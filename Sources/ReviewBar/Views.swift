@@ -212,6 +212,7 @@ struct ContentView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text(s.pr.title).lineLimit(2)
             Text("\(s.pr.author.login) · reviewed \(s.date.formatted(.relative(presentation: .named)))"
+                 + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
                  + (s.producedBy.map { " · \($0)" } ?? ""))
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -289,8 +290,14 @@ struct DetailView: View {
             }
 
             if !vm.isMine(pr), case .idle = vm.state(for: pr), vm.hasOlderReview(pr) {
-                Text("This PR has new activity since your last review. The older one is under Saved.")
-                    .font(.caption).foregroundStyle(.orange)
+                if let earlier = vm.earlierReview(for: pr) {
+                    Text("New commits since your review of \(earlier.pr.versionLabel). Review just those, "
+                         + "checked against your earlier notes, or run a full review.")
+                        .font(.caption).foregroundStyle(.orange)
+                } else {
+                    Text("This PR has new activity since your last review. The older one is under Saved.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
             }
 
             actions
@@ -347,8 +354,8 @@ struct DetailView: View {
     @ViewBuilder private var reviewContent: some View {
         switch vm.state(for: pr) {
         case .done(let text):
-            if let by = vm.savedReview(for: pr)?.producedBy {
-                Text("Review · \(by)").font(.caption2).foregroundStyle(.secondary)
+            if let s = vm.savedReview(for: pr) {
+                Text(reviewLabel(s)).font(.caption2).foregroundStyle(.secondary)
             }
             Text(rendered(text))
         case .failed(let msg):
@@ -381,19 +388,37 @@ struct DetailView: View {
             case .done(let text):
                 Button("Follow up in Terminal") { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
-                Button("Re-run") { vm.review(pr) }
+                Button("Re-run") { vm.rerun(pr) }
                 Button("Copy") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
             default:
-                Button("Review with Claude") { vm.review(pr) }
-                    .buttonStyle(.borderedProminent)
+                if let earlier = vm.earlierReview(for: pr) {
+                    Button("Review changes since \(earlier.pr.versionLabel)") { vm.reviewChanges(pr, since: earlier) }
+                        .buttonStyle(.borderedProminent)
+                    Button("Full review") { vm.review(pr) }
+                } else {
+                    Button("Review with Claude") { vm.review(pr) }
+                        .buttonStyle(.borderedProminent)
+                }
                 Button(vm.hasFollowUpContext(pr) ? "Follow up in Terminal" : "Review in Terminal") {
                     vm.openTerminal(pr)
                 }
             }
         }
+    }
+
+    /// "Review · Opus", "Changes since abc1234 · Opus", or the rebased fallback.
+    private func reviewLabel(_ s: SavedReview) -> String {
+        var parts: [String] = []
+        if let since = s.sinceCommit {
+            parts.append(s.sinceFellBack == true ? "Since \(since), full diff (branch rebased)" : "Changes since \(since)")
+        } else {
+            parts.append("Review")
+        }
+        if let by = s.producedBy { parts.append(by) }
+        return parts.joined(separator: " · ")
     }
 
     private func rendered(_ s: String) -> AttributedString {

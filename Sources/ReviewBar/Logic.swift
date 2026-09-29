@@ -35,6 +35,10 @@ struct SavedReview: Codable, Identifiable {
     let date: Date
     /// What produced it, e.g. "sonnet · high". Nil for reviews saved before this was recorded.
     var producedBy: String?
+    /// Set when this reviews only the commits after an earlier review: that review's short commit.
+    var sinceCommit: String?
+    /// True when a since-review had to fall back to the full diff (branch rebased or force-pushed).
+    var sinceFellBack: Bool?
     var id: String { pr.reviewKey }
 }
 
@@ -849,6 +853,145 @@ enum Backend {
         """
     }
 
+    // MARK: Review only what changed
+
+    /// How the commits after an earlier review relate to it, from GitHub's compare API.
+    struct CompareInfo: Decodable, Equatable {
+        /// "ahead" (branch only moved forward), "diverged" (rebased), "behind" or "identical".
+        let status: String
+        let aheadBy: Int
+        let commits: [Commit]
+        struct Commit: Decodable, Equatable { let sha: String; let message: String }
+
+        /// Only a branch that moved forward gives a clean diff of just the new commits.
+        var isIncremental: Bool { status == "ahead" && aheadBy > 0 }
+    }
+
+    /// Parses the trimmed compare output produced by `compareJQ`. Pure, for tests.
+    static func parseCompare(_ json: Data) throws -> CompareInfo {
+        let dec = JSONDecoder()
+        dec.keyDecodingStrategy = .convertFromSnakeCase
+        return try dec.decode(CompareInfo.self, from: json)
+    }
+
+    /// Keeps the compare response small: no files or patches, first line of each commit message.
+    private static let compareJQ =
+        #"{status: .status, ahead_by: .ahead_by, commits: [.commits[] | {sha: .sha[0:7], message: (.commit.message | split("
+")[0])}]}"#
+
+    static func isCommitSHA(_ s: String) -> Bool {
+        s.range(of: "^[0-9a-f]{7,40}$", options: .regularExpression) != nil
+    }
+
+    /// Reviews only the commits since `earlier`, or everything with the earlier notes when the
+    /// branch was rebased or force-pushed. Returns the text and whether it had to fall back.
+    static func reviewChanges(_ pr: PR, since earlier: SavedReview) async throws -> (text: String, fellBack: Bool) {
+        guard let base = earlier.pr.headRefOid, let head = pr.headRefOid,
+              isCommitSHA(base), isCommitSHA(head) else {
+            throw ShellError(code: 1, stderr: "Can't tell which commits are new: the earlier review has no commit recorded.")
+        }
+        let repo = pr.repository.nameWithOwner
+        let path = "repos/\(repo)/compare/\(base)...\(head)"
+
+        // A missing base commit (force-pushed away) also lands here: fall back to the full diff.
+        var info: CompareInfo?
+        if let out = try? await sh("gh api \(q(path)) --jq \(q(compareJQ))") {
+            info = try? parseCompare(Data(out.utf8))
+        }
+        let feedback = await feedback(for: pr)
+
+        var diff = "", note = "", fellBack = true
+        if let info, info.isIncremental {
+            diff = try await sh("gh api -H 'Accept: application/vnd.github.diff' \(q(path))")
+            if diff.utf8.count > maxDiffBytes {
+                diff = String(decoding: Data(diff.utf8.prefix(maxDiffBytes)), as: UTF8.self)
+                note = "(NOTE: diff truncated at \(maxDiffBytes / 1000) KB. Say so if it limits your answer.)\n"
+            }
+            fellBack = false
+        }
+
+        let prompt: String
+        let earlierNotes = """
+            EARLIER REVIEW NOTES (written by you for commit \(base.prefix(7))):
+            \(earlier.text)
+            """
+        if !fellBack, let info {
+            let log = info.commits.map { "- \($0.sha) \($0.message)" }.joined(separator: "\n")
+            prompt = """
+            You reviewed this pull request earlier at commit \(base.prefix(7)). Since then \(info.aheadBy) commit\(info.aheadBy == 1 ? " was" : "s were") pushed. Review ONLY those new commits, against your earlier notes.
+
+            \(rules)
+
+            OUTPUT (markdown, concise, candid; if unsure, say so; never invent line numbers)
+
+            ## What changed
+            2-4 bullets on what the new commits do.
+
+            ## Earlier concerns
+            For each item in the earlier notes' "Things to check": resolved / partly / still open / can't tell from this diff, with `path:line` and one line why. Use FEEDBACK ON GITHUB to see what the author said about each.
+
+            ## New things to check
+            Only for code in the new commits. Same format as before: `path:line` (new-file line number from the @@ hunk headers), the code quoted in a fenced block (max ~8 lines), the concern, and a question I could raise.
+
+            ## Lean
+            One of: approve / comment / request changes, with a one-line reason, taking the earlier concerns into account.
+
+            PR: \(pr.repository.nameWithOwner)#\(pr.number) by \(pr.author.login)
+            URL: \(pr.url)
+
+            NEW COMMITS:
+            \(log)
+
+            \(earlierNotes)
+
+            FEEDBACK ON GITHUB:
+            \(feedback)
+
+            \(note)
+            DIFF OF THE NEW COMMITS ONLY (\(base.prefix(7))..\(head.prefix(7))):
+            \(diff)
+            """
+        } else {
+            let c = try await context(for: pr)
+            prompt = """
+            You reviewed this pull request earlier at commit \(base.prefix(7)). The branch has since been rebased or force-pushed, so the new commits can't be separated out: below is the FULL current diff. Compare it with your earlier notes.
+
+            \(rules)
+
+            OUTPUT (markdown, concise, candid; if unsure, say so; never invent line numbers)
+
+            Start with one line saying the branch was rebased, so this compares against the full diff.
+
+            ## Earlier concerns
+            For each item in the earlier notes' "Things to check": resolved / partly / still open, with `path:line` and one line why.
+
+            ## New things to check
+            Anything in the current diff that the earlier notes did not cover. `path:line`, quoted code (max ~8 lines), the concern, and a question I could raise.
+
+            ## Lean
+            One of: approve / comment / request changes, with a one-line reason.
+
+            PR: \(pr.repository.nameWithOwner)#\(pr.number) by \(pr.author.login)
+            URL: \(pr.url)
+
+            METADATA (JSON):
+            \(c.meta)
+
+            \(earlierNotes)
+
+            FEEDBACK ON GITHUB:
+            \(feedback)
+
+            \(c.note)
+            FULL CURRENT DIFF:
+            \(c.diff)
+            """
+        }
+        let text = try await sh("\(claudeBin) \(headlessFlags)\(ClaudeSettings.flags(ClaudeSettings.review))", input: prompt)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text, fellBack)
+    }
+
     /// Headless review with the review model (uses your logged-in Max session).
     static func review(_ pr: PR) async throws -> String {
         let prompt = try await buildPrompt(for: pr)
@@ -1000,15 +1143,49 @@ final class ReviewViewModel: ObservableObject {
         saved.contains { $0.pr.url == pr.url && $0.id != pr.reviewKey }
     }
 
-    func review(_ pr: PR) {
+    /// The newest earlier review of this PR that recorded its commit, when the PR has moved on
+    /// to a different commit since: what "Review changes since…" builds on.
+    func earlierReview(for pr: PR) -> SavedReview? {
+        guard let head = pr.headRefOid else { return nil }
+        return saved.first {
+            $0.pr.url == pr.url && $0.id != pr.reviewKey
+                && $0.pr.headRefOid != nil && $0.pr.headRefOid != head
+        }
+    }
+
+    /// Full review of the current diff.
+    func review(_ pr: PR) { run(pr, since: nil) }
+
+    /// Review only the commits since `earlier` (falls back to the full diff after a rebase).
+    func reviewChanges(_ pr: PR, since earlier: SavedReview) { run(pr, since: earlier) }
+
+    /// Re-runs the same kind of review that is saved for this version.
+    func rerun(_ pr: PR) {
+        if savedReview(for: pr)?.sinceCommit != nil, let earlier = earlierReview(for: pr) {
+            reviewChanges(pr, since: earlier)
+        } else {
+            review(pr)
+        }
+    }
+
+    private func run(_ pr: PR, since earlier: SavedReview?) {
         let previous = reviews[pr.reviewKey]
         reviews[pr.reviewKey] = .running
         Task {
             do {
                 let by = ClaudeSettings.label(ClaudeSettings.review)
-                let text = try await Backend.review(pr)
+                var sinceCommit: String?, fellBack: Bool?
+                let text: String
+                if let earlier {
+                    let r = try await Backend.reviewChanges(pr, since: earlier)
+                    text = r.text
+                    sinceCommit = earlier.pr.versionLabel
+                    fellBack = r.fellBack
+                } else {
+                    text = try await Backend.review(pr)
+                }
                 reviews[pr.reviewKey] = .done(text)
-                persist(pr, text, producedBy: by)
+                persist(pr, text, producedBy: by, sinceCommit: sinceCommit, fellBack: fellBack)
             } catch {
                 // A failed re-run must not hide the review that is still saved.
                 if case .done = previous {
@@ -1021,9 +1198,11 @@ final class ReviewViewModel: ObservableObject {
         }
     }
 
-    private func persist(_ pr: PR, _ text: String, producedBy: String) {
+    private func persist(_ pr: PR, _ text: String, producedBy: String,
+                         sinceCommit: String? = nil, fellBack: Bool? = nil) {
         saved.removeAll { $0.id == pr.reviewKey }
-        saved.insert(SavedReview(pr: pr, text: text, date: Date(), producedBy: producedBy), at: 0)
+        saved.insert(SavedReview(pr: pr, text: text, date: Date(), producedBy: producedBy,
+                                 sinceCommit: sinceCommit, sinceFellBack: fellBack), at: 0)
         Store.save(saved)
         Store.writeMarkdown(pr, text)
     }

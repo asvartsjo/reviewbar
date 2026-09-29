@@ -3,6 +3,7 @@ import AppKit
 
 private enum Tab: String, CaseIterable {
     case pending = "Awaiting me"
+    case replies = "Replies"
     case saved = "Saved"
 }
 
@@ -25,14 +26,21 @@ struct ContentView: View {
                 DetailView(pr: pr) { selected = nil }
             } else {
                 Picker("", selection: $tab) {
-                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    ForEach(Tab.allCases, id: \.self) { Text(title($0)).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
 
-                if tab == .pending { pendingList } else { savedList }
+                if let e = vm.error, tab != .saved {
+                    Text(e).font(.caption).foregroundStyle(.red).padding(.horizontal, 10)
+                }
+                switch tab {
+                case .pending: pendingList
+                case .replies: repliesList
+                case .saved: savedList
+                }
             }
         }
         .frame(width: 480, height: 580)
@@ -57,9 +65,6 @@ struct ContentView: View {
 
     private var pendingList: some View {
         Group {
-            if let e = vm.error {
-                Text(e).font(.caption).foregroundStyle(.red).padding(.horizontal, 10)
-            }
             if vm.prs.isEmpty && !vm.loading {
                 empty("checkmark.circle", "Nothing waiting. Check settings if that looks wrong.")
             } else {
@@ -89,6 +94,42 @@ struct ContentView: View {
             }
             Text(pr.title).font(.body).lineLimit(2)
             Text("\(pr.author.login) · updated \(age(pr.updatedAt))")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: replies
+
+    private var repliesList: some View {
+        Group {
+            if vm.visibleReplies.isEmpty && !vm.loading {
+                empty("bubble.left.and.bubble.right", "No one is waiting on you in your review threads.")
+            } else {
+                List(vm.visibleReplies) { r in
+                    Button { selected = r.pr } label: { replyRow(r) }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Dismiss until the next reply") { vm.dismissReplies(r) }
+                        }
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+
+    private func replyRow(_ r: ReplyPR) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("\(r.pr.repository.nameWithOwner) #\(r.pr.number)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Label("\(r.waiting)", systemImage: "bubble.left.fill")
+                    .font(.caption).foregroundStyle(.blue)
+            }
+            Text(r.pr.title).font(.body).lineLimit(2)
+            Text("\(r.latestBy) replied \(age(r.latestAt))")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
@@ -138,6 +179,14 @@ struct ContentView: View {
 
     // MARK: helpers
 
+    private func title(_ t: Tab) -> String {
+        switch t {
+        case .pending where !vm.prs.isEmpty: return "\(t.rawValue) (\(vm.prs.count))"
+        case .replies where !vm.visibleReplies.isEmpty: return "\(t.rawValue) (\(vm.visibleReplies.count))"
+        default: return t.rawValue
+        }
+    }
+
     private func empty(_ icon: String, _ text: String) -> some View {
         VStack(spacing: 6) {
             Image(systemName: icon).font(.largeTitle)
@@ -173,6 +222,17 @@ struct DetailView: View {
             Text(pr.title).font(.headline)
             Text("\(pr.repository.nameWithOwner) #\(pr.number) · \(pr.author.login)")
                 .font(.caption).foregroundStyle(.secondary)
+
+            if let r = vm.reply(for: pr) {
+                HStack {
+                    Text("\(r.waiting) of your review threads \(r.waiting == 1 ? "has a reply" : "have replies") waiting. "
+                        + "Latest from \(r.latestBy).")
+                        .font(.caption).foregroundStyle(.blue)
+                    Spacer()
+                    Button("Dismiss") { vm.dismissReplies(r) }
+                        .buttonStyle(.borderless).font(.caption)
+                }
+            }
 
             if case .idle = vm.state(for: pr), vm.hasOlderReview(pr) {
                 Text("This PR has new activity since your last review. The older one is under Saved.")
@@ -217,7 +277,9 @@ struct DetailView: View {
             default:
                 Button("Review with Claude") { vm.review(pr) }
                     .buttonStyle(.borderedProminent)
-                Button("Review in Terminal") { vm.openTerminal(pr) }
+                Button(vm.hasFollowUpContext(pr) ? "Follow up in Terminal" : "Review in Terminal") {
+                    vm.openTerminal(pr)
+                }
             }
         }
     }

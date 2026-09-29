@@ -182,19 +182,18 @@ enum RepoList {
 /// Two model/effort pairs, stored in UserDefaults:
 /// - review: "Review with Claude" and every Terminal session (anything that reads code)
 /// - quick: "Summarise feedback", which reads only comments, never the diff
-/// Pinned model IDs stay on that exact model; aliases (opus, sonnet…) follow the latest one.
+/// Models are Claude Code aliases, so each follows the latest model in its family.
 /// An empty value passes no flag, so Claude Code's own configuration applies.
 enum ClaudeSettings {
-    static let opus55 = "claude-opus-5-5", sonnet55 = "claude-sonnet-5-5"
-    static let models = [opus55, sonnet55, "opus", "sonnet", "haiku", "fable", ""]
+    static let models = ["opus", "sonnet", "haiku", "fable", ""]
     static let quickModels = [sameAsReview] + models
     static let efforts = ["", "low", "medium", "high", "xhigh", "max"]
     static let sameAsReview = "same"
 
     static let reviewModelKey = "reviewModel", reviewEffortKey = "reviewEffort"
     static let quickModelKey = "quickModel", quickEffortKey = "quickEffort"
-    static let reviewModelDefault = opus55, reviewEffortDefault = ""
-    static let quickModelDefault = sonnet55, quickEffortDefault = "low"
+    static let reviewModelDefault = "opus", reviewEffortDefault = ""
+    static let quickModelDefault = "sonnet", quickEffortDefault = "low"
 
     private static func value(_ key: String, _ fallback: String, allowed: [String]) -> String {
         let v = UserDefaults.standard.string(forKey: key) ?? fallback
@@ -218,7 +217,7 @@ enum ClaudeSettings {
             + (pair.effort.isEmpty ? "" : " --effort \(pair.effort)")
     }
 
-    /// Short label such as "Opus 5.5 · high" or "default".
+    /// Short label such as "Opus · high" or "default".
     static func label(_ pair: (model: String, effort: String)) -> String {
         let parts = [pair.model.isEmpty ? "" : displayName(pair.model), pair.effort].filter { !$0.isEmpty }
         return parts.isEmpty ? "default" : parts.joined(separator: " · ")
@@ -228,9 +227,6 @@ enum ClaudeSettings {
         switch value {
         case "": return "Default"
         case sameAsReview: return "Same as reviews"
-        case opus55: return "Opus 5.5"
-        case sonnet55: return "Sonnet 5.5"
-        case "opus", "sonnet", "haiku", "fable": return value.prefix(1).uppercased() + value.dropFirst() + " (latest)"
         case "xhigh": return "Extra high"
         default: return value.prefix(1).uppercased() + value.dropFirst()
         }

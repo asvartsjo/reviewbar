@@ -507,8 +507,8 @@ struct SettingsView: View {
                     picker($quickEffort, ClaudeSettings.efforts, "Summary effort")
                 }
             }
-            Text("Opus 5.5 and Sonnet 5.5 stay pinned; “latest” follows new releases; Default uses your "
-                 + "Claude Code settings. Code is always read by the review model; "
+            Text("Models follow the latest release in each family. Default uses your Claude Code settings. "
+                 + "Code is always read by the review model; "
                  + "summaries are handed to it as a starting point.")
                 .font(.caption2).foregroundStyle(.secondary)
 

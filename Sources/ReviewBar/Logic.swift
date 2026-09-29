@@ -11,13 +11,22 @@ struct PR: Identifiable, Codable, Hashable {
     let updatedAt: String
     let repository: Repo
     let author: Author
+    /// Head commit, filled in by `Backend.fetchPRs` (search results don't include it).
+    var headRefOid: String?
 
     struct Repo: Codable, Hashable { let nameWithOwner: String }
     struct Author: Codable, Hashable { let login: String }
 
     var id: String { url }
-    /// Changes when the PR gets new commits/activity, so stale reviews are not reused.
-    var reviewKey: String { url + "@" + updatedAt }
+    /// Changes when the PR gets new commits (not on comments), so stale reviews are not reused.
+    /// Falls back to `updatedAt` if the head commit could not be fetched.
+    var reviewKey: String { url + "@" + (headRefOid ?? updatedAt) }
+
+    /// Short label for the reviewed version, used in file names and prompts.
+    var versionLabel: String {
+        headRefOid.map { String($0.prefix(7)) }
+            ?? updatedAt.filter { $0.isNumber }
+    }
 }
 
 struct SavedReview: Codable, Identifiable {
@@ -61,12 +70,23 @@ enum Store {
         if let data = try? enc.encode(reviews) { try? data.write(to: jsonURL, options: .atomic) }
     }
 
+    /// One file per reviewed version, so a newer review never overwrites an older one.
+    private static func markdownURL(_ pr: PR) -> URL {
+        let name = pr.repository.nameWithOwner.replacingOccurrences(of: "/", with: "-")
+            + "-\(pr.number)-\(pr.versionLabel).md"
+        return dir.appendingPathComponent("markdown", isDirectory: true).appendingPathComponent(name)
+    }
+
     static func writeMarkdown(_ pr: PR, _ text: String) {
-        let md = dir.appendingPathComponent("markdown", isDirectory: true)
-        try? FileManager.default.createDirectory(at: md, withIntermediateDirectories: true)
-        let name = pr.repository.nameWithOwner.replacingOccurrences(of: "/", with: "-") + "-\(pr.number).md"
+        let url = markdownURL(pr)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
         let body = "# \(pr.title)\n\(pr.url)\nAuthor: \(pr.author.login) · reviewed \(Date())\n\n\(text)\n"
-        try? body.write(to: md.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        try? body.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    static func deleteMarkdown(_ pr: PR) {
+        try? FileManager.default.removeItem(at: markdownURL(pr))
     }
 }
 
@@ -85,13 +105,17 @@ struct ShellError: LocalizedError {
     }
 }
 
+/// Printed right before the command so anything the shell's startup files print can be dropped.
+private let outputMarker = "__REVIEWBAR_OUTPUT_START__"
+
 /// Runs a command in an interactive login zsh so PATH (gh, claude) matches your Terminal.
+/// Only the command's own output is returned, not what `.zshrc` and friends print.
 func sh(_ command: String, input: String? = nil) async throws -> String {
     try await withCheckedThrowingContinuation { cont in
         DispatchQueue.global(qos: .userInitiated).async {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            p.arguments = ["-lic", command]
+            p.arguments = ["-lic", "print -r -- \(outputMarker); " + command]
             let outP = Pipe(), errP = Pipe(), inP = Pipe()
             p.standardOutput = outP
             p.standardError = errP
@@ -115,7 +139,8 @@ func sh(_ command: String, input: String? = nil) async throws -> String {
             p.waitUntilExit()
             group.wait()
 
-            let out = String(decoding: outData, as: UTF8.self)
+            var out = String(decoding: outData, as: UTF8.self)
+            if let r = out.range(of: outputMarker + "\n") { out = String(out[r.upperBound...]) }
             if p.terminationStatus == 0 {
                 cont.resume(returning: out)
             } else {
@@ -131,7 +156,14 @@ func sh(_ command: String, input: String? = nil) async throws -> String {
 enum Backend {
     /// Unsets API keys so Claude Code uses your Max subscription login, never API billing.
     static let claudeBin = "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude"
-    static let maxDiffChars = 250_000
+    /// Diff cap in UTF-8 bytes. Bytes, not characters: the Terminal follow-up passes the
+    /// whole prompt as one argument, which macOS limits to about 1 MB (ARG_MAX).
+    static let maxDiffBytes = 250_000
+    /// Refuse to build a Terminal command bigger than this, well under ARG_MAX.
+    static let maxArgBytes = 800_000
+    /// Headless reviews get no tools and no MCP servers: the diff is untrusted input
+    /// and the model only needs to read the prompt.
+    static let headlessFlags = "-p --output-format text --tools '' --strict-mcp-config"
 
     static let rules = """
     RULES
@@ -155,9 +187,35 @@ enum Backend {
         let cmd = "gh search prs --review-requested=@me --state=open \(scope) "
             + "--limit 50 --json number,title,url,isDraft,updatedAt,repository,author"
         let out = try await sh(cmd)
-        // Interactive shells can print junk before the JSON; grab from the first '['.
-        guard let start = out.firstIndex(of: "[") else { return [] }
-        return try JSONDecoder().decode([PR].self, from: Data(out[start...].utf8))
+        let prs = try JSONDecoder().decode([PR].self, from: Data(out.utf8))
+        return await withHeadCommits(prs)
+    }
+
+    /// Fills in each PR's head commit with one read-only GraphQL query.
+    /// Best effort: if it fails, PRs keep `updatedAt`-based review keys.
+    private static func withHeadCommits(_ prs: [PR]) async -> [PR] {
+        guard !prs.isEmpty else { return prs }
+        let enc = JSONEncoder()
+        enc.outputFormatting = .withoutEscapingSlashes
+        let fields = prs.indices.compactMap { i -> String? in
+            guard let data = try? enc.encode(prs[i].url), let url = String(data: data, encoding: .utf8)
+            else { return nil }
+            return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid } }"
+        }
+        let query = "query { \(fields.joined(separator: " ")) }"
+        guard let out = try? await sh("gh api graphql -f query=\(q(query))"),
+              let resp = try? JSONDecoder().decode(HeadCommits.self, from: Data(out.utf8))
+        else { return prs }
+        return prs.enumerated().map { i, pr in
+            var pr = pr
+            pr.headRefOid = resp.data["p\(i)"]??.headRefOid
+            return pr
+        }
+    }
+
+    private struct HeadCommits: Decodable {
+        let data: [String: Node?]
+        struct Node: Decodable { let headRefOid: String? }
     }
 
     /// Current metadata + diff, fetched fresh from GitHub (read-only).
@@ -167,9 +225,10 @@ enum Backend {
             + "--json title,body,author,baseRefName,headRefName,changedFiles,additions,deletions")
         var diff = try await sh("gh pr diff \(pr.number) --repo \(q(repo))")
         var note = ""
-        if diff.count > maxDiffChars {
-            diff = String(diff.prefix(maxDiffChars))
-            note = "(NOTE: diff truncated at \(maxDiffChars) characters. Say so if it limits your answer.)\n"
+        if diff.utf8.count > maxDiffBytes {
+            // May cut a multi-byte character in half; decoding turns that into U+FFFD.
+            diff = String(decoding: Data(diff.utf8.prefix(maxDiffBytes)), as: UTF8.self)
+            note = "(NOTE: diff truncated at \(maxDiffBytes / 1000) KB. Say so if it limits your answer.)\n"
         }
         return (meta, diff, note)
     }
@@ -223,7 +282,7 @@ enum Backend {
         \(rules)
 
         HOW TO BEHAVE
-        - The review notes were written when the PR was last updated at \(pr.updatedAt). The diff below is the current one, so tell me if anything in the notes no longer matches.
+        - The review notes were written for \(pr.headRefOid.map { "commit \($0.prefix(7))" } ?? "the PR as of \(pr.updatedAt)"). The diff below is the current one, so tell me if anything in the notes no longer matches.
         - Reply now with a single line saying you're ready, then wait for my questions.
         - When you refer to code, quote it and give `path:line`.
         - Only draft comment wording if I ask. I want to write my own comments.
@@ -246,7 +305,7 @@ enum Backend {
     /// Headless run through the Claude Code CLI (uses your logged-in Max session).
     static func review(_ pr: PR) async throws -> String {
         let prompt = try await buildPrompt(for: pr)
-        return try await sh("\(claudeBin) -p --output-format text", input: prompt)
+        return try await sh("\(claudeBin) \(headlessFlags)", input: prompt)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -258,6 +317,10 @@ enum Backend {
             prompt = try await buildFollowUpPrompt(for: pr, review: priorReview)
         } else {
             prompt = try await buildPrompt(for: pr)
+        }
+        guard prompt.utf8.count <= maxArgBytes else {
+            throw ShellError(code: 1, stderr: "Prompt is \(prompt.utf8.count / 1000) KB, too large to pass to "
+                + "Terminal (limit \(maxArgBytes / 1000) KB). Use Review with Claude instead.")
         }
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("review-\(pr.number)-\(UUID().uuidString.prefix(6)).md")
@@ -346,6 +409,7 @@ final class ReviewViewModel: ObservableObject {
         saved.removeAll { $0.id == s.id }
         reviews[s.id] = nil
         Store.save(saved)
+        Store.deleteMarkdown(s.pr)
     }
 
     /// Fresh review in Terminal, or a follow-up seeded with the saved notes when one exists.

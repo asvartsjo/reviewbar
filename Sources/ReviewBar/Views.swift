@@ -146,9 +146,12 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private static let isoParser = ISO8601DateFormatter()
+    private static let relative = RelativeDateTimeFormatter()
+
     private func age(_ iso: String) -> String {
-        guard let d = ISO8601DateFormatter().date(from: iso) else { return "" }
-        return RelativeDateTimeFormatter().localizedString(for: d, relativeTo: Date())
+        guard let d = Self.isoParser.date(from: iso) else { return "" }
+        return Self.relative.localizedString(for: d, relativeTo: Date())
     }
 }
 

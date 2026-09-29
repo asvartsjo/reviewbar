@@ -8,8 +8,12 @@ struct ReviewBarApp: App {
         MenuBarExtra {
             ContentView().environmentObject(vm)
         } label: {
-            Image(systemName: "eye")
-            if !vm.prs.isEmpty { Text("\(vm.prs.count)") }
+            // One Text: the menu bar may only render the first view of a multi-view label.
+            if vm.prs.isEmpty {
+                Image(systemName: "eye")
+            } else {
+                Text("\(Image(systemName: "eye")) \(vm.prs.count)")
+            }
         }
         .menuBarExtraStyle(.window)
     }

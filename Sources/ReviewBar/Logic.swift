@@ -13,6 +13,8 @@ struct PR: Identifiable, Codable, Hashable {
     let author: Author
     /// Head commit, filled in by `Backend.fetchPRs` (search results don't include it).
     var headRefOid: String?
+    /// When the PR was opened; used to put the longest-waiting review requests first.
+    var createdAt: String? = nil
 
     struct Repo: Codable, Hashable { let nameWithOwner: String }
     struct Author: Codable, Hashable { let login: String }
@@ -65,14 +67,36 @@ struct FeedbackPR: Identifiable, Hashable {
     let comments: Int
     let latestAt: String   // ISO 8601
     let latestBy: String
+    /// Combined CI state of the head commit: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED or nil.
+    var checks: String? = nil
+    /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub still computing).
+    var mergeable: String? = nil
     var id: String { pr.url }
+
+    func with(latestAt: String, latestBy: String) -> FeedbackPR {
+        FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
+                   latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable)
+    }
+
+    var checksFailing: Bool { checks == "FAILURE" || checks == "ERROR" }
+    var hasConflict: Bool { mergeable == "CONFLICTING" }
+    var readyToMerge: Bool { decision == "APPROVED" && checks == "SUCCESS" && mergeable == "MERGEABLE" }
+
+    /// What blocks or unblocks the PR, most urgent first; nil when there's nothing to say.
+    var status: String? {
+        if hasConflict { return "Merge conflict" }
+        if checksFailing { return "Checks failing" }
+        if readyToMerge { return "Ready to merge" }
+        if checks == "PENDING" || checks == "EXPECTED" { return "Checks running" }
+        return nil
+    }
 
     var summary: String {
         func n(_ count: Int, _ word: String) -> String? {
             count == 0 ? nil : "\(count) \(word)\(count == 1 ? "" : "s")"
         }
-        return [n(threads, "thread"), n(reviews, "review"), n(comments, "comment")]
-            .compactMap { $0 }.joined(separator: " · ")
+        let counts = [n(threads, "thread"), n(reviews, "review"), n(comments, "comment")].compactMap { $0 }
+        return counts.isEmpty ? (status ?? "") : counts.joined(separator: " · ")
     }
 }
 
@@ -255,46 +279,109 @@ struct ShellError: LocalizedError {
 /// Printed right before the command so anything the shell's startup files print can be dropped.
 private let outputMarker = "__REVIEWBAR_OUTPUT_START__"
 
+/// Lets a Swift task cancellation stop the running command.
+private final class RunningProcess: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var cancelled = false
+
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+
+    /// Returns false if cancel() already happened, so the caller doesn't start at all.
+    func attach(_ p: Process) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        process = p
+        return !cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let p = process
+        lock.unlock()
+        guard let p, p.isRunning else { return }
+        // The interactive zsh ignores SIGTERM, so stop its children (gh, claude) first.
+        let kill = Process()
+        kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        kill.arguments = ["-TERM", "-P", String(p.processIdentifier)]
+        try? kill.run()
+        kill.waitUntilExit()
+        p.terminate()
+    }
+}
+
 /// Runs a command in an interactive login zsh so PATH (gh, claude) matches your Terminal.
 /// Only the command's own output is returned, not what `.zshrc` and friends print.
+/// Cancelling the calling task stops the command and throws CancellationError.
 func sh(_ command: String, input: String? = nil) async throws -> String {
-    try await withCheckedThrowingContinuation { cont in
-        DispatchQueue.global(qos: .userInitiated).async {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            p.arguments = ["-lic", "print -r -- \(outputMarker); " + command]
-            let outP = Pipe(), errP = Pipe(), inP = Pipe()
-            p.standardOutput = outP
-            p.standardError = errP
-            p.standardInput = inP
+    let running = RunningProcess()
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                p.arguments = ["-lic", "print -r -- \(outputMarker); " + command]
+                let outP = Pipe(), errP = Pipe(), inP = Pipe()
+                p.standardOutput = outP
+                p.standardError = errP
+                p.standardInput = inP
 
-            do { try p.run() } catch { cont.resume(throwing: error); return }
+                guard running.attach(p) else { cont.resume(throwing: CancellationError()); return }
+                do { try p.run() } catch { cont.resume(throwing: error); return }
 
-            var errData = Data()
-            let group = DispatchGroup()
-            group.enter()
-            DispatchQueue.global().async {
-                errData = errP.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-            DispatchQueue.global().async {
-                if let input { try? inP.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
-                try? inP.fileHandleForWriting.close()
-            }
+                var errData = Data()
+                let group = DispatchGroup()
+                group.enter()
+                DispatchQueue.global().async {
+                    errData = errP.fileHandleForReading.readDataToEndOfFile()
+                    group.leave()
+                }
+                DispatchQueue.global().async {
+                    if let input { try? inP.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
+                    try? inP.fileHandleForWriting.close()
+                }
 
-            let outData = outP.fileHandleForReading.readDataToEndOfFile()
-            p.waitUntilExit()
-            group.wait()
+                let outData = outP.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                group.wait()
 
-            var out = String(decoding: outData, as: UTF8.self)
-            if let r = out.range(of: outputMarker + "\n") { out = String(out[r.upperBound...]) }
-            if p.terminationStatus == 0 {
-                cont.resume(returning: out)
-            } else {
-                cont.resume(throwing: ShellError(code: p.terminationStatus,
-                                                 stderr: String(decoding: errData, as: UTF8.self)))
+                var out = String(decoding: outData, as: UTF8.self)
+                if let r = out.range(of: outputMarker + "\n") { out = String(out[r.upperBound...]) }
+                if running.isCancelled {
+                    cont.resume(throwing: CancellationError())
+                } else if p.terminationStatus == 0 {
+                    cont.resume(returning: out)
+                } else {
+                    // Some tools (claude among them) report errors on stdout; keep both.
+                    let err = String(decoding: errData, as: UTF8.self)
+                    let detail = err.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? String(out.suffix(2000)) : err
+                    cont.resume(throwing: ShellError(code: p.terminationStatus, stderr: detail))
+                }
             }
         }
+    } onCancel: {
+        running.cancel()
+    }
+}
+
+// MARK: - Claude errors
+
+enum ClaudeErrors {
+    /// A readable message when Claude Code reports hitting the plan's usage limit, else nil.
+    /// It prints e.g. "Claude AI usage limit reached|1759140000" (reset time, Unix seconds). Pure, for tests.
+    static func usageLimitMessage(_ output: String, now: Date = Date()) -> String? {
+        let lower = output.lowercased()
+        guard lower.contains("usage limit") || lower.contains("limit reached") else { return nil }
+        var message = "Claude usage limit reached."
+        if let r = output.range(of: #"\|(\d{9,11})"#, options: .regularExpression),
+           let secs = TimeInterval(output[r].dropFirst()) {
+            let reset = Date(timeIntervalSince1970: secs)
+            if reset > now {
+                message += " It resets \(reset.formatted(date: .omitted, time: .shortened))."
+            }
+        }
+        return message + " Try again then, or pick a lighter model in Settings."
     }
 }
 
@@ -320,13 +407,28 @@ enum Backend {
 
     /// Owner and `org/repo` list from Settings.
     /// Watched repos from Settings. `owner` is only set for old settings that watched a whole org.
-    private static func settingsScope() -> (owner: String, repos: [String]) {
-        let repos = RepoList.load().filter { $0.contains("/") }
-        let owner = repos.isEmpty
-            ? (UserDefaults.standard.string(forKey: RepoList.legacyOwnerKey) ?? "")
+    private static func settingsScope(skipping skipped: Set<String>) -> (owner: String, repos: [String]) {
+        let all = RepoList.load().filter { $0.contains("/") }
+        let repos = all.filter { !skipped.contains($0) }
+        guard !all.isEmpty else {
+            let owner = (UserDefaults.standard.string(forKey: RepoList.legacyOwnerKey) ?? "")
                 .trimmingCharacters(in: .whitespaces)
-            : ""
-        return (owner, repos)
+            return (owner, [])
+        }
+        return ("", repos)
+    }
+
+    /// Watched repos `gh` can't read. One of them makes GitHub reject the whole search,
+    /// so after a failed refresh these are found and left out. Checked in parallel.
+    static func inaccessibleRepos() async -> [String] {
+        await withTaskGroup(of: String?.self) { group in
+            for repo in RepoList.load() {
+                group.addTask { (try? await checkRepo(repo)) == nil ? repo : nil }
+            }
+            var bad: [String] = []
+            for await r in group { if let r { bad.append(r) } }
+            return bad.sorted()
+        }
     }
 
     /// Checks `gh` can read the repo and returns its canonical `owner/repo`. One repo the
@@ -342,17 +444,18 @@ enum Backend {
         }
     }
 
-    static func fetchPRs() async throws -> [PR] {
-        let (owner, repos) = settingsScope()
+    static func fetchPRs(skipping skipped: Set<String> = []) async throws -> [PR] {
+        let (owner, repos) = settingsScope(skipping: skipped)
         var scope = repos.map { "--repo \(q($0))" }.joined(separator: " ")
         if scope.isEmpty, !owner.isEmpty { scope = "--owner \(q(owner))" }
         guard !scope.isEmpty else { return [] }
 
         let cmd = "gh search prs --review-requested=@me --state=open \(scope) "
-            + "--limit 50 --json number,title,url,isDraft,updatedAt,repository,author"
+            + "--limit 50 --json number,title,url,isDraft,createdAt,updatedAt,repository,author"
         let out = try await sh(cmd)
         let prs = try JSONDecoder().decode([PR].self, from: Data(out.utf8))
-        return await withHeadCommits(prs)
+        // Longest-waiting first.
+        return await withHeadCommits(prs).sorted { ($0.createdAt ?? "") < ($1.createdAt ?? "") }
     }
 
     /// Fills in each PR's head commit with one read-only GraphQL query.
@@ -403,8 +506,8 @@ enum Backend {
 
     /// Open PRs you have reviewed with an unresolved thread you took part in
     /// whose last comment is from someone else. One read-only GraphQL query.
-    static func fetchReplies() async throws -> [ReplyPR] {
-        let (owner, repos) = settingsScope()
+    static func fetchReplies(skipping skipped: Set<String> = []) async throws -> [ReplyPR] {
+        let (owner, repos) = settingsScope(skipping: skipped)
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
         guard !terms.isEmpty else { return [] }
@@ -471,7 +574,8 @@ enum Backend {
         nodes { ... on PullRequest {
           number title url isDraft updatedAt headRefOid reviewDecision
           repository { nameWithOwner } author { login }
-          commits(last: 1) { nodes { commit { committedDate } } }
+          mergeable
+          commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
           reviews(last: 20) { nodes { author { login __typename } state body submittedAt } }
           comments(last: 20) { nodes { author { login __typename } createdAt } }
           reviewThreads(last: 50) { nodes {
@@ -486,8 +590,8 @@ enum Backend {
     /// Your open PRs where a reviewer (not a bot) left something you have not answered:
     /// an unresolved thread whose last comment is theirs, or a review or comment
     /// newer than your last commit or comment. One read-only GraphQL query.
-    static func fetchMyPRs() async throws -> [FeedbackPR] {
-        let (owner, repos) = settingsScope()
+    static func fetchMyPRs(skipping skipped: Set<String> = []) async throws -> [FeedbackPR] {
+        let (owner, repos) = settingsScope(skipping: skipped)
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
         guard !terms.isEmpty else { return [] }
@@ -539,13 +643,29 @@ enum Backend {
                 comments += 1
                 seen(c.createdAt, c.author)
             }
-            guard threads + reviews + comments > 0 else { return nil }
-
+            let head = n.commits.items.last?.commit
             let pr = PR(number: n.number, title: n.title, url: n.url, isDraft: n.isDraft,
                         updatedAt: n.updatedAt, repository: n.repository,
                         author: n.author ?? PR.Author(login: me), headRefOid: n.headRefOid)
-            return FeedbackPR(pr: pr, decision: n.reviewDecision, threads: threads, reviews: reviews,
-                              comments: comments, latestAt: latestAt, latestBy: latestBy)
+            var f = FeedbackPR(pr: pr, decision: n.reviewDecision, threads: threads, reviews: reviews,
+                               comments: comments, latestAt: latestAt, latestBy: latestBy,
+                               checks: head?.statusCheckRollup?.state, mergeable: n.mergeable)
+
+            // No unanswered feedback: still list it if something blocks it, or it can be merged.
+            if threads + reviews + comments == 0 {
+                guard f.hasConflict || f.checksFailing || f.readyToMerge else { return nil }
+                // Stable timestamps, so dismissing holds and notifications fire once per state:
+                // the latest approval for "ready", the head commit for a blocker.
+                let approval = n.reviews.items
+                    .filter { $0.state == "APPROVED" && isReviewer($0.author) }
+                    .max { ($0.submittedAt ?? "") < ($1.submittedAt ?? "") }
+                if f.readyToMerge, let a = approval, let at = a.submittedAt {
+                    f = f.with(latestAt: at, latestBy: a.author?.login ?? "")
+                } else {
+                    f = f.with(latestAt: head?.committedDate ?? n.updatedAt, latestBy: f.hasConflict ? "GitHub" : "CI")
+                }
+            }
+            return f
         }
         .sorted { $0.latestAt > $1.latestAt }
     }
@@ -561,6 +681,7 @@ enum Backend {
             let updatedAt: String
             let headRefOid: String?
             let reviewDecision: String?
+            let mergeable: String?
             let repository: PR.Repo
             let author: PR.Author?
             let commits: Nodes<CommitNode>
@@ -570,7 +691,11 @@ enum Backend {
         }
         struct CommitNode: Decodable {
             let commit: Commit
-            struct Commit: Decodable { let committedDate: String }
+            struct Commit: Decodable {
+                let committedDate: String
+                let statusCheckRollup: Rollup?
+            }
+            struct Rollup: Decodable { let state: String }
         }
         struct Review: Decodable {
             let author: GitHubUser?
@@ -986,16 +1111,31 @@ enum Backend {
             \(c.diff)
             """
         }
-        let text = try await sh("\(claudeBin) \(headlessFlags)\(ClaudeSettings.flags(ClaudeSettings.review))", input: prompt)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = try await runClaude(prompt, ClaudeSettings.review)
         return (text, fellBack)
+    }
+
+    /// Runs Claude Code headlessly. A usage-limit notice (sometimes printed with exit 0)
+    /// becomes a readable error instead of being saved as a review.
+    static func runClaude(_ prompt: String, _ pair: (model: String, effort: String)) async throws -> String {
+        let text: String
+        do {
+            text = try await sh("\(claudeBin) \(headlessFlags)\(ClaudeSettings.flags(pair))", input: prompt)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch let e as ShellError {
+            if let m = ClaudeErrors.usageLimitMessage(e.stderr) { throw ShellError(code: e.code, stderr: m) }
+            throw e
+        }
+        if text.count < 400, let m = ClaudeErrors.usageLimitMessage(text) {
+            throw ShellError(code: 1, stderr: m)
+        }
+        return text
     }
 
     /// Headless review with the review model (uses your logged-in Max session).
     static func review(_ pr: PR) async throws -> String {
         let prompt = try await buildPrompt(for: pr)
-        return try await sh("\(claudeBin) \(headlessFlags)\(ClaudeSettings.flags(ClaudeSettings.review))", input: prompt)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await runClaude(prompt, ClaudeSettings.review)
     }
 
     /// Short summary of the comments with the quick model. Reads only the feedback, never the diff,
@@ -1024,8 +1164,7 @@ enum Backend {
         FEEDBACK ON GITHUB:
         \(feedback)
         """
-        return try await sh("\(claudeBin) \(headlessFlags)\(ClaudeSettings.flags(ClaudeSettings.quick))", input: prompt)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await runClaude(prompt, ClaudeSettings.quick)
     }
 
     /// Opens a new Terminal window with an interactive Claude Code session seeded for `mode`.
@@ -1082,6 +1221,8 @@ final class ReviewViewModel: ObservableObject {
     private var seenRequests: Set<String>?
     private var seenReplies: [String: String]?
     private var seenFeedback: [String: String]?
+    /// Repos left out of searches because `gh` can't read them; cleared when Settings change.
+    @Published private(set) var skippedRepos: Set<String> = []
 
     static let refreshInterval: TimeInterval = 300
     /// Opening the popover refreshes if the data is older than this.
@@ -1099,6 +1240,12 @@ final class ReviewViewModel: ObservableObject {
         }
     }
 
+    /// After Settings change: try every repo again, then refresh.
+    func settingsChanged() async {
+        skippedRepos = []
+        await refresh()
+    }
+
     /// For opening the popover: refresh unless it happened within the last minute.
     func refreshIfStale() async {
         if let last = lastRefresh, Date().timeIntervalSince(last) < Self.staleAfter { return }
@@ -1109,9 +1256,10 @@ final class ReviewViewModel: ObservableObject {
         // One at a time; a request made meanwhile (e.g. after editing Settings) runs right after.
         if loading { refreshAgain = true; return }
         loading = true
-        async let fetchedPRs = Backend.fetchPRs()
-        async let fetchedReplies = Backend.fetchReplies()
-        async let fetchedMine = Backend.fetchMyPRs()
+        let skip = skippedRepos
+        async let fetchedPRs = Backend.fetchPRs(skipping: skip)
+        async let fetchedReplies = Backend.fetchReplies(skipping: skip)
+        async let fetchedMine = Backend.fetchMyPRs(skipping: skip)
         var errors: [String] = []
         var alerts: [ReviewAlert] = []
 
@@ -1134,6 +1282,21 @@ final class ReviewViewModel: ObservableObject {
             seenFeedback = AlertDiff.latestByURL(myPRs, url: \.pr.url, latestAt: \.latestAt)
         } catch { errors.append("My PRs: \(error.localizedDescription)") }
 
+        // A failed search is usually one repo gh can't read: find it, leave it out, try again.
+        if !errors.isEmpty {
+            let failing = Set(await Backend.inaccessibleRepos())
+            let bad = failing.subtracting(skippedRepos)
+            // If every repo fails, it's gh, the network or GitHub, not a repo: skip nothing.
+            if !bad.isEmpty, failing.count < RepoList.load().count {
+                skippedRepos.formUnion(bad)
+                refreshAgain = true
+            }
+        }
+        if !skippedRepos.isEmpty {
+            errors.insert("Skipping \(skippedRepos.sorted().joined(separator: ", ")): gh can't read "
+                + "\(skippedRepos.count == 1 ? "it" : "them"). Check the name in Settings, or run "
+                + "`gh auth refresh` if the org uses SSO.", at: 0)
+        }
         self.error = errors.isEmpty ? nil : errors.joined(separator: "\n")
         Notifier.post(alerts)
         lastRefresh = Date()
@@ -1210,10 +1373,20 @@ final class ReviewViewModel: ObservableObject {
         }
     }
 
+    /// Running reviews by review key, so they can be cancelled.
+    private var running: [String: Task<Void, Never>] = [:]
+
+    /// Stops a running review and puts back what was there before (a saved review, or nothing).
+    func cancelReview(_ pr: PR) {
+        running[pr.reviewKey]?.cancel()
+    }
+
     private func run(_ pr: PR, since earlier: SavedReview?) {
-        let previous = reviews[pr.reviewKey]
-        reviews[pr.reviewKey] = .running
-        Task {
+        let key = pr.reviewKey
+        let previous = reviews[key]
+        reviews[key] = .running
+        running[key] = Task {
+            defer { running[key] = nil }
             do {
                 let by = ClaudeSettings.label(ClaudeSettings.review)
                 var sinceCommit: String?, fellBack: Bool?
@@ -1228,6 +1401,8 @@ final class ReviewViewModel: ObservableObject {
                 }
                 reviews[pr.reviewKey] = .done(text)
                 persist(pr, text, producedBy: by, sinceCommit: sinceCommit, fellBack: fellBack)
+            } catch is CancellationError {
+                reviews[pr.reviewKey] = previous
             } catch {
                 // A failed re-run must not hide the review that is still saved.
                 if case .done = previous {

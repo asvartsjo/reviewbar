@@ -99,10 +99,19 @@ enum Notifier {
             return ("reply-\(r.pr.url)-\(r.latestAt)", "\(r.latestBy) replied", "\(line(r.pr)) · \(waiting)", r.pr.url)
         case .feedback(let f):
             let title: String
-            switch f.decision {
-            case "CHANGES_REQUESTED": title = "Changes requested on your PR"
-            case "APPROVED": title = "Your PR was approved"
-            default: title = "New feedback on your PR"
+            let noFeedback = f.threads + f.reviews + f.comments == 0
+            if noFeedback && f.hasConflict {
+                title = "Merge conflict on your PR"
+            } else if noFeedback && f.checksFailing {
+                title = "Checks failing on your PR"
+            } else if noFeedback && f.readyToMerge {
+                title = "Your PR is ready to merge"
+            } else {
+                switch f.decision {
+                case "CHANGES_REQUESTED": title = "Changes requested on your PR"
+                case "APPROVED": title = "Your PR was approved"
+                default: title = "New feedback on your PR"
+                }
             }
             return ("feedback-\(f.pr.url)-\(f.latestAt)", title, "\(line(f.pr)) · \(f.summary) · \(f.latestBy)", f.pr.url)
         }

@@ -23,7 +23,7 @@ struct ContentView: View {
             if showSettings {
                 SettingsView {
                     showSettings = false
-                    Task { await vm.refresh() }
+                    Task { await vm.settingsChanged() }
                 }
             } else if let pr = selected {
                 DetailView(pr: pr) { selected = nil }
@@ -102,8 +102,17 @@ struct ContentView: View {
                 }
             }
             Text(pr.title).font(.body).lineLimit(2)
-            Text("\(pr.author.login) · updated \(age(pr.updatedAt))")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Text("\(pr.author.login) · updated \(age(pr.updatedAt))")
+                    .foregroundStyle(.secondary)
+                if let opened = pr.createdAt {
+                    let days = daysSince(opened)
+                    Text(days < 1 ? "· opened today" : "· open \(days)d")
+                        .foregroundStyle(days >= Self.oldAfterDays ? .orange : .secondary)
+                        .help(days >= Self.oldAfterDays ? "Open for \(days) days" : "")
+                }
+            }
+            .font(.caption)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -174,6 +183,7 @@ struct ContentView: View {
                         .background(.quaternary, in: Capsule())
                 }
                 Spacer()
+                StatusBadge(feedback: f)
                 DecisionBadge(decision: f.decision)
             }
             Text(f.pr.title).font(.body).lineLimit(2)
@@ -249,6 +259,14 @@ struct ContentView: View {
     private static let isoParser = ISO8601DateFormatter()
     private static let relative = RelativeDateTimeFormatter()
 
+    /// Review requests open at least this long are flagged.
+    static let oldAfterDays = 3
+
+    private func daysSince(_ iso: String) -> Int {
+        guard let d = Self.isoParser.date(from: iso) else { return 0 }
+        return Calendar.current.dateComponents([.day], from: d, to: Date()).day ?? 0
+    }
+
     private func age(_ iso: String) -> String {
         guard let d = Self.isoParser.date(from: iso) else { return "" }
         return Self.relative.localizedString(for: d, relativeTo: Date())
@@ -277,7 +295,9 @@ struct DetailView: View {
             if let f = vm.feedback(for: pr) {
                 HStack {
                     DecisionBadge(decision: f.decision)
-                    Text("New feedback: \(f.summary). Latest from \(f.latestBy).")
+                    Text(f.threads + f.reviews + f.comments == 0
+                         ? "\(f.summary)."
+                         : "New feedback: \(f.summary). Latest from \(f.latestBy).")
                         .font(.caption).foregroundStyle(.blue)
                     Spacer()
                     Button("Dismiss") { vm.dismissFeedback(f) }
@@ -344,7 +364,7 @@ struct DetailView: View {
             case .running:
                 Text("Reading the comments…").foregroundStyle(.secondary)
             case .done(let text):
-                Text(rendered(text))
+                MarkdownView(text: text)
                 Text("Reads comments only, not code. Terminal gets this plus the full comments and diff.")
                     .font(.caption2).foregroundStyle(.secondary)
             case .failed(let msg):
@@ -364,7 +384,7 @@ struct DetailView: View {
             if let s = vm.savedReview(for: pr) {
                 Text(reviewLabel(s)).font(.caption2).foregroundStyle(.secondary)
             }
-            Text(rendered(text))
+            MarkdownView(text: text)
         case .failed(let msg):
             Text(msg).foregroundStyle(.red)
         default:
@@ -392,6 +412,7 @@ struct DetailView: View {
             case .running:
                 ProgressView().controlSize(.small)
                 Text("Claude is reading the diff…").font(.caption)
+                Button("Cancel") { vm.cancelReview(pr) }.font(.caption)
             case .done(let text):
                 Button("Follow up in Terminal") { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
@@ -428,11 +449,6 @@ struct DetailView: View {
         return parts.joined(separator: " · ")
     }
 
-    private func rendered(_ s: String) -> AttributedString {
-        let opts = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: s, options: opts)) ?? AttributedString(s)
-    }
 
     private func open(_ url: String) {
         if let u = URL(string: url) { NSWorkspace.shared.open(u) }
@@ -686,5 +702,31 @@ struct DecisionBadge: View {
         default:
             EmptyView()
         }
+    }
+}
+
+/// CI and merge state of one of your PRs: conflict, failing checks, running, or ready to merge.
+struct StatusBadge: View {
+    let feedback: FeedbackPR
+
+    var body: some View {
+        if let status = feedback.status {
+            Label(status, systemImage: icon)
+                .font(.caption)
+                .foregroundStyle(color)
+        }
+    }
+
+    private var icon: String {
+        if feedback.hasConflict { return "arrow.triangle.merge" }
+        if feedback.checksFailing { return "xmark.octagon.fill" }
+        if feedback.readyToMerge { return "checkmark.seal.fill" }
+        return "clock"
+    }
+
+    private var color: Color {
+        if feedback.hasConflict || feedback.checksFailing { return .red }
+        if feedback.readyToMerge { return .green }
+        return .secondary
     }
 }

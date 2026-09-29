@@ -7,6 +7,10 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 - Lists open PRs where you are a requested reviewer, in the repos you choose (any mix of orgs and users).
 - **Review with Claude** runs `claude -p` headlessly and shows a private summary, a lean (approve / comment / request changes), and findings with `file:line`, quoted code and a question to ask the author.
 - **Review changes since…**: when a PR you reviewed gets new commits, review only those commits against your earlier notes (which concerns are resolved, still open, and what's new). If the branch was rebased or force-pushed the new commits can't be separated, so it falls back to the full diff with your notes, and says so. **Full review** is still there.
+- **My PRs** also shows CI and merge state: merge conflicts and failing checks are listed even without new feedback, and so are approved PRs with green checks ("Ready to merge").
+- **Awaiting me** lists the longest-open PRs first; ones open 3+ days are flagged.
+- A running review can be cancelled. Hitting your Claude plan's usage limit shows a clear message (with the reset time when Claude Code gives one) instead of a failed review.
+- If one watched repo can't be read by `gh` (typo, lost access, SSO), it is named and left out so the rest keep working; it is tried again when you change Settings.
 - **Notifications** for new review requests, replies on your review threads and feedback on your PRs (each can be turned off in Settings). Clicking one opens the PR; several at once are grouped. The first refresh after launch only sets a baseline, so starting the app doesn't flood you.
 - **Open at login** (Settings › Startup). Refreshes every 5 minutes and whenever you open the popover if the data is over a minute old.
 - Reviews are saved locally and reload on launch, labelled with the model and effort that wrote them.

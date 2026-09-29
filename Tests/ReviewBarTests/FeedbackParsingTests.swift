@@ -70,13 +70,17 @@ final class FeedbackParsingTests: XCTestCase {
     }
 
     private func myPRsJSON(lastCommit: String = "2026-09-10T00:00:00Z", decision: String = "REVIEW_REQUIRED",
-                           reviews: [String] = [], comments: [String] = [], threads: [String] = []) -> Data {
-        Data("""
+                           reviews: [String] = [], comments: [String] = [], threads: [String] = [],
+                           checks: String? = nil, mergeable: String? = nil) -> Data {
+        let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
+        let merge = mergeable.map { "\"\($0)\"" } ?? "null"
+        return Data("""
         {"data": {"viewer": {"login": "me"}, "search": {"nodes": [
           {"number": 7, "title": "Mine", "url": "https://github.com/o/r/pull/7", "isDraft": false,
            "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "reviewDecision": "\(decision)",
+           "mergeable": \(merge),
            "repository": {"nameWithOwner": "o/r"}, "author": {"login": "me"},
-           "commits": {"nodes": [{"commit": {"committedDate": "\(lastCommit)"}}]},
+           "commits": {"nodes": [{"commit": {"committedDate": "\(lastCommit)", "statusCheckRollup": \(rollup)}}]},
            "reviews": {"nodes": [\(reviews.joined(separator: ","))]},
            "comments": {"nodes": [\(comments.joined(separator: ","))]},
            "reviewThreads": {"nodes": [\(threads.joined(separator: ","))]}}
@@ -156,6 +160,40 @@ final class FeedbackParsingTests: XCTestCase {
                       myThread(last: comment("bob", "2026-09-11T06:00:00Z"))]))
         XCTAssertEqual(prs[0].summary, "2 threads · 1 review · 2 comments")
         XCTAssertEqual(prs[0].latestBy, "carol")
+    }
+
+    // MARK: CI and merge state
+
+    func testApprovedGreenMergeableIsListedAsReady() throws {
+        let prs = try Backend.parseMyPRs(myPRsJSON(
+            decision: "APPROVED",
+            reviews: [review("alice", "APPROVED", "2026-09-09T09:00:00Z")],   // before last commit: no feedback
+            checks: "SUCCESS", mergeable: "MERGEABLE"))
+        XCTAssertEqual(prs.count, 1)
+        XCTAssertTrue(prs[0].readyToMerge)
+        XCTAssertEqual(prs[0].summary, "Ready to merge")
+        XCTAssertEqual(prs[0].latestAt, "2026-09-09T09:00:00Z")   // the approval: stable for dismissing
+        XCTAssertEqual(prs[0].latestBy, "alice")
+    }
+
+    func testFailingChecksAndConflictsAreListed() throws {
+        let failing = try Backend.parseMyPRs(myPRsJSON(checks: "FAILURE", mergeable: "MERGEABLE"))
+        XCTAssertEqual(failing.first?.status, "Checks failing")
+        XCTAssertEqual(failing.first?.latestAt, "2026-09-10T00:00:00Z")   // the head commit
+        let conflict = try Backend.parseMyPRs(myPRsJSON(checks: "SUCCESS", mergeable: "CONFLICTING"))
+        XCTAssertEqual(conflict.first?.status, "Merge conflict")
+    }
+
+    func testQuietPRsStayHidden() throws {
+        XCTAssertTrue(try Backend.parseMyPRs(myPRsJSON(checks: "SUCCESS", mergeable: "MERGEABLE")).isEmpty)
+        XCTAssertTrue(try Backend.parseMyPRs(myPRsJSON(checks: "PENDING", mergeable: "UNKNOWN")).isEmpty)
+    }
+
+    func testFeedbackRowsStillShowCountsWithStatus() throws {
+        let prs = try Backend.parseMyPRs(myPRsJSON(
+            comments: [comment("bob", "2026-09-11T09:00:00Z")], checks: "FAILURE", mergeable: "MERGEABLE"))
+        XCTAssertEqual(prs[0].summary, "1 comment")
+        XCTAssertEqual(prs[0].status, "Checks failing")
     }
 
     // MARK: Review keys

@@ -33,6 +33,8 @@ struct SavedReview: Codable, Identifiable {
     let pr: PR
     let text: String
     let date: Date
+    /// What produced it, e.g. "sonnet · high". Nil for reviews saved before this was recorded.
+    var producedBy: String?
     var id: String { pr.reviewKey }
 }
 
@@ -172,6 +174,59 @@ enum RepoList {
         guard !repos.isEmpty else { return }
         save(repos.map { $0.contains("/") ? $0 : "\(owner)/\($0)" })
         d.removeObject(forKey: legacyOwnerKey)
+    }
+}
+
+// MARK: - Claude model and effort
+
+/// Two model/effort pairs, stored in UserDefaults:
+/// - review: "Review with Claude" and every Terminal session (anything that reads code)
+/// - quick: "Summarise feedback", which reads only comments, never the diff
+/// An empty value passes no flag, so Claude Code's own configuration applies.
+enum ClaudeSettings {
+    static let models = ["", "opus", "sonnet", "haiku", "fable"]
+    static let quickModels = [sameAsReview] + models
+    static let efforts = ["", "low", "medium", "high", "xhigh", "max"]
+    static let sameAsReview = "same"
+
+    static let reviewModelKey = "reviewModel", reviewEffortKey = "reviewEffort"
+    static let quickModelKey = "quickModel", quickEffortKey = "quickEffort"
+    static let quickModelDefault = "haiku", quickEffortDefault = "low"
+
+    private static func value(_ key: String, _ fallback: String, allowed: [String]) -> String {
+        let v = UserDefaults.standard.string(forKey: key) ?? fallback
+        return allowed.contains(v) ? v : fallback   // only whitelisted values reach the shell
+    }
+
+    static var review: (model: String, effort: String) {
+        (value(reviewModelKey, "", allowed: models), value(reviewEffortKey, "", allowed: efforts))
+    }
+
+    static var quick: (model: String, effort: String) {
+        let m = value(quickModelKey, quickModelDefault, allowed: quickModels)
+        let e = value(quickEffortKey, quickEffortDefault, allowed: efforts)
+        return (m == sameAsReview ? review.model : m, e)
+    }
+
+    /// Command-line flags for a pair, with a leading space, or "" for all defaults.
+    static func flags(_ pair: (model: String, effort: String)) -> String {
+        (pair.model.isEmpty ? "" : " --model \(pair.model)")
+            + (pair.effort.isEmpty ? "" : " --effort \(pair.effort)")
+    }
+
+    /// Short label such as "sonnet · high" or "default".
+    static func label(_ pair: (model: String, effort: String)) -> String {
+        let parts = [pair.model, pair.effort].filter { !$0.isEmpty }
+        return parts.isEmpty ? "default" : parts.joined(separator: " · ")
+    }
+
+    static func displayName(_ value: String) -> String {
+        switch value {
+        case "": return "Default"
+        case sameAsReview: return "Same as reviews"
+        case "xhigh": return "Extra high"
+        default: return value.prefix(1).uppercased() + value.dropFirst()
+        }
     }
 }
 
@@ -698,7 +753,7 @@ enum Backend {
 
     /// Follow-up prompt: seeds a new session with the saved review (if any), the feedback
     /// on GitHub including replies to my comments, and the current diff.
-    static func buildFollowUpPrompt(for pr: PR, review: String?) async throws -> String {
+    static func buildFollowUpPrompt(for pr: PR, review: String?, summary: String?) async throws -> String {
         let c = try await context(for: pr)
         let feedback = await feedback(for: pr)
         return """
@@ -722,7 +777,7 @@ enum Backend {
         EARLIER REVIEW NOTES:
         \(review ?? "(none saved)")
 
-        FEEDBACK ON GITHUB:
+        \(summaryBlock(summary))FEEDBACK ON GITHUB:
         \(feedback)
 
         \(c.note)
@@ -732,7 +787,7 @@ enum Backend {
     }
 
     /// Author prompt: helps me work through reviewer feedback on my own PR.
-    static func buildAuthorPrompt(for pr: PR) async throws -> String {
+    static func buildAuthorPrompt(for pr: PR, summary: String?) async throws -> String {
         let c = try await context(for: pr)
         let feedback = await feedback(for: pr)
         return """
@@ -753,7 +808,7 @@ enum Backend {
         METADATA (JSON):
         \(c.meta)
 
-        FEEDBACK ON GITHUB:
+        \(summaryBlock(summary))FEEDBACK ON GITHUB:
         \(feedback)
 
         \(c.note)
@@ -765,16 +820,56 @@ enum Backend {
     enum TerminalMode {
         /// Fresh review of someone else's PR.
         case review
-        /// Continue reviewing someone else's PR, with saved notes if any.
-        case followUp(notes: String?)
-        /// Work through feedback on my own PR.
-        case author
+        /// Continue reviewing someone else's PR, with saved notes and quick summary if any.
+        case followUp(notes: String?, summary: String?)
+        /// Work through feedback on my own PR, with the quick summary if any.
+        case author(summary: String?)
     }
 
-    /// Headless run through the Claude Code CLI (uses your logged-in Max session).
+    /// Hands a quick-model summary to the review model as a map, never as the source of truth.
+    private static func summaryBlock(_ summary: String?) -> String {
+        guard let summary else { return "" }
+        return """
+        QUICK SUMMARY OF THE FEEDBACK (written by a smaller model from the comments only, without seeing the code. Use it as a map, but check each point against FEEDBACK ON GITHUB and the diff before relying on it, and say where it is wrong):
+        \(summary)
+
+        """
+    }
+
+    /// Headless review with the review model (uses your logged-in Max session).
     static func review(_ pr: PR) async throws -> String {
         let prompt = try await buildPrompt(for: pr)
-        return try await sh("\(claudeBin) \(headlessFlags)", input: prompt)
+        return try await sh("\(claudeBin) \(headlessFlags)\(ClaudeSettings.flags(ClaudeSettings.review))", input: prompt)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Short summary of the comments with the quick model. Reads only the feedback, never the diff,
+    /// so it reports what people said and what is waiting on me, not whether the code is right.
+    static func summariseFeedback(_ pr: PR, mine: Bool) async throws -> String {
+        let feedback = await feedback(for: pr)
+        let task = mine
+            ? """
+              This is MY pull request. Summarise what reviewers are asking for, grouped as: must address, questions to answer, optional. One line each: `path:line` if there is one, who, and what they want. Then one line on anything reviewers are waiting on me for.
+              """
+            : """
+              I reviewed this pull request. For each UNRESOLVED thread I took part in where someone else spoke last, give one line: `path:line`, who replied, and whether it is an answer, a question for me, pushback, or a claim that it is fixed. Then one line on what is left for me to do.
+              """
+        let prompt = """
+        You are summarising code review comments for me, briefly.
+
+        \(rules)
+        - You only see the comments, not the code. Never judge whether a change or fix is correct; report claims as claims ("says fixed", not "fixed").
+
+        TASK
+        \(task)
+        Plain text or simple markdown bullets, at most about 15 lines. No preamble.
+
+        PR: \(pr.repository.nameWithOwner)#\(pr.number): \(pr.title)
+
+        FEEDBACK ON GITHUB:
+        \(feedback)
+        """
+        return try await sh("\(claudeBin) \(headlessFlags)\(ClaudeSettings.flags(ClaudeSettings.quick))", input: prompt)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -783,8 +878,10 @@ enum Backend {
         let prompt: String
         switch mode {
         case .review: prompt = try await buildPrompt(for: pr)
-        case .followUp(let notes): prompt = try await buildFollowUpPrompt(for: pr, review: notes)
-        case .author: prompt = try await buildAuthorPrompt(for: pr)
+        case .followUp(let notes, let summary):
+            prompt = try await buildFollowUpPrompt(for: pr, review: notes, summary: summary)
+        case .author(let summary):
+            prompt = try await buildAuthorPrompt(for: pr, summary: summary)
         }
         guard prompt.utf8.count <= maxArgBytes else {
             throw ShellError(code: 1, stderr: "Prompt is \(prompt.utf8.count / 1000) KB, too large to pass to "
@@ -795,7 +892,7 @@ enum Backend {
         try prompt.write(to: file, atomically: true, encoding: .utf8)
 
         // Quote the path, and delete the file once read: it holds the full diff.
-        let cmd = "\(claudeBin) \"$(cat \(q(file.path)); rm -f \(q(file.path)))\""
+        let cmd = "\(claudeBin)\(ClaudeSettings.flags(ClaudeSettings.review)) \"$(cat \(q(file.path)); rm -f \(q(file.path)))\""
         let escaped = cmd.replacingOccurrences(of: "\\", with: "\\\\")
                          .replacingOccurrences(of: "\"", with: "\\\"")
         let script = "tell application \"Terminal\"\nactivate\ndo script \"\(escaped)\"\nend tell"
@@ -818,6 +915,8 @@ final class ReviewViewModel: ObservableObject {
     @Published var reviews: [String: ReviewState] = [:]   // keyed by PR.reviewKey
     @Published var replies: [ReplyPR] = []
     @Published var myPRs: [FeedbackPR] = []
+    /// Quick-model summaries, keyed by `summaryKey` so newer comments make them stale. Not saved.
+    @Published var summaries: [String: ReviewState] = [:]
     /// PR url -> `latestAt` of the reply you dismissed. Newer replies bring the PR back.
     @Published private var dismissed: [String: String] =
         UserDefaults.standard.dictionary(forKey: "dismissedReplies") as? [String: String] ?? [:]
@@ -893,9 +992,10 @@ final class ReviewViewModel: ObservableObject {
         reviews[pr.reviewKey] = .running
         Task {
             do {
+                let by = ClaudeSettings.label(ClaudeSettings.review)
                 let text = try await Backend.review(pr)
                 reviews[pr.reviewKey] = .done(text)
-                persist(pr, text)
+                persist(pr, text, producedBy: by)
             } catch {
                 // A failed re-run must not hide the review that is still saved.
                 if case .done = previous {
@@ -908,9 +1008,9 @@ final class ReviewViewModel: ObservableObject {
         }
     }
 
-    private func persist(_ pr: PR, _ text: String) {
+    private func persist(_ pr: PR, _ text: String, producedBy: String) {
         saved.removeAll { $0.id == pr.reviewKey }
-        saved.insert(SavedReview(pr: pr, text: text, date: Date()), at: 0)
+        saved.insert(SavedReview(pr: pr, text: text, date: Date(), producedBy: producedBy), at: 0)
         Store.save(saved)
         Store.writeMarkdown(pr, text)
     }
@@ -933,14 +1033,55 @@ final class ReviewViewModel: ObservableObject {
         priorNotes(for: pr) != nil || replies.contains { $0.pr.url == pr.url }
     }
 
+    /// The saved review for this exact version, if any.
+    func savedReview(for pr: PR) -> SavedReview? { saved.first { $0.id == pr.reviewKey } }
+
+    // MARK: Quick summaries
+
+    /// Summaries are offered where there are comments to read: replies to you, or your own PRs.
+    func canSummarise(_ pr: PR) -> Bool {
+        isMine(pr) || replies.contains { $0.pr.url == pr.url }
+    }
+
+    /// Changes when new comments arrive, so an old summary isn't shown as current.
+    private func summaryKey(_ pr: PR) -> String {
+        let latest = myPRs.first { $0.pr.url == pr.url }?.latestAt
+            ?? replies.first { $0.pr.url == pr.url }?.latestAt ?? ""
+        return pr.url + "#" + latest
+    }
+
+    func summaryState(for pr: PR) -> ReviewState { summaries[summaryKey(pr)] ?? .idle }
+
+    private func summaryText(for pr: PR) -> String? {
+        if case .done(let text) = summaryState(for: pr) { return text }
+        return nil
+    }
+
+    func summarise(_ pr: PR) {
+        let key = summaryKey(pr)
+        let mine = isMine(pr)
+        summaries[key] = .running
+        Task {
+            do {
+                let text = try await Backend.summariseFeedback(pr, mine: mine)
+                summaries[key] = .done(text)
+            } catch {
+                summaries[key] = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: Terminal
+
     /// Your own PR: work through feedback. Otherwise a fresh review, or a follow-up
-    /// seeded with saved notes and the feedback on GitHub.
+    /// seeded with saved notes and the feedback on GitHub. A quick summary, if one
+    /// was made, is handed over as a starting point.
     func openTerminal(_ pr: PR) {
         let mode: Backend.TerminalMode
         if isMine(pr) {
-            mode = .author
+            mode = .author(summary: summaryText(for: pr))
         } else if hasFollowUpContext(pr) {
-            mode = .followUp(notes: priorNotes(for: pr))
+            mode = .followUp(notes: priorNotes(for: pr), summary: summaryText(for: pr))
         } else {
             mode = .review
         }

@@ -211,7 +211,8 @@ struct ContentView: View {
             Text("\(s.pr.repository.nameWithOwner) #\(s.pr.number)")
                 .font(.caption).foregroundStyle(.secondary)
             Text(s.pr.title).lineLimit(2)
-            Text("\(s.pr.author.login) · reviewed \(s.date.formatted(.relative(presentation: .named)))")
+            Text("\(s.pr.author.login) · reviewed \(s.date.formatted(.relative(presentation: .named)))"
+                 + (s.producedBy.map { " · \($0)" } ?? ""))
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
@@ -296,16 +297,9 @@ struct DetailView: View {
 
             Divider()
             ScrollView {
-                Group {
-                    switch vm.state(for: pr) {
-                    case .done(let text): Text(rendered(text))
-                    case .failed(let msg): Text(msg).foregroundStyle(.red)
-                    default:
-                        Text(vm.isMine(pr)
-                             ? "Opens Claude Code with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub."
-                             : "Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
-                            .foregroundStyle(.secondary)
-                    }
+                VStack(alignment: .leading, spacing: 10) {
+                    if vm.canSummarise(pr) { summaryBox }
+                    reviewContent
                 }
                 .font(.system(size: 12))
                 .textSelection(.enabled)
@@ -313,6 +307,58 @@ struct DetailView: View {
             }
         }
         .padding(10)
+    }
+
+    /// Quick-model summary of the comments, or the button to make one.
+    @ViewBuilder private var summaryBox: some View {
+        let quick = ClaudeSettings.label(ClaudeSettings.quick)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Feedback summary").font(.caption.bold())
+                Text(quick).font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                switch vm.summaryState(for: pr) {
+                case .running:
+                    ProgressView().controlSize(.small)
+                case .done:
+                    Button("Redo") { vm.summarise(pr) }.buttonStyle(.borderless).font(.caption)
+                default:
+                    Button("Summarise feedback") { vm.summarise(pr) }.font(.caption)
+                }
+            }
+            switch vm.summaryState(for: pr) {
+            case .running:
+                Text("Reading the comments…").foregroundStyle(.secondary)
+            case .done(let text):
+                Text(rendered(text))
+                Text("Reads comments only, not code. Terminal gets this plus the full comments and diff.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            case .failed(let msg):
+                Text(msg).foregroundStyle(.red)
+            case .idle:
+                Text("A quick read of who said what and what's waiting on you. It doesn't see the code.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder private var reviewContent: some View {
+        switch vm.state(for: pr) {
+        case .done(let text):
+            if let by = vm.savedReview(for: pr)?.producedBy {
+                Text("Review · \(by)").font(.caption2).foregroundStyle(.secondary)
+            }
+            Text(rendered(text))
+        case .failed(let msg):
+            Text(msg).foregroundStyle(.red)
+        default:
+            Text(vm.isMine(pr)
+                 ? "Opens Claude Code with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub."
+                 : "Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
+                .foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder private var actions: some View {
@@ -367,6 +413,10 @@ struct SettingsView: View {
     @State private var input = ""
     @State private var checking = false
     @State private var problems: [String] = []
+    @AppStorage(ClaudeSettings.reviewModelKey) private var reviewModel = ""
+    @AppStorage(ClaudeSettings.reviewEffortKey) private var reviewEffort = ""
+    @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
+    @AppStorage(ClaudeSettings.quickEffortKey) private var quickEffort = ClaudeSettings.quickEffortDefault
     let done: () -> Void
 
     var body: some View {
@@ -429,9 +479,39 @@ struct SettingsView: View {
                 }
             }
 
+            Text("\(repos.count) repo\(repos.count == 1 ? "" : "s")")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Divider()
+            Text("Claude").font(.headline)
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+                GridRow {
+                    Text("").gridColumnAlignment(.leading)
+                    Text("Model").font(.caption).foregroundStyle(.secondary)
+                    Text("Effort").font(.caption).foregroundStyle(.secondary)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Reviews & Terminal")
+                        Text("Reads the code").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    picker($reviewModel, ClaudeSettings.models, "Review model")
+                    picker($reviewEffort, ClaudeSettings.efforts, "Review effort")
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Feedback summaries")
+                        Text("Reads comments only").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    picker($quickModel, ClaudeSettings.quickModels, "Summary model")
+                    picker($quickEffort, ClaudeSettings.efforts, "Summary effort")
+                }
+            }
+            Text("Default uses your Claude Code settings. Code is always read by the review model; "
+                 + "summaries are handed to it as a starting point.")
+                .font(.caption2).foregroundStyle(.secondary)
+
             HStack {
-                Text("\(repos.count) repo\(repos.count == 1 ? "" : "s")")
-                    .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Done", action: done).buttonStyle(.borderedProminent)
             }
@@ -469,6 +549,16 @@ struct SettingsView: View {
             input = failed.joined(separator: " ")   // keep what didn't work, so it can be fixed
             checking = false
         }
+    }
+
+    private func picker(_ value: Binding<String>, _ options: [String], _ label: String) -> some View {
+        Picker(label, selection: value) {
+            ForEach(options, id: \.self) { Text(ClaudeSettings.displayName($0)).tag($0) }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(width: 120)
+        .accessibilityLabel(label)
     }
 
     private func remove(_ r: String) {

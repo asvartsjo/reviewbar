@@ -124,6 +124,57 @@ enum Store {
     }
 }
 
+// MARK: - Watched repos
+
+/// The repos to watch, stored in UserDefaults "repos" as one `owner/repo` per line.
+/// Owners can be mixed freely (orgs and users).
+enum RepoList {
+    static let key = "repos"
+    /// Pre-list settings: one owner, applied to bare repo names or meaning "the whole org".
+    static let legacyOwnerKey = "owner"
+
+    static func load() -> [String] {
+        (UserDefaults.standard.string(forKey: key) ?? "")
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    static func save(_ repos: [String]) {
+        UserDefaults.standard.set(repos.joined(separator: "\n"), forKey: key)
+    }
+
+    /// `owner/repo` from `owner/repo`, `github.com/owner/repo`, a full URL (any path after
+    /// the repo is ignored) or `git@github.com:owner/repo.git`. Nil if it isn't one.
+    static func normalize(_ raw: String) -> String? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["https://", "http://", "git@github.com:", "www.", "github.com/"]
+        where s.lowercased().hasPrefix(prefix) {
+            s = String(s.dropFirst(prefix.count))
+        }
+        let parts = s.split(separator: "/").map(String.init)
+        guard parts.count >= 2 else { return nil }
+        var name = parts[1]
+        if name.hasSuffix(".git") { name = String(name.dropLast(4)) }
+        let owner = parts[0]
+        let ownerOK = owner.range(of: #"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"#, options: .regularExpression) != nil
+        let nameOK = name.range(of: #"^[A-Za-z0-9._-]{1,100}$"#, options: .regularExpression) != nil
+        return ownerOK && nameOK ? "\(owner)/\(name)" : nil
+    }
+
+    /// Turns old owner + bare-name settings into full `owner/repo` entries. The old owner
+    /// is only kept when the list is empty, where it still means "the whole org".
+    static func migrateLegacySettings() {
+        let d = UserDefaults.standard
+        let owner = (d.string(forKey: legacyOwnerKey) ?? "").trimmingCharacters(in: .whitespaces)
+        guard !owner.isEmpty else { return }
+        let repos = load()
+        guard !repos.isEmpty else { return }
+        save(repos.map { $0.contains("/") ? $0 : "\(owner)/\($0)" })
+        d.removeObject(forKey: legacyOwnerKey)
+    }
+}
+
 // MARK: - Shell helper
 
 /// Single-quote a string for zsh.
@@ -206,15 +257,27 @@ enum Backend {
     """
 
     /// Owner and `org/repo` list from Settings.
+    /// Watched repos from Settings. `owner` is only set for old settings that watched a whole org.
     private static func settingsScope() -> (owner: String, repos: [String]) {
-        let d = UserDefaults.standard
-        let owner = (d.string(forKey: "owner") ?? "").trimmingCharacters(in: .whitespaces)
-        let repos = (d.string(forKey: "repos") ?? "")
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .map { $0.contains("/") || owner.isEmpty ? $0 : "\(owner)/\($0)" }
+        let repos = RepoList.load().filter { $0.contains("/") }
+        let owner = repos.isEmpty
+            ? (UserDefaults.standard.string(forKey: RepoList.legacyOwnerKey) ?? "")
+                .trimmingCharacters(in: .whitespaces)
+            : ""
         return (owner, repos)
+    }
+
+    /// Checks `gh` can read the repo and returns its canonical `owner/repo`. One repo the
+    /// search can't access makes GitHub reject the whole search, so this runs on add.
+    static func checkRepo(_ name: String) async throws -> String {
+        do {
+            let out = try await sh("gh repo view \(q(name)) --json nameWithOwner --jq .nameWithOwner")
+            let canonical = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            return canonical.isEmpty ? name : canonical
+        } catch let e as ShellError {
+            throw ShellError(code: e.code, stderr: "Can't access \(name). Check the spelling; if the org uses SSO, "
+                + "run `gh auth refresh` and authorise it. (\(e.stderr.trimmingCharacters(in: .whitespacesAndNewlines)))")
+        }
     }
 
     static func fetchPRs() async throws -> [PR] {
@@ -761,6 +824,7 @@ final class ReviewViewModel: ObservableObject {
     private var timer: Timer?
 
     init() {
+        RepoList.migrateLegacySettings()
         saved = Store.load().sorted { $0.date > $1.date }
         for s in saved { reviews[s.id] = .done(s.text) }
 

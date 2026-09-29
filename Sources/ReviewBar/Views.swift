@@ -362,28 +362,118 @@ struct DetailView: View {
 }
 
 struct SettingsView: View {
-    @AppStorage("owner") private var owner = ""
-    @AppStorage("repos") private var repos = ""
+    @State private var repos = RepoList.load()
+    @State private var legacyOwner = UserDefaults.standard.string(forKey: RepoList.legacyOwnerKey) ?? ""
+    @State private var input = ""
+    @State private var checking = false
+    @State private var problems: [String] = []
     let done: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("GitHub org / owner").font(.caption).foregroundStyle(.secondary)
-            TextField("e.g. your-org", text: $owner).textFieldStyle(.roundedBorder)
-
-            Text("Repos to watch (one per line, `repo` or `org/repo`). Leave empty for the whole org.")
+            Text("Repositories").font(.headline)
+            Text("PRs from these repos show up in every tab. Mix any orgs and users.")
                 .font(.caption).foregroundStyle(.secondary)
-            TextEditor(text: $repos)
-                .font(.system(.body, design: .monospaced))
-                .frame(minHeight: 200)
-                .border(.quaternary)
 
             HStack {
+                TextField("owner/repo or GitHub URL", text: $input)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit(add)
+                Button("Add", action: add)
+                    .disabled(input.trimmingCharacters(in: .whitespaces).isEmpty || checking)
+            }
+            Text("Paste several at once, separated by spaces, commas or new lines.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            if checking {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking access…").font(.caption)
+                }
+            }
+            ForEach(problems, id: \.self) { p in
+                Text(p).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+            }
+
+            if repos.isEmpty && !legacyOwner.isEmpty {
+                HStack {
+                    Text("Watching everything in \(legacyOwner) (from older settings). Add repos to narrow it down.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Stop") {
+                        UserDefaults.standard.removeObject(forKey: RepoList.legacyOwnerKey)
+                        legacyOwner = ""
+                    }
+                    .buttonStyle(.borderless).font(.caption)
+                }
+            }
+
+            List {
+                ForEach(repos, id: \.self) { r in
+                    HStack {
+                        Image(systemName: "book.closed").foregroundStyle(.secondary)
+                        Text(r).font(.system(.body, design: .monospaced))
+                        Spacer()
+                        Button { remove(r) } label: { Image(systemName: "minus.circle") }
+                            .buttonStyle(.borderless)
+                            .help("Remove \(r)")
+                            .accessibilityLabel("Remove \(r)")
+                    }
+                }
+            }
+            .listStyle(.bordered(alternatesRowBackgrounds: true))
+            .overlay {
+                if repos.isEmpty {
+                    Text("No repos yet").font(.callout).foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Text("\(repos.count) repo\(repos.count == 1 ? "" : "s")")
+                    .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Save", action: done).buttonStyle(.borderedProminent)
+                Button("Done", action: done).buttonStyle(.borderedProminent)
             }
         }
         .padding(10)
+    }
+
+    /// Normalises each pasted entry, checks `gh` can read it, then appends the canonical name.
+    private func add() {
+        let entries = input
+            .split(whereSeparator: { $0.isWhitespace || $0 == "," })
+            .map(String.init)
+        guard !entries.isEmpty, !checking else { return }
+        problems = []
+        checking = true
+        Task {
+            var added: [String] = []
+            var failed: [String] = []
+            for raw in entries {
+                guard let name = RepoList.normalize(raw) else {
+                    problems.append("“\(raw)” isn't owner/repo.")
+                    failed.append(raw)
+                    continue
+                }
+                if (repos + added).contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) { continue }
+                do {
+                    added.append(try await Backend.checkRepo(name))
+                } catch {
+                    problems.append(error.localizedDescription)
+                    failed.append(raw)
+                }
+            }
+            repos += added
+            RepoList.save(repos)
+            input = failed.joined(separator: " ")   // keep what didn't work, so it can be fixed
+            checking = false
+        }
+    }
+
+    private func remove(_ r: String) {
+        repos.removeAll { $0 == r }
+        RepoList.save(repos)
     }
 }
 

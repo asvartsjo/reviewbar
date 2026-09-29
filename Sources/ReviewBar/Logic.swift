@@ -876,8 +876,7 @@ enum Backend {
 
     /// Keeps the compare response small: no files or patches, first line of each commit message.
     private static let compareJQ =
-        #"{status: .status, ahead_by: .ahead_by, commits: [.commits[] | {sha: .sha[0:7], message: (.commit.message | split("
-")[0])}]}"#
+        #"{status: .status, ahead_by: .ahead_by, commits: [.commits[] | {sha: .sha[0:7], message: (.commit.message | split("\n")[0])}]}"#
 
     static func isCommitSHA(_ s: String) -> Bool {
         s.range(of: "^[0-9a-f]{7,40}$", options: .regularExpression) != nil

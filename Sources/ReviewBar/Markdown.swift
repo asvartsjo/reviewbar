@@ -100,32 +100,33 @@ struct MarkdownView: View {
         switch block {
         case .heading(let level, let t):
             Text(inline(t))
-                .font(level <= 2 ? .system(size: 13, weight: .bold) : .system(size: 12, weight: .semibold))
+                .font(level <= 2 ? .system(size: 15, weight: .bold) : .system(size: 13, weight: .semibold))
                 .padding(.top, 4)
         case .bullet(let indent, let t):
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("•").foregroundStyle(.secondary)
+                Text("•").foregroundStyle(.primary.opacity(0.7))
                 Text(inline(t))
             }
             .padding(.leading, CGFloat(indent) * 12)
         case .numbered(let indent, let n, let t):
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(n).").foregroundStyle(.secondary).monospacedDigit()
+                Text("\(n).").foregroundStyle(.primary.opacity(0.7)).monospacedDigit()
                 Text(inline(t))
             }
             .padding(.leading, CGFloat(indent) * 12)
         case .code(_, let t):
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(t).font(.system(size: 11, design: .monospaced)).fixedSize()
+                Text(t).font(.system(size: 12, design: .monospaced)).fixedSize()
             }
             .padding(6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
+            .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.15)))
         case .quote(let t):
             Text(inline(t))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary.opacity(0.8))
                 .padding(.leading, 8)
-                .overlay(alignment: .leading) { Rectangle().fill(.tertiary).frame(width: 2) }
+                .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor).frame(width: 2) }
         case .paragraph(let t):
             Text(inline(t))
         case .rule:

@@ -10,6 +10,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if Notifier.isAvailable { UNUserNotificationCenter.current().delegate = self }
     }
 
+    /// reviewbar:// links from review pages opened in the browser.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated { urls.forEach(ReviewViewModel.shared.handle) }
+    }
+
     /// Show banners even though the app counts as frontmost while its popover is open.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
@@ -30,19 +35,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 @main
 struct ReviewBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var vm = ReviewViewModel()
+    @StateObject private var vm = ReviewViewModel.shared
 
     var body: some Scene {
         MenuBarExtra {
             ContentView().environmentObject(vm)
         } label: {
-            // One Text: the menu bar may only render the first view of a multi-view label.
-            if vm.badgeCount == 0 {
-                Image(systemName: "eye")
-            } else {
-                Text("\(Image(systemName: "eye")) \(vm.badgeCount)")
-            }
+            // One pre-rendered template image: an SF Symbol inside a Text label can vanish
+            // after the menu bar re-renders, leaving only the number.
+            Image(nsImage: MenuBarIcon.image(count: vm.badgeCount))
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+enum MenuBarIcon {
+    static func image(count: Int) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        let eye = NSImage(systemSymbolName: "eye", accessibilityDescription: "ReviewBar")?
+            .withSymbolConfiguration(config) ?? NSImage()
+        guard count > 0 else { eye.isTemplate = true; return eye }
+        let text = NSAttributedString(string: " \(count)", attributes: [
+            .font: NSFont.menuBarFont(ofSize: 0), .foregroundColor: NSColor.black,
+        ])
+        let textSize = text.size()
+        let height = max(eye.size.height, textSize.height)
+        let size = NSSize(width: ceil(eye.size.width + textSize.width), height: ceil(height))
+        let image = NSImage(size: size, flipped: false) { _ in
+            eye.draw(in: NSRect(x: 0, y: (height - eye.size.height) / 2,
+                                width: eye.size.width, height: eye.size.height))
+            text.draw(at: NSPoint(x: eye.size.width, y: (height - textSize.height) / 2))
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "ReviewBar, \(count) to review"
+        return image
     }
 }

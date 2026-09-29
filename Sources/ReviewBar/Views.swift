@@ -77,12 +77,33 @@ struct ContentView: View {
             if vm.prs.isEmpty && !vm.loading {
                 empty("checkmark.circle", "Nothing waiting. Check settings if that looks wrong.")
             } else {
+                reviewAllBar
                 List(vm.prs) { pr in
                     Button { selected = pr } label: { row(pr) }.buttonStyle(.plain)
                 }
                 .listStyle(.plain)
             }
         }
+    }
+
+    @ViewBuilder private var reviewAllBar: some View {
+        HStack {
+            if let b = vm.batch {
+                ProgressView(value: Double(b.done), total: Double(b.total)).frame(width: 120)
+                Text("Reviewed \(b.done) of \(b.total)").font(.caption)
+                Spacer()
+                Button("Stop") { vm.cancelAll() }.font(.caption)
+            } else if !vm.unreviewed.isEmpty {
+                Text("\(vm.unreviewed.count) without a review").font(.caption)
+                Spacer()
+                Menu("Review all") {
+                    Button("One by one") { vm.reviewAll(parallel: false) }
+                    Button("In parallel (3 at a time)") { vm.reviewAll(parallel: true) }
+                }
+                .menuStyle(.borderlessButton).fixedSize().font(.caption)
+            }
+        }
+        .padding(.horizontal, 10)
     }
 
     private func row(_ pr: PR) -> some View {
@@ -342,7 +363,8 @@ struct DetailView: View {
                     if vm.canSummarise(pr) { summaryBox }
                     reviewContent
                 }
-                .font(.system(size: 12))
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -389,7 +411,7 @@ struct DetailView: View {
         switch vm.state(for: pr) {
         case .done(let text):
             if let s = vm.savedReview(for: pr) {
-                Text(reviewLabel(s)).font(.caption2).foregroundStyle(.secondary)
+                Text(ReviewPage.label(s)).font(.caption).foregroundStyle(.primary.opacity(0.75))
             }
             MarkdownView(text: text)
         case .failed(let msg):
@@ -426,6 +448,10 @@ struct DetailView: View {
             case .done(let text):
                 Button(terminalLabel("Follow up")) { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
+                Button("Open in browser") {
+                    let s = vm.savedReview(for: pr)
+                    ReviewPage.open(pr: pr, text: text, label: s.map(ReviewPage.label), date: s?.date)
+                }
                 Button("Re-run") { vm.rerun(pr) }
                 Button("Copy") {
                     NSPasteboard.general.clearContents()
@@ -446,19 +472,6 @@ struct DetailView: View {
             }
         }
     }
-
-    /// "Review · Opus", "Changes since abc1234 · Opus", or the rebased fallback.
-    private func reviewLabel(_ s: SavedReview) -> String {
-        var parts: [String] = []
-        if let since = s.sinceCommit {
-            parts.append(s.sinceFellBack == true ? "Since \(since), full diff (branch rebased)" : "Changes since \(since)")
-        } else {
-            parts.append("Review")
-        }
-        if let by = s.producedBy { parts.append(by) }
-        return parts.joined(separator: " · ")
-    }
-
 
     private func open(_ url: String) {
         if let u = URL(string: url) { NSWorkspace.shared.open(u) }

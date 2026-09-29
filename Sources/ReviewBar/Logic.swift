@@ -1358,6 +1358,9 @@ enum Backend {
 
 @MainActor
 final class ReviewViewModel: ObservableObject {
+    /// One instance for the app, so URLs from review pages (reviewbar://…) reach it.
+    static let shared = ReviewViewModel()
+
     @Published var prs: [PR] = []
     @Published var saved: [SavedReview] = []
     @Published var loading = false
@@ -1543,11 +1546,80 @@ final class ReviewViewModel: ObservableObject {
         running[pr.reviewKey]?.cancel()
     }
 
-    private func run(_ pr: PR, since earlier: SavedReview?) {
+    // MARK: Review all
+
+    /// PRs "Review all" would pick up: no review of this version yet, and none running.
+    var unreviewed: [PR] {
+        prs.filter { pr in
+            switch state(for: pr) { case .idle, .failed: return true; default: return false }
+        }
+    }
+
+    @Published private(set) var batch: (done: Int, total: Int)?
+    private var batchTask: Task<Void, Never>?
+
+    /// Reviews every unreviewed PR, reusing earlier notes where a PR moved on since. `parallel`
+    /// runs up to three at once; otherwise one by one.
+    func reviewAll(parallel: Bool) {
+        let targets = unreviewed
+        guard !targets.isEmpty, batchTask == nil else { return }
+        batch = (0, targets.count)
+        batchTask = Task {
+            defer { batchTask = nil; batch = nil }
+            let width = parallel ? 3 : 1
+            for start in stride(from: 0, to: targets.count, by: width) {
+                if Task.isCancelled { break }
+                let group = targets[start..<min(start + width, targets.count)].map { pr in
+                    run(pr, since: earlierReview(for: pr))
+                }
+                for t in group { await t.value; batch?.done += 1 }
+            }
+        }
+    }
+
+    /// Stops the batch and any review it started.
+    func cancelAll() {
+        batchTask?.cancel()
+        for t in running.values { t.cancel() }
+    }
+
+    // MARK: Review page links
+
+    /// Handles reviewbar://update?pr=<PR url> from the browser page: fetch the PR again, then
+    /// review the new commits (or re-run if nothing moved) and reopen the page when done.
+    /// reviewbar://rerun?pr=<url> always runs a full review of the current diff.
+    func handle(_ url: URL) {
+        guard url.scheme == "reviewbar",
+              let prURL = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "pr" })?.value else { return }
+        let full = url.host == "rerun"
+        Task {
+            await refresh()
+            guard let pr = prs.first(where: { $0.url == prURL })
+                    ?? saved.first(where: { $0.pr.url == prURL })?.pr else { return }
+            if case .running = state(for: pr) { return }
+            let task: Task<Void, Never>
+            if full {
+                task = run(pr, since: nil)
+            } else if savedReview(for: pr) != nil {
+                task = run(pr, since: savedReview(for: pr)?.sinceCommit != nil ? earlierReview(for: pr) : nil)
+            } else {
+                task = run(pr, since: earlierReview(for: pr))
+            }
+            await task.value
+            if case .done(let text) = state(for: pr) {
+                let s = savedReview(for: pr)
+                ReviewPage.open(pr: pr, text: text, label: s.map(ReviewPage.label), date: s?.date)
+            }
+        }
+    }
+
+    @discardableResult
+    private func run(_ pr: PR, since earlier: SavedReview?) -> Task<Void, Never> {
         let key = pr.reviewKey
         let previous = reviews[key]
         reviews[key] = .running
-        running[key] = Task {
+        let task = Task {
             defer { running[key] = nil }
             do {
                 let by = ClaudeSettings.label(ClaudeSettings.review)
@@ -1575,6 +1647,8 @@ final class ReviewViewModel: ObservableObject {
                 }
             }
         }
+        running[key] = task
+        return task
     }
 
     private func persist(_ pr: PR, _ text: String, producedBy: String,

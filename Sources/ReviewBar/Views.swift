@@ -109,7 +109,7 @@ struct ContentView: View {
     private func row(_ pr: PR) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text("\(pr.repository.nameWithOwner) #\(pr.number)")
+                Text(verbatim: "\(pr.repository.nameWithOwner) #\(pr.number)")
                     .font(.caption).foregroundStyle(.secondary)
                 if pr.isDraft {
                     Text("DRAFT").font(.caption2).padding(.horizontal, 4)
@@ -161,7 +161,7 @@ struct ContentView: View {
     private func replyRow(_ r: ReplyPR) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text("\(r.pr.repository.nameWithOwner) #\(r.pr.number)")
+                Text(verbatim: "\(r.pr.repository.nameWithOwner) #\(r.pr.number)")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Label("\(r.waiting)", systemImage: "bubble.left.fill")
@@ -197,7 +197,7 @@ struct ContentView: View {
     private func feedbackRow(_ f: FeedbackPR) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text("\(f.pr.repository.nameWithOwner) #\(f.pr.number)")
+                Text(verbatim: "\(f.pr.repository.nameWithOwner) #\(f.pr.number)")
                     .font(.caption).foregroundStyle(.secondary)
                 if f.pr.isDraft {
                     Text("DRAFT").font(.caption2).padding(.horizontal, 4)
@@ -246,7 +246,7 @@ struct ContentView: View {
 
     private func savedRow(_ s: SavedReview) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("\(s.pr.repository.nameWithOwner) #\(s.pr.number)")
+            Text(verbatim: "\(s.pr.repository.nameWithOwner) #\(s.pr.number)")
                 .font(.caption).foregroundStyle(.secondary)
             Text(s.pr.title).lineLimit(2)
             Text("\(s.pr.author.login) · reviewed \(s.date.formatted(.relative(presentation: .named)))"
@@ -317,7 +317,7 @@ struct DetailView: View {
             .buttonStyle(.borderless)
 
             Text(pr.title).font(.headline)
-            Text("\(pr.repository.nameWithOwner) #\(pr.number) · \(pr.author.login)")
+            Text(verbatim: "\(pr.repository.nameWithOwner) #\(pr.number) · \(pr.author.login)")
                 .font(.caption).foregroundStyle(.secondary)
 
             if let f = vm.feedback(for: pr) {

@@ -121,3 +121,19 @@ final class TerminalAppTests: XCTestCase {
         XCTAssertEqual(TerminalApp.resolve(saved: "warp", installed: here), .ghostty)
     }
 }
+
+final class NotificationPollTests: XCTestCase {
+    func testChangedWithETagAndInterval() {
+        let out = "HTTP/2.0 200 OK\r\nEtag: \"abc\"\r\nX-Poll-Interval: 60\r\n\r\n[]"
+        XCTAssertEqual(Backend.parseNotificationPoll(out), .init(changed: true, etag: "\"abc\"", interval: 60))
+    }
+
+    func testNotModified() {
+        XCTAssertEqual(Backend.parseNotificationPoll("HTTP/2.0 304 Not Modified\r\n\r\n")?.changed, false)
+    }
+
+    func testErrorsAreNil() {
+        XCTAssertNil(Backend.parseNotificationPoll("HTTP/2.0 401 Unauthorized\r\n"))
+        XCTAssertNil(Backend.parseNotificationPoll(""))
+    }
+}

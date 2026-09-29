@@ -623,10 +623,103 @@ enum Backend {
 
         let cmd = "gh search prs --review-requested=@me --state=open \(scope) "
             + "--limit 50 --json number,title,url,isDraft,createdAt,updatedAt,repository,author"
+        // GitHub's search index lags a minute or more behind new PRs and review requests,
+        // so named repos are also read directly and the two lists merged.
+        async let direct = directRequests(repos)
         let out = try await sh(cmd)
-        let prs = try JSONDecoder().decode([PR].self, from: Data(out.utf8))
+        let searched = try JSONDecoder().decode([PR].self, from: Data(out.utf8))
+        let fresh = await direct
+        let known = Set(searched.map(\.url))
+        let prs = searched + fresh.filter { !known.contains($0.url) }
         // Longest-waiting first.
         return await withHeadCommits(prs).sorted { ($0.createdAt ?? "") < ($1.createdAt ?? "") }
+    }
+
+    struct NotificationPoll: Equatable {
+        let changed: Bool
+        let etag: String?
+        let interval: TimeInterval?
+    }
+
+    /// One conditional request for the newest notification. Nil when gh or the network failed.
+    static func pollNotifications(etag: String?) async -> NotificationPoll? {
+        let header = etag.map { "-H \(q("If-None-Match: \($0)")) " } ?? ""
+        // gh exits non-zero on 304, so read the status line instead of the exit code.
+        guard let out = try? await sh("gh api -i \(header)'notifications?per_page=1' 2>/dev/null; true")
+        else { return nil }
+        return parseNotificationPoll(out)
+    }
+
+    /// `gh api -i` output → whether anything changed, the new ETag and GitHub's poll interval. Pure, for tests.
+    static func parseNotificationPoll(_ out: String) -> NotificationPoll? {
+        let lines = out.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard let status = lines.first(where: { $0.hasPrefix("HTTP/") }) else { return nil }
+        let code = status.split(separator: " ").dropFirst().first.flatMap { Int($0) } ?? 0
+        guard code == 200 || code == 304 else { return nil }
+        func header(_ name: String) -> String? {
+            lines.first { $0.lowercased().hasPrefix(name.lowercased() + ":") }
+                .map { String($0.dropFirst(name.count + 1)).trimmingCharacters(in: .whitespaces) }
+        }
+        return NotificationPoll(changed: code == 200, etag: header("ETag"),
+                                interval: header("X-Poll-Interval").flatMap(TimeInterval.init))
+    }
+
+    /// Open PRs in `repos` that request a review from me personally, read straight from each
+    /// repository (not the search index). Team requests are left to the search. Best effort.
+    private static func directRequests(_ repos: [String]) async -> [PR] {
+        guard !repos.isEmpty else { return [] }
+        let fields = repos.enumerated().compactMap { i, r -> String? in
+            let parts = r.split(separator: "/")
+            guard parts.count == 2 else { return nil }
+            return """
+            r\(i): repository(owner: "\(parts[0])", name: "\(parts[1])") {
+              pullRequests(states: OPEN, first: 50, orderBy: {field: CREATED_AT, direction: DESC}) { nodes {
+                number title url isDraft createdAt updatedAt
+                repository { nameWithOwner } author { login }
+                reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
+              } }
+            }
+            """
+        }
+        let query = "query { viewer { login } \(fields.joined(separator: " ")) }"
+        guard let out = try? await sh("gh api graphql -f query=\(q(query))") else { return [] }
+        return (try? parseDirectRequests(Data(out.utf8))) ?? []
+    }
+
+    /// The `directRequests` response → PRs requesting my review. Pure, for tests.
+    static func parseDirectRequests(_ json: Data) throws -> [PR] {
+        struct Reviewer: Decodable { let login: String? }
+        struct Request: Decodable { let requestedReviewer: Reviewer? }
+        struct Node: Decodable {
+            let number: Int, title: String, url: String, isDraft: Bool, createdAt: String, updatedAt: String
+            let repository: PR.Repo
+            let author: PR.Author?
+            let reviewRequests: Nodes<Request>
+        }
+        struct Repo: Decodable { let pullRequests: Nodes<Node> }
+        struct Root: Decodable {
+            let viewer: Login
+            let repos: [Repo]
+            struct Key: CodingKey {
+                var stringValue: String; var intValue: Int? { nil }
+                init(stringValue: String) { self.stringValue = stringValue }
+                init?(intValue: Int) { nil }
+            }
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: Key.self)
+                viewer = try c.decode(Login.self, forKey: Key(stringValue: "viewer"))
+                repos = c.allKeys.filter { $0.stringValue.hasPrefix("r") }
+                    .compactMap { try? c.decodeIfPresent(Repo.self, forKey: $0) }
+            }
+        }
+        let root = try JSONDecoder().decode(GQL<Root>.self, from: json).data
+        let me = root.viewer.login
+        return root.repos.flatMap(\.pullRequests.items).filter { n in
+            n.reviewRequests.items.contains { $0.requestedReviewer?.login == me }
+        }.map { n in
+            PR(number: n.number, title: n.title, url: n.url, isDraft: n.isDraft, updatedAt: n.updatedAt,
+               repository: n.repository, author: n.author ?? PR.Author(login: "ghost"), createdAt: n.createdAt)
+        }
     }
 
     /// Fills in each PR's head commit with one read-only GraphQL query.
@@ -1433,6 +1526,24 @@ final class ReviewViewModel: ObservableObject {
         Task { await refresh() }
         timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
+        }
+        Task { await watchNotifications() }
+    }
+
+    /// Near real-time updates: checks GitHub notifications about once a minute (as often as
+    /// GitHub's X-Poll-Interval allows) and refreshes only when something new arrived. Unchanged
+    /// checks answer 304 and don't count against the rate limit. The 5-minute timer stays as a
+    /// fallback for changes that don't notify, like new commits on a PR you reviewed.
+    private func watchNotifications() async {
+        var etag: String?
+        var interval: TimeInterval = 60
+        while !Task.isCancelled {
+            if let poll = await Backend.pollNotifications(etag: etag) {
+                if poll.changed, etag != nil { await refresh() }
+                etag = poll.etag ?? etag
+                interval = max(poll.interval ?? 60, 30)
+            }
+            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
         }
     }
 

@@ -48,14 +48,33 @@ enum ReviewPage {
         """
     }
 
-    /// Markdown blocks to HTML, grouping consecutive list items into lists.
+    /// Review markdown to HTML: verdict banner, one card per finding, plain blocks otherwise.
     static func body(_ markdown: String) -> String {
+        ReviewDoc.parse(markdown).map { segment in
+            switch segment {
+            case .verdict(let v, let reason):
+                let cls = v == .approve ? "approve" : v == .comment ? "comment" : "changes"
+                let icon = v == .approve ? "✓" : v == .comment ? "●" : "✕"
+                return "<div class=\"verdict \(cls)\"><span class=\"icon\">\(icon)</span><div><strong>\(v.title)</strong>"
+                    + (reason.isEmpty ? "" : "<div>\(inline(reason))</div>") + "</div></div>"
+            case .block(let b):
+                return blocks([b])
+            case .finding(let sev, let title, let bs):
+                let tag = sev.map { "<span class=\"sev \($0.rawValue)\">\($0.rawValue)</span>" } ?? ""
+                return "<section class=\"finding \(sev?.rawValue ?? "")\"><h3>\(tag)\(inline(title))</h3>\n"
+                    + blocks(bs) + "</section>"
+            }
+        }.joined(separator: "\n")
+    }
+
+    /// Markdown blocks to HTML, grouping consecutive list items into lists.
+    static func blocks(_ input: [MarkdownBlock]) -> String {
         var out: [String] = []
         var openList: String?
         func close() { if let l = openList { out.append("</\(l)>"); openList = nil } }
         func list(_ tag: String) { if openList != tag { close(); out.append("<\(tag)>"); openList = tag } }
 
-        for block in MarkdownBlock.parse(markdown) {
+        for block in input {
             switch block {
             case .bullet(let indent, let t):
                 list("ul"); out.append("<li style=\"margin-left:\(indent * 20)px\">\(inline(t))</li>")
@@ -119,10 +138,12 @@ enum ReviewPage {
 
     private static let css = """
     :root { --bg:#ffffff; --fg:#111418; --muted:#3d4450; --line:#d4d8de; --soft:#f2f4f7;
-            --accent:#0b57d0; --code:#eef1f5; }
+            --accent:#0b57d0; --code:#eef1f5;
+            --green:#1a7f37; --yellow:#b58100; --red:#cf222e; --orange:#c2410c; }
     @media (prefers-color-scheme: dark) {
       :root { --bg:#0f1115; --fg:#f2f4f7; --muted:#c3c9d2; --line:#343a44; --soft:#181b21;
-              --accent:#8ab4ff; --code:#1c2029; } }
+              --accent:#8ab4ff; --code:#1c2029;
+              --green:#2ea043; --yellow:#d29922; --red:#f85149; --orange:#f0883e; } }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--fg);
            font:17px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
@@ -150,6 +171,21 @@ enum ReviewPage {
     pre code { background:none; padding:0; font-size:14px; }
     blockquote { margin:0 0 14px; padding:4px 16px; border-left:3px solid var(--accent); color:var(--muted); }
     hr { border:0; border-top:1px solid var(--line); margin:28px 0; }
+    .verdict { display:flex; gap:14px; align-items:flex-start; padding:16px 18px; border-radius:12px;
+               border:1.5px solid var(--vc); background:color-mix(in srgb, var(--vc) 13%, var(--bg)); margin:0 0 24px; }
+    .verdict strong { font-size:20px; display:block; margin-bottom:2px; }
+    .verdict .icon { flex:none; width:32px; height:32px; border-radius:50%; background:var(--vc); color:#fff;
+                     display:grid; place-items:center; font-weight:700; font-size:17px; }
+    .verdict.approve { --vc:var(--green); } .verdict.comment { --vc:var(--yellow); } .verdict.changes { --vc:var(--red); }
+    .finding { border:1px solid var(--line); border-left:4px solid var(--sc, var(--line)); border-radius:10px;
+               padding:14px 18px 4px; margin:0 0 14px; background:var(--soft); }
+    .finding h3 { margin:0 0 10px; font-size:16px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+    .finding.blocker { --sc:var(--red); } .finding.should-fix { --sc:var(--orange); } .finding.nit { --sc:var(--muted); }
+    .finding pre { background:var(--bg); }
+    .finding blockquote { border-left-color:var(--sc, var(--accent)); color:var(--fg); font-style:italic; }
+    .sev { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; padding:2px 8px;
+           border-radius:99px; color:#fff; background:var(--sc); flex:none; }
+    .finding.nit .sev { color:var(--bg); }
     footer { margin-top:48px; padding-top:16px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }
     """
 }

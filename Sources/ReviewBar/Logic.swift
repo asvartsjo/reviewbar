@@ -535,14 +535,40 @@ enum ClaudeErrors {
 enum Backend {
     /// Unsets API keys so Claude Code uses your Max subscription login, never API billing.
     static let claudeBin = "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude"
-    /// Diff cap in UTF-8 bytes. Bytes, not characters: the Terminal follow-up passes the
-    /// whole prompt as one argument, which macOS limits to about 1 MB (ARG_MAX).
-    static let maxDiffBytes = 250_000
+    /// Diff budget in UTF-8 bytes (about 100k tokens). Bytes, not characters: the Terminal
+    /// follow-up passes the whole prompt as one argument, which macOS limits to about 1 MB (ARG_MAX).
+    static let maxDiffBytes = 400_000
     /// Refuse to build a Terminal command bigger than this, well under ARG_MAX.
     static let maxArgBytes = 800_000
     /// Headless reviews get no tools and no MCP servers: the diff is untrusted input
     /// and the model only needs to read the prompt.
     static let headlessFlags = "-p --output-format text --tools '' --strict-mcp-config"
+
+    /// Shared output shape for reviews. ReviewDoc renders the VERDICT line as a colored banner
+    /// and each `###` finding as its own box, so keep those markers stable.
+    static let reviewStyle = """
+        STYLE
+        - Be brief. Short sentences, no filler, no restating the diff. If unsure, say so. Never invent line numbers.
+        - Suggested comments must sound like a colleague wrote them: one or two plain sentences, friendly, direct, no "Great job!", no "Consider leveraging", no bullet lists, no emoji. Questions are fine ("Could this be null here?").
+        """
+
+    static let findingFormat = """
+        Each finding is its own block, ordered blocker → should-fix → nit:
+
+        ### [blocker|should-fix|nit] `path/to/file.ext:LINE` Short title
+        ```
+        the relevant code, max ~6 lines
+        ```
+        Why: one or two sentences.
+        > Suggested comment, one or two sentences, in a human voice.
+
+        (LINE = new-file line number from the @@ hunk headers.) Skip the code block if it adds nothing. No findings: write "Nothing to flag."
+        """
+
+    static let verdictLine = """
+        The FIRST line of your answer must be exactly:
+        VERDICT: Approve | Comment | Request changes — one short reason
+        """
 
     static let rules = """
     RULES
@@ -988,14 +1014,23 @@ enum Backend {
         let repo = pr.repository.nameWithOwner
         let meta = try await sh("gh pr view \(pr.number) --repo \(q(repo)) "
             + "--json title,body,author,baseRefName,headRefName,changedFiles,additions,deletions")
-        var diff = try await sh("gh pr diff \(pr.number) --repo \(q(repo))")
-        var note = ""
-        if diff.utf8.count > maxDiffBytes {
-            // May cut a multi-byte character in half; decoding turns that into U+FFFD.
-            diff = String(decoding: Data(diff.utf8.prefix(maxDiffBytes)), as: UTF8.self)
-            note = "(NOTE: diff truncated at \(maxDiffBytes / 1000) KB. Say so if it limits your answer.)\n"
+        let fitted = DiffBudget.fit(try await fullDiff(pr), maxBytes: maxDiffBytes)
+        return (meta, fitted.diff, fitted.note)
+    }
+
+    /// `gh pr diff`, or for PRs GitHub won't diff (over 20,000 lines or 300 files), the diff
+    /// rebuilt from the per-file patches.
+    private static func fullDiff(_ pr: PR) async throws -> String {
+        let repo = pr.repository.nameWithOwner
+        do {
+            return try await sh("gh pr diff \(pr.number) --repo \(q(repo))")
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            let out = try await sh("gh api --paginate --slurp \(q("repos/\(repo)/pulls/\(pr.number)/files?per_page=100"))")
+            let pages = try JSONDecoder().decode([[DiffBudget.FileEntry]].self, from: Data(out.utf8))
+            return DiffBudget.diff(from: pages.flatMap { $0 })
         }
-        return (meta, diff, note)
     }
 
     /// Fresh review prompt.
@@ -1006,26 +1041,23 @@ enum Backend {
 
         \(rules)
 
-        OUTPUT (markdown, concise, candid; if unsure, say so; never invent line numbers)
+        \(reviewStyle)
+
+        OUTPUT (markdown)
+
+        \(verdictLine)
 
         ## Summary
-        3-5 bullets: what changed and why, plus size and risk level.
+        2-4 short bullets: what changed, size, risk.
 
-        ## Lean
-        One of: approve / comment / request changes, with a one-line reason.
+        ## Findings
+        \(findingFormat)
 
-        ## Things to check
-        Ordered by severity (blocker, should-fix, nit). For each item:
-        - `path/to/file.ext:LINE` (LINE = new-file line number, computed from the @@ hunk headers)
-        - The relevant code quoted in a fenced block (max ~8 lines) so I can find it fast
-        - What concerns you and why
-        - A question or observation I could raise with the author, phrased as a starting point I will rewrite in my own words
-
-        ## What's good
-        Short. Things worth acknowledging to the author.
+        ## Good
+        One or two bullets worth saying to the author. Omit if nothing stands out.
 
         ## Missing
-        Tests, docs, migrations, edge cases not covered.
+        Tests, docs or edge cases not covered, one bullet each. Omit if none.
 
         PR: \(pr.repository.nameWithOwner)#\(pr.number) by \(pr.author.login)
         URL: \(pr.url)
@@ -1171,11 +1203,10 @@ enum Backend {
 
         var diff = "", note = "", fellBack = true
         if let info, info.isIncremental {
-            diff = try await sh("gh api -H 'Accept: application/vnd.github.diff' \(q(path))")
-            if diff.utf8.count > maxDiffBytes {
-                diff = String(decoding: Data(diff.utf8.prefix(maxDiffBytes)), as: UTF8.self)
-                note = "(NOTE: diff truncated at \(maxDiffBytes / 1000) KB. Say so if it limits your answer.)\n"
-            }
+            let fitted = DiffBudget.fit(
+                try await sh("gh api -H 'Accept: application/vnd.github.diff' \(q(path))"), maxBytes: maxDiffBytes)
+            diff = fitted.diff
+            note = fitted.note
             fellBack = false
         }
 
@@ -1191,19 +1222,22 @@ enum Backend {
 
             \(rules)
 
-            OUTPUT (markdown, concise, candid; if unsure, say so; never invent line numbers)
+            \(reviewStyle)
+
+            OUTPUT (markdown)
+
+            \(verdictLine)
+            (Take the earlier concerns into account.)
 
             ## What changed
-            2-4 bullets on what the new commits do.
+            2-3 short bullets on what the new commits do.
 
             ## Earlier concerns
-            For each item in the earlier notes' "Things to check": resolved / partly / still open / can't tell from this diff, with `path:line` and one line why. Use FEEDBACK ON GITHUB to see what the author said about each.
+            One bullet per earlier finding: **resolved** / **partly** / **still open** / **can't tell**, `path:line`, a few words why. Use FEEDBACK ON GITHUB to see what the author said.
 
-            ## New things to check
-            Only for code in the new commits. Same format as before: `path:line` (new-file line number from the @@ hunk headers), the code quoted in a fenced block (max ~8 lines), the concern, and a question I could raise.
-
-            ## Lean
-            One of: approve / comment / request changes, with a one-line reason, taking the earlier concerns into account.
+            ## New findings
+            Only for code in the new commits.
+            \(findingFormat)
 
             PR: \(pr.repository.nameWithOwner)#\(pr.number) by \(pr.author.login)
             URL: \(pr.url)
@@ -1227,18 +1261,19 @@ enum Backend {
 
             \(rules)
 
-            OUTPUT (markdown, concise, candid; if unsure, say so; never invent line numbers)
+            \(reviewStyle)
 
-            Start with one line saying the branch was rebased, so this compares against the full diff.
+            OUTPUT (markdown)
+
+            \(verdictLine)
+            Then one line saying the branch was rebased, so this compares against the full diff.
 
             ## Earlier concerns
-            For each item in the earlier notes' "Things to check": resolved / partly / still open, with `path:line` and one line why.
+            One bullet per earlier finding: **resolved** / **partly** / **still open**, `path:line`, a few words why.
 
-            ## New things to check
-            Anything in the current diff that the earlier notes did not cover. `path:line`, quoted code (max ~8 lines), the concern, and a question I could raise.
-
-            ## Lean
-            One of: approve / comment / request changes, with a one-line reason.
+            ## New findings
+            Anything in the current diff the earlier notes did not cover.
+            \(findingFormat)
 
             PR: \(pr.repository.nameWithOwner)#\(pr.number) by \(pr.author.login)
             URL: \(pr.url)

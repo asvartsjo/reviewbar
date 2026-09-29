@@ -88,12 +88,54 @@ struct MarkdownView: View {
     let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(MarkdownBlock.parse(text).enumerated()), id: \.offset) { _, block in
-                view(for: block)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(ReviewDoc.parse(text).enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .verdict(let v, let reason): verdictBanner(v, reason)
+                case .block(let block): view(for: block)
+                case .finding(let sev, let title, let blocks): findingBox(sev, title, blocks)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func verdictBanner(_ v: ReviewDoc.Verdict, _ reason: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: v.symbol).foregroundStyle(v.color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(v.title).font(.system(size: 14, weight: .bold))
+                if !reason.isEmpty { Text(inline(reason)) }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(v.color.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(v.color.opacity(0.6)))
+    }
+
+    private func findingBox(_ sev: ReviewDoc.Severity?, _ title: String, _ blocks: [MarkdownBlock]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let sev {
+                    Text(sev.rawValue.uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(sev.color.opacity(0.2), in: Capsule())
+                        .foregroundStyle(sev.color)
+                }
+                Text(inline(title)).font(.system(size: 13, weight: .semibold))
+            }
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in view(for: b) }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .leading) {
+            UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 8)
+                .fill((sev?.color ?? .secondary)).frame(width: 3)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12)))
     }
 
     @ViewBuilder private func view(for block: MarkdownBlock) -> some View {
@@ -137,5 +179,110 @@ struct MarkdownView: View {
     private func inline(_ s: String) -> AttributedString {
         let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: s, options: opts)) ?? AttributedString(s)
+    }
+}
+
+/// A review split into what gets drawn specially: the verdict banner and one box per finding.
+enum ReviewDoc {
+    enum Verdict: Equatable {
+        case approve, comment, requestChanges
+        var title: String {
+            switch self { case .approve: "Approve"; case .comment: "Comment"; case .requestChanges: "Request changes" }
+        }
+    }
+
+    enum Severity: String { case blocker, shouldFix = "should-fix", nit }
+
+    enum Segment: Equatable {
+        case verdict(Verdict, reason: String)
+        case block(MarkdownBlock)
+        case finding(severity: Severity?, title: String, blocks: [MarkdownBlock])
+    }
+
+    /// Pure, for tests. Findings are `###` headings; a finding runs until the next heading or rule.
+    /// The verdict comes from a "VERDICT: …" line, or the first line under an old "## Lean" heading.
+    static func parse(_ markdown: String) -> [Segment] {
+        var out: [Segment] = []
+        var finding: (Severity?, String, [MarkdownBlock])?
+        var leanNext = false, haveVerdict = false
+        func close() { if let f = finding { out.append(.finding(severity: f.0, title: f.1, blocks: f.2)); finding = nil } }
+
+        for block in MarkdownBlock.parse(markdown) {
+            if !haveVerdict, let v = verdict(in: block, afterLean: leanNext) {
+                close(); out.append(.verdict(v.0, reason: v.1)); haveVerdict = true; leanNext = false
+                continue
+            }
+            switch block {
+            case .heading(let level, let t) where level >= 3:
+                close()
+                let (sev, title) = severity(t)
+                finding = (sev, title, [])
+            case .heading(_, let t):
+                close()
+                leanNext = ["lean", "verdict"].contains(t.lowercased())
+                if !leanNext || haveVerdict { out.append(.block(block)) }
+            case .rule:
+                close(); out.append(.block(block))
+            default:
+                if finding != nil { finding!.2.append(block) } else { out.append(.block(block)) }
+            }
+        }
+        close()
+        return out
+    }
+
+    private static func verdict(in block: MarkdownBlock, afterLean: Bool) -> (Verdict, String)? {
+        let text: String
+        switch block {
+        case .paragraph(let t), .bullet(_, let t): text = t
+        default: return nil
+        }
+        var line = text.components(separatedBy: "\n")[0].replacingOccurrences(of: "*", with: "")
+        if line.uppercased().hasPrefix("VERDICT:") {
+            line = String(line.dropFirst("VERDICT:".count))
+        } else if !afterLean {
+            return nil
+        }
+        line = line.trimmingCharacters(in: .whitespaces)
+        let lower = line.lowercased()
+        let v: Verdict
+        if lower.hasPrefix("request") { v = .requestChanges }
+        else if lower.hasPrefix("approve") { v = .approve }
+        else if lower.hasPrefix("comment") { v = .comment }
+        else { return nil }
+        var reason = line.drop { $0 != "—" && $0 != "-" && $0 != ":" && $0 != "," }.dropFirst()
+            .trimmingCharacters(in: .whitespaces)
+        if text.contains("\n") { reason += " " + text.components(separatedBy: "\n").dropFirst().joined(separator: " ") }
+        return (v, reason)
+    }
+
+    /// "[blocker] `a.swift:3` Title" → (.blocker, "`a.swift:3` Title").
+    private static func severity(_ t: String) -> (Severity?, String) {
+        let s = t.trimmingCharacters(in: .whitespaces)
+        for sev in [Severity.blocker, .shouldFix, .nit] {
+            for form in ["[\(sev.rawValue)]", "\(sev.rawValue):", "**\(sev.rawValue)**"]
+            where s.lowercased().hasPrefix(form) {
+                return (sev, s.dropFirst(form.count).trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return (nil, s)
+    }
+}
+
+extension ReviewDoc.Verdict {
+    var color: Color {
+        switch self { case .approve: .green; case .comment: .yellow; case .requestChanges: .red }
+    }
+    var symbol: String {
+        switch self {
+        case .approve: "checkmark.circle.fill"; case .comment: "text.bubble.fill"
+        case .requestChanges: "xmark.octagon.fill"
+        }
+    }
+}
+
+extension ReviewDoc.Severity {
+    var color: Color {
+        switch self { case .blocker: .red; case .shouldFix: .orange; case .nit: .gray }
     }
 }

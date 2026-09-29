@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
+import UserNotifications
 
 private enum Tab: String, CaseIterable {
     case pending = "Awaiting me"
@@ -46,6 +48,11 @@ struct ContentView: View {
             }
         }
         .frame(width: 480, height: 580)
+        // Opening the popover refreshes data older than a minute.
+        .onAppear { Task { await vm.refreshIfStale() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            Task { await vm.refreshIfStale() }
+        }
     }
 
     // MARK: header
@@ -442,9 +449,28 @@ struct SettingsView: View {
     @AppStorage(ClaudeSettings.reviewEffortKey) private var reviewEffort = ClaudeSettings.reviewEffortDefault
     @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
     @AppStorage(ClaudeSettings.quickEffortKey) private var quickEffort = ClaudeSettings.quickEffortDefault
+    @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
+    @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
+    @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
+    @State private var notificationsAllowed: UNAuthorizationStatus?
+    @State private var openAtLogin = LoginItem.isAvailable && LoginItem.status == .enabled
+    @State private var loginProblem: String?
     let done: () -> Void
 
     var body: some View {
+        VStack(spacing: 0) {
+            ScrollView { form.padding(10) }
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done", action: done).buttonStyle(.borderedProminent)
+            }
+            .padding(10)
+        }
+        .onAppear { Notifier.authorizationStatus { notificationsAllowed = $0 } }
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Repositories").font(.headline)
             Text("PRs from these repos show up in every tab. Mix any orgs and users.")
@@ -498,6 +524,7 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.bordered(alternatesRowBackgrounds: true))
+            .frame(height: 130)
             .overlay {
                 if repos.isEmpty {
                     Text("No repos yet").font(.callout).foregroundStyle(.secondary)
@@ -537,12 +564,63 @@ struct SettingsView: View {
                  + "summaries are handed to it as a starting point.")
                 .font(.caption2).foregroundStyle(.secondary)
 
-            HStack {
-                Spacer()
-                Button("Done", action: done).buttonStyle(.borderedProminent)
+            Divider()
+            Text("Notifications").font(.headline)
+            Toggle("New review requests", isOn: $notifyRequests)
+            Toggle("Replies on your review threads", isOn: $notifyReplies)
+            Toggle("Feedback on your PRs", isOn: $notifyFeedback)
+            notificationHint
+
+            Divider()
+            Text("Startup").font(.headline)
+            Toggle("Open at login", isOn: $openAtLogin)
+                .disabled(!LoginItem.isAvailable)
+                .onChange(of: openAtLogin) { on in setOpenAtLogin(on) }
+            if !LoginItem.isAvailable {
+                Text("Needs the app bundle: build it with scripts/make-app.sh and run it from /Applications.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else if LoginItem.status == .requiresApproval {
+                Text("Approve ReviewBar in System Settings › General › Login Items.")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+            if let loginProblem {
+                Text(loginProblem).font(.caption2).foregroundStyle(.red)
             }
         }
-        .padding(10)
+        .toggleStyle(.checkbox)
+    }
+
+    @ViewBuilder private var notificationHint: some View {
+        if !Notifier.isAvailable {
+            Text("Notifications need the app bundle: build it with scripts/make-app.sh.")
+                .font(.caption2).foregroundStyle(.secondary)
+        } else if notificationsAllowed == .denied {
+            HStack {
+                Text("Notifications are turned off for ReviewBar in System Settings.")
+                    .font(.caption2).foregroundStyle(.orange)
+                Button("Open Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.borderless).font(.caption2)
+            }
+        } else {
+            Text("Clicking a notification opens the PR on GitHub. Several at once are grouped into one.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func setOpenAtLogin(_ on: Bool) {
+        let current = LoginItem.status == .enabled
+        guard on != current else { return }
+        do {
+            try LoginItem.set(on)
+            loginProblem = nil
+        } catch {
+            loginProblem = "Couldn't change the login item: \(error.localizedDescription)"
+            openAtLogin = LoginItem.status == .enabled
+        }
     }
 
     /// Normalises each pasted entry, checks `gh` can read it, then appends the canonical name.

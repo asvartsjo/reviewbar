@@ -1076,29 +1076,72 @@ final class ReviewViewModel: ObservableObject {
     @Published private var dismissed: [String: String] =
         UserDefaults.standard.dictionary(forKey: "dismissedReplies") as? [String: String] ?? [:]
     private var timer: Timer?
+    private var lastRefresh: Date?
+    private var refreshAgain = false
+    /// What the previous successful refresh saw, per list; nil until the first one (the baseline).
+    private var seenRequests: Set<String>?
+    private var seenReplies: [String: String]?
+    private var seenFeedback: [String: String]?
+
+    static let refreshInterval: TimeInterval = 300
+    /// Opening the popover refreshes if the data is older than this.
+    static let staleAfter: TimeInterval = 60
 
     init() {
         RepoList.migrateLegacySettings()
         saved = Store.load().sorted { $0.date > $1.date }
         for s in saved { reviews[s.id] = .done(s.text) }
+        Notifier.requestAuthorization()
 
         Task { await refresh() }
-        timer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
         }
     }
 
+    /// For opening the popover: refresh unless it happened within the last minute.
+    func refreshIfStale() async {
+        if let last = lastRefresh, Date().timeIntervalSince(last) < Self.staleAfter { return }
+        await refresh()
+    }
+
     func refresh() async {
+        // One at a time; a request made meanwhile (e.g. after editing Settings) runs right after.
+        if loading { refreshAgain = true; return }
         loading = true
-        defer { loading = false }
         async let fetchedPRs = Backend.fetchPRs()
         async let fetchedReplies = Backend.fetchReplies()
         async let fetchedMine = Backend.fetchMyPRs()
         var errors: [String] = []
-        do { prs = try await fetchedPRs } catch { errors.append(error.localizedDescription) }
-        do { replies = try await fetchedReplies } catch { errors.append("Replies: \(error.localizedDescription)") }
-        do { myPRs = try await fetchedMine } catch { errors.append("My PRs: \(error.localizedDescription)") }
+        var alerts: [ReviewAlert] = []
+
+        // Each list only updates (and only notifies) when its own fetch succeeded.
+        do {
+            prs = try await fetchedPRs
+            alerts += AlertDiff.newRequests(prs, seen: seenRequests).map(ReviewAlert.request)
+            seenRequests = Set(prs.map(\.url))
+        } catch { errors.append(error.localizedDescription) }
+        do {
+            replies = try await fetchedReplies
+            alerts += AlertDiff.newer(visibleReplies, seen: seenReplies, url: \.pr.url, latestAt: \.latestAt)
+                .map(ReviewAlert.reply)
+            seenReplies = AlertDiff.latestByURL(replies, url: \.pr.url, latestAt: \.latestAt)
+        } catch { errors.append("Replies: \(error.localizedDescription)") }
+        do {
+            myPRs = try await fetchedMine
+            alerts += AlertDiff.newer(visibleFeedback, seen: seenFeedback, url: \.pr.url, latestAt: \.latestAt)
+                .map(ReviewAlert.feedback)
+            seenFeedback = AlertDiff.latestByURL(myPRs, url: \.pr.url, latestAt: \.latestAt)
+        } catch { errors.append("My PRs: \(error.localizedDescription)") }
+
         self.error = errors.isEmpty ? nil : errors.joined(separator: "\n")
+        Notifier.post(alerts)
+        lastRefresh = Date()
+        loading = false
+        if refreshAgain {
+            refreshAgain = false
+            await refresh()
+        }
     }
 
     /// Replies you have not dismissed (or that are newer than what you dismissed).

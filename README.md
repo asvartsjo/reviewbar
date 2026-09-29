@@ -7,6 +7,8 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 - Lists open PRs where you are a requested reviewer, in the repos you choose (any mix of orgs and users).
 - **Review with Claude** runs `claude -p` headlessly and shows a private summary, a lean (approve / comment / request changes), and findings with `file:line`, quoted code and a question to ask the author.
 - **Review changes since…**: when a PR you reviewed gets new commits, review only those commits against your earlier notes (which concerns are resolved, still open, and what's new). If the branch was rebased or force-pushed the new commits can't be separated, so it falls back to the full diff with your notes, and says so. **Full review** is still there.
+- **Notifications** for new review requests, replies on your review threads and feedback on your PRs (each can be turned off in Settings). Clicking one opens the PR; several at once are grouped. The first refresh after launch only sets a baseline, so starting the app doesn't flood you.
+- **Open at login** (Settings › Startup). Refreshes every 5 minutes and whenever you open the popover if the data is over a minute old.
 - Reviews are saved locally and reload on launch, labelled with the model and effort that wrote them.
 - **Settings › Claude** picks a model and effort for anything that reads code (Review with Claude, every Terminal session), (default Opus), and a separate pair (default Sonnet, low effort) for **Summarise feedback**. Models are Claude Code aliases, so they follow the latest release in each family. That summary reads only comments, never the diff, so it reports what people said and what's waiting on you, not whether a fix is right. Terminal sessions get it as a starting point together with the full comments and diff. "Default" passes no model flag, so Claude Code's own settings apply.
 - **Replies** lists open PRs you reviewed where someone answered in one of your unresolved review threads (the last comment isn't yours). Dismiss one to hide it until the next reply. The menu bar count includes them.
@@ -35,7 +37,7 @@ The app is ad-hoc signed and not sandboxed (it runs `gh` and `claude`). No Xcode
 
 ### Developing
 
-- `swift run` starts it straight from the source tree. It uses a separate settings domain from the `.app`, so add your repos in each.
+- `swift run` starts it straight from the source tree. Notifications and Open at login need the `.app` bundle, so they are disabled there. It uses a separate settings domain from the `.app`, so add your repos in each.
 - `swift test` runs the unit tests (repo name parsing, model settings, feedback and reply counting from sample GitHub responses).
 - `open Package.swift` opens it in Xcode.
 - CI (GitHub Actions, macOS) builds, tests and bundles the app on every push; the zipped `.app` is attached to each run. A downloaded build is quarantined by macOS: right-click › Open the first time, or `xattr -dr com.apple.quarantine ReviewBar.app`.

@@ -263,7 +263,8 @@ enum Backend {
             .appendingPathComponent("review-\(pr.number)-\(UUID().uuidString.prefix(6)).md")
         try prompt.write(to: file, atomically: true, encoding: .utf8)
 
-        let cmd = "\(claudeBin) \"$(cat \(file.path))\""
+        // Quote the path, and delete the file once read: it holds the full diff.
+        let cmd = "\(claudeBin) \"$(cat \(q(file.path)); rm -f \(q(file.path)))\""
         let escaped = cmd.replacingOccurrences(of: "\\", with: "\\\\")
                          .replacingOccurrences(of: "\"", with: "\\\"")
         let script = "tell application \"Terminal\"\nactivate\ndo script \"\(escaped)\"\nend tell"
@@ -315,6 +316,7 @@ final class ReviewViewModel: ObservableObject {
     }
 
     func review(_ pr: PR) {
+        let previous = reviews[pr.reviewKey]
         reviews[pr.reviewKey] = .running
         Task {
             do {
@@ -322,7 +324,13 @@ final class ReviewViewModel: ObservableObject {
                 reviews[pr.reviewKey] = .done(text)
                 persist(pr, text)
             } catch {
-                reviews[pr.reviewKey] = .failed(error.localizedDescription)
+                // A failed re-run must not hide the review that is still saved.
+                if case .done = previous {
+                    reviews[pr.reviewKey] = previous
+                    self.error = "Re-run failed: \(error.localizedDescription)"
+                } else {
+                    reviews[pr.reviewKey] = .failed(error.localizedDescription)
+                }
             }
         }
     }

@@ -7,6 +7,7 @@ private enum Tab: String, CaseIterable {
     case pending = "Awaiting me"
     case replies = "Replies"
     case mine = "My PRs"
+    case mentions = "Mentions"
     case saved = "Saved"
 }
 
@@ -45,6 +46,7 @@ struct ContentView: View {
                 case .pending: pendingList
                 case .replies: repliesList
                 case .mine: mineList
+                case .mentions: mentionsList
                 case .saved: savedList
                 }
             }
@@ -169,6 +171,40 @@ struct ContentView: View {
         }
     }
 
+    // MARK: mentions
+
+    private var mentionsList: some View {
+        Group {
+            if vm.visibleMentions.isEmpty && !vm.loading {
+                empty("at", "No @mentions of you in the last week.")
+            } else {
+                List(vm.visibleMentions) { m in
+                    Button { if let u = URL(string: m.url) { NSWorkspace.shared.open(u) } } label: { mentionRow(m) }
+                        .buttonStyle(.plain)
+                        .contextMenu { Button("Dismiss") { vm.dismissMention(m) } }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+
+    private func mentionRow(_ m: Mention) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(verbatim: "\(m.repo) #\(m.number)").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Dismiss") { vm.dismissMention(m) }.buttonStyle(.borderless).font(.caption)
+            }
+            Text(m.title).font(.body).lineLimit(2)
+            Text("\(m.author) mentioned you \(age(m.updatedAt))").font(.caption).foregroundStyle(.blue)
+            if !m.snippet.isEmpty {
+                Text(m.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
     private func replyRow(_ r: ReplyPR) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
@@ -278,6 +314,7 @@ struct ContentView: View {
         case .pending where !vm.prs.isEmpty: return "\(t.rawValue) (\(vm.prs.count))"
         case .replies where !vm.visibleReplies.isEmpty: return "\(t.rawValue) (\(vm.visibleReplies.count))"
         case .mine where !vm.visibleFeedback.isEmpty: return "\(t.rawValue) (\(vm.visibleFeedback.count))"
+        case .mentions where !vm.visibleMentions.isEmpty: return "\(t.rawValue) (\(vm.visibleMentions.count))"
         default: return t.rawValue
         }
     }

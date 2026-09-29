@@ -183,7 +183,8 @@ enum LoginItem {
 }
 
 /// An @mention of you (or a team you're in) from GitHub's notifications.
-struct Mention: Equatable {
+struct Mention: Equatable, Identifiable {
+    var id: String { url }
     let repo: String
     let number: Int
     let title: String

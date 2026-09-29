@@ -775,30 +775,43 @@ enum Backend {
         let updatedAt: String
     }
 
-    /// Unread @mentions since `since`, in the given repos (all repos when empty). Read-only.
+    /// @mentions since `since`, read on GitHub or not, in the given repos (all when empty). Read-only.
     static func fetchMentions(since: String, repos: [String]) async -> [Mention] {
         let jq = #"[.[] | select(.reason == "mention" or .reason == "team_mention") | "#
             + #"{repo: .repository.full_name, title: .subject.title, url: .subject.url, "#
             + #"comment: .subject.latest_comment_url, updatedAt: .updated_at}]"#
-        guard let out = try? await sh("gh api \(q("notifications?participating=true&since=\(since)")) --jq \(q(jq))"),
+        let query = "notifications?participating=true&all=true&per_page=50&since=\(since)"
+        guard let out = try? await sh("gh api \(q(query)) --jq \(q(jq))"),
               let threads = try? JSONDecoder().decode([MentionThread].self, from: Data(out.utf8)) else { return [] }
         let wanted = Set(repos.map { $0.lowercased() })
         var result: [Mention] = []
-        for t in threads.prefix(5) where wanted.isEmpty || wanted.contains(t.repo.lowercased()) {
+        for t in threads.filter({ wanted.isEmpty || wanted.contains($0.repo.lowercased()) }).prefix(15) {
             guard let api = t.url, let number = Int(api.split(separator: "/").last ?? "") else { continue }
             var author = "Someone", snippet = "", url = "https://github.com/\(t.repo)/pull/\(number)"
-            if let c = t.comment, c.hasPrefix("https://api.github.com/"),
+            let cacheKey = (t.comment ?? api) + "@" + t.updatedAt
+            if let hit = await mentionCache.get(cacheKey) {
+                (author, snippet, url) = hit
+            } else if let c = t.comment, c.hasPrefix("https://api.github.com/"),
                let out = try? await sh("gh api \(q(c)) --jq '{u: .user.login, b: .body, h: .html_url}'"),
                let d = try? JSONDecoder().decode([String: String?].self, from: Data(out.utf8)) {
                 author = (d["u"] ?? nil) ?? author
                 snippet = Self.snippet((d["b"] ?? nil) ?? "")
                 if let h = d["h"] ?? nil, h.hasPrefix("https://github.com/") { url = h }
+                await mentionCache.set(cacheKey, (author, snippet, url))
             }
             result.append(Mention(repo: t.repo, number: number, title: t.title, author: author,
                                   snippet: snippet, url: url, updatedAt: t.updatedAt))
         }
         return result
     }
+
+    /// Comment details by comment URL and update time, so refreshes only fetch new mentions.
+    private actor MentionCache {
+        private var items: [String: (String, String, String)] = [:]
+        func get(_ k: String) -> (String, String, String)? { items[k] }
+        func set(_ k: String, _ v: (String, String, String)) { items[k] = v }
+    }
+    private static let mentionCache = MentionCache()
 
     /// First ~140 characters of a comment on one line, quotes and code fences dropped. Pure, for tests.
     static func snippet(_ body: String) -> String {
@@ -1771,20 +1784,9 @@ final class ReviewViewModel: ObservableObject {
     private func watchNotifications() async {
         var etag: String?
         var interval: TimeInterval = 60
-        var mentionsSince = ISO8601DateFormatter().string(from: Date())
-        var notified: Set<String> = []
         while !Task.isCancelled {
             if let poll = await Backend.pollNotifications(etag: etag) {
-                if poll.changed, etag != nil {
-                    await refresh()
-                    let checkedAt = ISO8601DateFormatter().string(from: Date())
-                    for m in await Backend.fetchMentions(since: mentionsSince, repos: RepoList.load())
-                    where !notified.contains(m.url + m.updatedAt) {
-                        notified.insert(m.url + m.updatedAt)
-                        Notifier.mention(m)
-                    }
-                    mentionsSince = checkedAt
-                }
+                if poll.changed, etag != nil { await refresh() }
                 etag = poll.etag ?? etag
                 interval = max(poll.interval ?? 60, 30)
             }
@@ -1799,6 +1801,7 @@ final class ReviewViewModel: ObservableObject {
         seenRequests = nil
         seenReplies = nil
         seenFeedback = nil
+        seenMentions = nil
         await refresh()
     }
 
@@ -1816,6 +1819,8 @@ final class ReviewViewModel: ObservableObject {
         async let fetchedPRs = Backend.fetchPRs(skipping: skip)
         async let fetchedReplies = Backend.fetchReplies(skipping: skip)
         async let fetchedMine = Backend.fetchMyPRs(skipping: skip)
+        let week = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 86_400))
+        async let fetchedMentions = Backend.fetchMentions(since: week, repos: RepoList.load())
         var errors: [String] = []
         var alerts: [ReviewAlert] = []
 
@@ -1839,6 +1844,12 @@ final class ReviewViewModel: ObservableObject {
                 .map(ReviewAlert.feedback)
             seenFeedback = AlertDiff.latestByURL(myPRs, url: \.pr.url, latestAt: \.latestAt)
         } catch { errors.append("My PRs: \(error.localizedDescription)") }
+
+        // Mentions are best effort: an empty list on failure, and only new ones notify.
+        mentions = await fetchedMentions
+        let newMentions = AlertDiff.newer(visibleMentions, seen: seenMentions, url: \.url, latestAt: \.updatedAt)
+        seenMentions = AlertDiff.latestByURL(mentions, url: \.url, latestAt: \.updatedAt)
+        newMentions.forEach(Notifier.mention)
 
         // A failed search is usually one repo gh can't read: find it, leave it out, try again.
         if !errors.isEmpty {
@@ -1874,6 +1885,16 @@ final class ReviewViewModel: ObservableObject {
 
     func dismissReplies(_ r: ReplyPR) { dismiss(r.pr.url, until: r.latestAt) }
 
+    @Published var mentions: [Mention] = []
+    private var seenMentions: [String: String]?
+
+    /// Mentions from the last week you have not dismissed.
+    var visibleMentions: [Mention] {
+        mentions.filter { $0.updatedAt > (dismissed["mention:" + $0.url] ?? "") }
+    }
+
+    func dismissMention(_ m: Mention) { dismiss("mention:" + m.url, until: m.updatedAt) }
+
     /// Your PRs with feedback you have not dismissed (or newer than what you dismissed).
     var visibleFeedback: [FeedbackPR] {
         myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
@@ -1896,6 +1917,7 @@ final class ReviewViewModel: ObservableObject {
         Set(prs.map(\.url))
             .union(visibleReplies.map(\.pr.url))
             .union(visibleFeedback.map(\.pr.url))
+            .union(visibleMentions.map(\.url))
             .count
     }
 

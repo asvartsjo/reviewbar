@@ -275,8 +275,13 @@ struct ContentView: View {
 
 struct DetailView: View {
     @EnvironmentObject var vm: ReviewViewModel
-    @AppStorage(TerminalApp.key) private var terminalRaw = TerminalApp.terminal.rawValue
-    private var terminalName: String { (TerminalApp(rawValue: terminalRaw) ?? .terminal).name }
+    @AppStorage(TerminalApp.key) private var terminalRaw = ""
+    private var terminal: TerminalApp { TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed) }
+
+    /// "Follow up in Ghostty", or "Follow up (copy command)" when no terminal can be driven.
+    private func terminalLabel(_ verb: String) -> String {
+        terminal == .copy ? "\(verb) (copy command)" : "\(verb) in \(terminal.name)"
+    }
     let pr: PR
     let back: () -> Void
 
@@ -400,11 +405,14 @@ struct DetailView: View {
     @ViewBuilder private var actions: some View {
         HStack {
             if vm.isMine(pr) {
-                Button("Work through feedback in \(terminalName)") { vm.openTerminal(pr) }
+                Button(terminalLabel("Work through feedback")) { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
             } else {
                 reviewActions
             }
+        }
+        if let notice = vm.terminalNotice {
+            Text(notice).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -416,7 +424,7 @@ struct DetailView: View {
                 Text("Claude is reading the diff…").font(.caption)
                 Button("Cancel") { vm.cancelReview(pr) }.font(.caption)
             case .done(let text):
-                Button("Follow up in \(terminalName)") { vm.openTerminal(pr) }
+                Button(terminalLabel("Follow up")) { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
                 Button("Re-run") { vm.rerun(pr) }
                 Button("Copy") {
@@ -432,7 +440,7 @@ struct DetailView: View {
                     Button("Review with Claude") { vm.review(pr) }
                         .buttonStyle(.borderedProminent)
                 }
-                Button(vm.hasFollowUpContext(pr) ? "Follow up in \(terminalName)" : "Review in \(terminalName)") {
+                Button(terminalLabel(vm.hasFollowUpContext(pr) ? "Follow up" : "Review")) {
                     vm.openTerminal(pr)
                 }
             }
@@ -468,7 +476,7 @@ struct SettingsView: View {
     @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
     @AppStorage(ClaudeSettings.quickEffortKey) private var quickEffort = ClaudeSettings.quickEffortDefault
     @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
-    @AppStorage(TerminalApp.key) private var terminalRaw = TerminalApp.terminal.rawValue
+    @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
@@ -586,27 +594,42 @@ struct SettingsView: View {
 
             Divider()
             Text("Terminal").font(.headline)
+            let installed = TerminalApp.installed
+            let resolved = TerminalApp.resolve(saved: terminalRaw, installed: installed)
+            let automatic = TerminalApp.resolve(saved: "", installed: installed)
             HStack {
                 Text("Open Claude Code in")
                 Picker("Terminal app", selection: $terminalRaw) {
-                    ForEach(TerminalApp.allCases) { app in
-                        Text(app.isInstalled ? app.name : "\(app.name) (not installed)")
-                            .tag(app.rawValue)
+                    Text("Automatic (\(automatic.name))").tag("")
+                    Divider()
+                    ForEach(installed) { app in Text(app.name).tag(app.rawValue) }
+                    // A saved choice that is no longer installed stays visible, so it can be changed.
+                    if let saved = TerminalApp(rawValue: terminalRaw), !installed.contains(saved) {
+                        Text("\(saved.name) (not installed)").tag(saved.rawValue)
                     }
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 180)
+                .frame(width: 200)
             }
-            if !(TerminalApp(rawValue: terminalRaw) ?? .terminal).isInstalled {
-                Text("That app isn't installed; pick another.").font(.caption2).foregroundStyle(.orange)
-            } else if terminalRaw == TerminalApp.ghostty.rawValue {
-                Text("Ghostty opens a separate window for each session (it has no scripting support).")
-                    .font(.caption2).foregroundStyle(.secondary)
-            } else {
-                Text("macOS asks once for permission to control it.")
-                    .font(.caption2).foregroundStyle(.secondary)
+            Group {
+                if let saved = TerminalApp(rawValue: terminalRaw), !installed.contains(saved) {
+                    Text("\(saved.name) isn't installed here, so \(resolved.name) is used.")
+                        .foregroundStyle(.orange)
+                } else {
+                    switch resolved {
+                    case .terminal, .iterm:
+                        Text("macOS asks once for permission to control \(resolved.name).")
+                    case .ghostty, .kitty, .alacritty:
+                        Text("Each session opens in a new \(resolved.name) window.")
+                    case .wezterm:
+                        Text("Each session opens in a new WezTerm window.")
+                    case .copy:
+                        Text("For Warp or any other terminal: the button copies a command to paste.")
+                    }
+                }
             }
+            .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             Text("Pull requests").font(.headline)

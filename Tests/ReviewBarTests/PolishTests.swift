@@ -81,31 +81,43 @@ final class TerminalAppTests: XCTestCase {
         XCTAssertFalse(TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "").contains("export PATH"))
     }
 
-    func testOpenCommands() {
-        let (t, targs) = TerminalApp.terminal.openCommand(launcher: "/tmp/r.sh")
+    func testLaunchCommands() {
+        guard case .process(let t, let targs) = TerminalApp.terminal.launch(launcher: "/tmp/r.sh", app: "/System/Applications/Utilities/Terminal.app")
+        else { return XCTFail() }
         XCTAssertEqual(t, "/usr/bin/osascript")
         XCTAssertTrue(targs[1].contains(#"tell application "Terminal""#))
         XCTAssertTrue(targs[1].contains(#"do script "'/tmp/r.sh'""#))
 
-        let (i, iargs) = TerminalApp.iterm.openCommand(launcher: "/tmp/r.sh")
+        guard case .process(let i, let iargs) = TerminalApp.iterm.launch(launcher: "/tmp/r.sh", app: "/Applications/iTerm.app")
+        else { return XCTFail() }
         XCTAssertEqual(i, "/usr/bin/osascript")
-        XCTAssertTrue(iargs[1].contains(#"tell application "iTerm""#))
         XCTAssertTrue(iargs[1].contains(#"create window with default profile command "/tmp/r.sh""#))
 
-        let (g, gargs) = TerminalApp.ghostty.openCommand(launcher: "/tmp/r.sh")
-        XCTAssertEqual(g, "/usr/bin/open")
-        XCTAssertEqual(gargs, ["-na", "Ghostty", "--args", "--window-save-state=never", "-e", "/tmp/r.sh"])
+        XCTAssertEqual(TerminalApp.ghostty.launch(launcher: "/tmp/r.sh", app: "/Applications/Ghostty.app"),
+                       .process("/usr/bin/open", ["-na", "/Applications/Ghostty.app", "--args",
+                                                  "--window-save-state=never", "-e", "/tmp/r.sh"]))
+        XCTAssertEqual(TerminalApp.wezterm.launch(launcher: "/tmp/r.sh", app: "/Applications/WezTerm.app"),
+                       .process("/Applications/WezTerm.app/Contents/MacOS/wezterm", ["start", "--", "/tmp/r.sh"]))
+        XCTAssertEqual(TerminalApp.kitty.launch(launcher: "/tmp/r.sh", app: "/Applications/kitty.app"),
+                       .process("/usr/bin/open", ["-na", "/Applications/kitty.app", "--args", "/tmp/r.sh"]))
+        XCTAssertEqual(TerminalApp.alacritty.launch(launcher: "/tmp/r.sh", app: "/Applications/Alacritty.app"),
+                       .process("/usr/bin/open", ["-na", "/Applications/Alacritty.app", "--args", "-e", "/tmp/r.sh"]))
+        XCTAssertEqual(TerminalApp.copy.launch(launcher: "/tmp/r.sh", app: ""), .copy("zsh '/tmp/r.sh'"))
     }
 
-    func testUnknownSavedValueFallsBackToTerminal() {
-        let saved = UserDefaults.standard.object(forKey: TerminalApp.key)
-        defer {
-            if let saved { UserDefaults.standard.set(saved, forKey: TerminalApp.key) }
-            else { UserDefaults.standard.removeObject(forKey: TerminalApp.key) }
-        }
-        UserDefaults.standard.set("warp", forKey: TerminalApp.key)
-        XCTAssertEqual(TerminalApp.chosen, .terminal)
-        UserDefaults.standard.set("ghostty", forKey: TerminalApp.key)
-        XCTAssertEqual(TerminalApp.chosen, .ghostty)
+    func testAutomaticPrefersInstalledAlternativesOverTerminal() {
+        XCTAssertEqual(TerminalApp.resolve(saved: "", installed: [.terminal, .iterm, .ghostty, .copy]), .ghostty)
+        XCTAssertEqual(TerminalApp.resolve(saved: "", installed: [.terminal, .iterm, .copy]), .iterm)
+        XCTAssertEqual(TerminalApp.resolve(saved: "", installed: [.terminal, .copy]), .terminal)
+        XCTAssertEqual(TerminalApp.resolve(saved: "", installed: [.copy]), .copy)
+    }
+
+    func testSavedChoiceUsedOnlyWhileInstalled() {
+        let here: [TerminalApp] = [.terminal, .iterm, .ghostty, .copy]
+        XCTAssertEqual(TerminalApp.resolve(saved: "iterm", installed: here), .iterm)
+        XCTAssertEqual(TerminalApp.resolve(saved: "copy", installed: here), .copy)
+        // A colleague's Mac without Ghostty: fall back to automatic.
+        XCTAssertEqual(TerminalApp.resolve(saved: "ghostty", installed: [.terminal, .copy]), .terminal)
+        XCTAssertEqual(TerminalApp.resolve(saved: "warp", installed: here), .ghostty)
     }
 }

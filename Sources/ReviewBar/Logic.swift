@@ -229,9 +229,15 @@ enum PRFilter {
 
 /// Where "… in Terminal" opens Claude Code.
 enum TerminalApp: String, CaseIterable, Identifiable {
-    case terminal, iterm, ghostty
+    case terminal, iterm, ghostty, wezterm, kitty, alacritty
+    /// For any other terminal (Warp, …): copy a command to paste.
+    case copy
 
     static let key = "terminalApp"
+    /// Picked when nothing was chosen: the first one installed. People who install another
+    /// terminal usually use it, so Terminal comes last.
+    static let automaticOrder: [TerminalApp] = [.ghostty, .iterm, .wezterm, .kitty, .alacritty, .terminal]
+
     var id: String { rawValue }
 
     var name: String {
@@ -239,24 +245,48 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         case .terminal: return "Terminal"
         case .iterm: return "iTerm2"
         case .ghostty: return "Ghostty"
+        case .wezterm: return "WezTerm"
+        case .kitty: return "kitty"
+        case .alacritty: return "Alacritty"
+        case .copy: return "Copy command"
         }
     }
 
-    var bundleID: String {
+    /// For button labels: "Follow up in Ghostty", or "Copy follow-up command".
+    var buttonTarget: String { self == .copy ? "any terminal (copies a command)" : name }
+
+    var bundleID: String? {
         switch self {
         case .terminal: return "com.apple.Terminal"
         case .iterm: return "com.googlecode.iterm2"
         case .ghostty: return "com.mitchellh.ghostty"
+        case .wezterm: return "com.github.wez.wezterm"
+        case .kitty: return "net.kovidgoyal.kitty"
+        case .alacritty: return "org.alacritty"
+        case .copy: return nil
         }
     }
 
-    var isInstalled: Bool { NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil }
+    /// Where the app is installed; nil if it isn't. "Copy command" needs no app.
+    var appURL: URL? {
+        bundleID.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+    }
 
+    var isInstalled: Bool { self == .copy || appURL != nil }
+
+    /// Installed terminals plus "Copy command", in menu order.
     static var installed: [TerminalApp] { allCases.filter(\.isInstalled) }
 
-    /// The saved choice; Terminal if none was made or the saved value is unknown.
+    /// The saved choice if it's still installed, else the automatic pick.
     static var chosen: TerminalApp {
-        TerminalApp(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .terminal
+        resolve(saved: UserDefaults.standard.string(forKey: key) ?? "", installed: installed)
+    }
+
+    /// Pure, for tests. An empty or unknown saved value, or an app that has since been
+    /// uninstalled, means automatic.
+    static func resolve(saved: String, installed: [TerminalApp]) -> TerminalApp {
+        if let app = TerminalApp(rawValue: saved), installed.contains(app) { return app }
+        return automaticOrder.first(where: installed.contains) ?? .copy
     }
 
     /// Shell script the terminal runs. It uses your login PATH (terminals started with a command
@@ -276,22 +306,29 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         """
     }
 
-    /// Executable and arguments that open `launcher` in this terminal. Pure, for tests.
-    func openCommand(launcher: String) -> (String, [String]) {
+    enum Launch: Equatable {
+        /// Run this executable with these arguments.
+        case process(String, [String])
+        /// Put this on the clipboard for the user to paste into a terminal.
+        case copy(String)
+    }
+
+    /// How to open `launcher` in this terminal; `app` is its .app path. Pure, for tests.
+    func launch(launcher: String, app: String) -> Launch {
         func appleScriptString(_ s: String) -> String {
             "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
         }
         switch self {
         case .terminal:
             // Terminal runs it in a new window's shell; quoted for that shell.
-            return ("/usr/bin/osascript", ["-e", """
+            return .process("/usr/bin/osascript", ["-e", """
                 tell application "Terminal"
                     activate
                     do script \(appleScriptString(q(launcher)))
                 end tell
                 """])
         case .iterm:
-            return ("/usr/bin/osascript", ["-e", """
+            return .process("/usr/bin/osascript", ["-e", """
                 tell application "iTerm"
                     activate
                     create window with default profile command \(appleScriptString(launcher))
@@ -300,7 +337,15 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         case .ghostty:
             // No AppleScript: a new Ghostty instance runs the command. Without the save-state
             // flag it would also reopen your previous tabs.
-            return ("/usr/bin/open", ["-na", "Ghostty", "--args", "--window-save-state=never", "-e", launcher])
+            return .process("/usr/bin/open", ["-na", app, "--args", "--window-save-state=never", "-e", launcher])
+        case .wezterm:
+            return .process(app + "/Contents/MacOS/wezterm", ["start", "--", launcher])
+        case .kitty:
+            return .process("/usr/bin/open", ["-na", app, "--args", launcher])
+        case .alacritty:
+            return .process("/usr/bin/open", ["-na", app, "--args", "-e", launcher])
+        case .copy:
+            return .copy("zsh \(q(launcher))")
         }
     }
 }
@@ -1268,7 +1313,8 @@ enum Backend {
     }
 
     /// Opens a new Terminal window with an interactive Claude Code session seeded for `mode`.
-    static func openInTerminal(_ pr: PR, mode: TerminalMode) async throws {
+    /// Returns a command to copy instead when the chosen terminal is "Copy command".
+    static func openInTerminal(_ pr: PR, mode: TerminalMode) async throws -> String? {
         let prompt: String
         switch mode {
         case .review: prompt = try await buildPrompt(for: pr)
@@ -1295,16 +1341,16 @@ enum Backend {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcher.path)
 
         let app = TerminalApp.chosen
-        guard app.isInstalled else {
-            try? FileManager.default.removeItem(at: promptFile)
-            try? FileManager.default.removeItem(at: launcher)
-            throw ShellError(code: 1, stderr: "\(app.name) isn't installed. Pick another terminal in Settings.")
+        switch app.launch(launcher: launcher.path, app: app.appURL?.path ?? "") {
+        case .copy(let command):
+            return command
+        case .process(let exe, let args):
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: exe)
+            p.arguments = args
+            try p.run()
+            return nil
         }
-        let (exe, args) = app.openCommand(launcher: launcher.path)
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: exe)
-        p.arguments = args
-        try p.run()
     }
 }
 
@@ -1319,6 +1365,8 @@ final class ReviewViewModel: ObservableObject {
     @Published var reviews: [String: ReviewState] = [:]   // keyed by PR.reviewKey
     @Published var replies: [ReplyPR] = []
     @Published var myPRs: [FeedbackPR] = []
+    /// Shown under the terminal button, e.g. after copying a command.
+    @Published var terminalNotice: String?
     /// Quick-model summaries, keyed by `summaryKey` so newer comments make them stale. Not saved.
     @Published var summaries: [String: ReviewState] = [:]
     /// PR url -> `latestAt` of the reply you dismissed. Newer replies bring the PR back.
@@ -1608,9 +1656,17 @@ final class ReviewViewModel: ObservableObject {
         } else {
             mode = .review
         }
+        terminalNotice = nil
         Task {
-            do { try await Backend.openInTerminal(pr, mode: mode) }
-            catch { self.error = error.localizedDescription }
+            do {
+                if let command = try await Backend.openInTerminal(pr, mode: mode) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    terminalNotice = "Command copied. Paste it into any terminal to start the session."
+                }
+            } catch {
+                self.error = error.localizedDescription
+            }
         }
     }
 }

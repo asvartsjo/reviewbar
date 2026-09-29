@@ -413,8 +413,8 @@ struct SettingsView: View {
     @State private var input = ""
     @State private var checking = false
     @State private var problems: [String] = []
-    @AppStorage(ClaudeSettings.reviewModelKey) private var reviewModel = ""
-    @AppStorage(ClaudeSettings.reviewEffortKey) private var reviewEffort = ""
+    @AppStorage(ClaudeSettings.reviewModelKey) private var reviewModel = ClaudeSettings.reviewModelDefault
+    @AppStorage(ClaudeSettings.reviewEffortKey) private var reviewEffort = ClaudeSettings.reviewEffortDefault
     @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
     @AppStorage(ClaudeSettings.quickEffortKey) private var quickEffort = ClaudeSettings.quickEffortDefault
     let done: () -> Void
@@ -507,7 +507,8 @@ struct SettingsView: View {
                     picker($quickEffort, ClaudeSettings.efforts, "Summary effort")
                 }
             }
-            Text("Default uses your Claude Code settings. Code is always read by the review model; "
+            Text("Opus 5.5 and Sonnet 5.5 stay pinned; “latest” follows new releases; Default uses your "
+                 + "Claude Code settings. Code is always read by the review model; "
                  + "summaries are handed to it as a starting point.")
                 .font(.caption2).foregroundStyle(.secondary)
 

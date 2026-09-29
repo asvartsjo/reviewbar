@@ -39,13 +39,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>ReviewBar opens Claude Code in Terminal for follow-up sessions.</string>
+    <string>ReviewBar opens Claude Code in your terminal (Terminal or iTerm2) for follow-up sessions.</string>
 </dict>
 </plist>
 PLIST
 
-# No App Sandbox: the app runs gh and claude. The entitlement lets "Follow up in Terminal"
-# drive Terminal via AppleScript under the hardened runtime.
+# No App Sandbox: the app runs gh and claude. The entitlement lets "Follow up in …"
+# drive Terminal or iTerm2 via AppleScript under the hardened runtime.
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
     codesign --force --sign - --entitlements scripts/ReviewBar.entitlements "$APP"
     echo "Built $APP (ad-hoc signed)"

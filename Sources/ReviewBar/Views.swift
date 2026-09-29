@@ -275,6 +275,8 @@ struct ContentView: View {
 
 struct DetailView: View {
     @EnvironmentObject var vm: ReviewViewModel
+    @AppStorage(TerminalApp.key) private var terminalRaw = TerminalApp.terminal.rawValue
+    private var terminalName: String { (TerminalApp(rawValue: terminalRaw) ?? .terminal).name }
     let pr: PR
     let back: () -> Void
 
@@ -398,7 +400,7 @@ struct DetailView: View {
     @ViewBuilder private var actions: some View {
         HStack {
             if vm.isMine(pr) {
-                Button("Work through feedback in Terminal") { vm.openTerminal(pr) }
+                Button("Work through feedback in \(terminalName)") { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
             } else {
                 reviewActions
@@ -414,7 +416,7 @@ struct DetailView: View {
                 Text("Claude is reading the diff…").font(.caption)
                 Button("Cancel") { vm.cancelReview(pr) }.font(.caption)
             case .done(let text):
-                Button("Follow up in Terminal") { vm.openTerminal(pr) }
+                Button("Follow up in \(terminalName)") { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
                 Button("Re-run") { vm.rerun(pr) }
                 Button("Copy") {
@@ -430,7 +432,7 @@ struct DetailView: View {
                     Button("Review with Claude") { vm.review(pr) }
                         .buttonStyle(.borderedProminent)
                 }
-                Button(vm.hasFollowUpContext(pr) ? "Follow up in Terminal" : "Review in Terminal") {
+                Button(vm.hasFollowUpContext(pr) ? "Follow up in \(terminalName)" : "Review in \(terminalName)") {
                     vm.openTerminal(pr)
                 }
             }
@@ -466,6 +468,7 @@ struct SettingsView: View {
     @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
     @AppStorage(ClaudeSettings.quickEffortKey) private var quickEffort = ClaudeSettings.quickEffortDefault
     @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
+    @AppStorage(TerminalApp.key) private var terminalRaw = TerminalApp.terminal.rawValue
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
@@ -561,7 +564,7 @@ struct SettingsView: View {
                 }
                 GridRow {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Reviews & Terminal")
+                        Text("Reviews & terminal")
                         Text("Reads the code").font(.caption2).foregroundStyle(.secondary)
                     }
                     picker($reviewModel, ClaudeSettings.models, "Review model")
@@ -580,6 +583,30 @@ struct SettingsView: View {
                  + "Code is always read by the review model; "
                  + "summaries are handed to it as a starting point.")
                 .font(.caption2).foregroundStyle(.secondary)
+
+            Divider()
+            Text("Terminal").font(.headline)
+            HStack {
+                Text("Open Claude Code in")
+                Picker("Terminal app", selection: $terminalRaw) {
+                    ForEach(TerminalApp.allCases) { app in
+                        Text(app.isInstalled ? app.name : "\(app.name) (not installed)")
+                            .tag(app.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 180)
+            }
+            if !(TerminalApp(rawValue: terminalRaw) ?? .terminal).isInstalled {
+                Text("That app isn't installed; pick another.").font(.caption2).foregroundStyle(.orange)
+            } else if terminalRaw == TerminalApp.ghostty.rawValue {
+                Text("Ghostty opens a separate window for each session (it has no scripting support).")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else {
+                Text("macOS asks once for permission to control it.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
 
             Divider()
             Text("Pull requests").font(.headline)

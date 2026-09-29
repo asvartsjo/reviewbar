@@ -63,3 +63,49 @@ final class ClaudeErrorsTests: XCTestCase {
         XCTAssertNil(ClaudeErrors.usageLimitMessage("## Summary\n- Adds rate limiting to the API"))
     }
 }
+
+final class TerminalAppTests: XCTestCase {
+    func testLauncherScript() {
+        let s = TerminalApp.launcherScript(claude: "env -u ANTHROPIC_API_KEY claude --model opus",
+                                           promptFile: "/tmp/it's here/p.md", path: "/opt/homebrew/bin:/usr/bin")
+        XCTAssertTrue(s.hasPrefix("#!/bin/zsh\n"))
+        XCTAssertTrue(s.contains("export PATH='/opt/homebrew/bin:/usr/bin'"))
+        // The prompt path is shell-quoted, including the apostrophe.
+        XCTAssertTrue(s.contains(#"[[ -f '/tmp/it'\''s here/p.md' ]] || exit 0"#))
+        XCTAssertTrue(s.contains(#"rm -f '/tmp/it'\''s here/p.md' "$0""#))
+        XCTAssertTrue(s.contains(#"env -u ANTHROPIC_API_KEY claude --model opus "$prompt""#))
+        XCTAssertTrue(s.contains(#"exec "${SHELL:-/bin/zsh}" -l"#))
+    }
+
+    func testLauncherWithoutPathSkipsExport() {
+        XCTAssertFalse(TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "").contains("export PATH"))
+    }
+
+    func testOpenCommands() {
+        let (t, targs) = TerminalApp.terminal.openCommand(launcher: "/tmp/r.sh")
+        XCTAssertEqual(t, "/usr/bin/osascript")
+        XCTAssertTrue(targs[1].contains(#"tell application "Terminal""#))
+        XCTAssertTrue(targs[1].contains(#"do script "'/tmp/r.sh'""#))
+
+        let (i, iargs) = TerminalApp.iterm.openCommand(launcher: "/tmp/r.sh")
+        XCTAssertEqual(i, "/usr/bin/osascript")
+        XCTAssertTrue(iargs[1].contains(#"tell application "iTerm""#))
+        XCTAssertTrue(iargs[1].contains(#"create window with default profile command "/tmp/r.sh""#))
+
+        let (g, gargs) = TerminalApp.ghostty.openCommand(launcher: "/tmp/r.sh")
+        XCTAssertEqual(g, "/usr/bin/open")
+        XCTAssertEqual(gargs, ["-na", "Ghostty", "--args", "--window-save-state=never", "-e", "/tmp/r.sh"])
+    }
+
+    func testUnknownSavedValueFallsBackToTerminal() {
+        let saved = UserDefaults.standard.object(forKey: TerminalApp.key)
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: TerminalApp.key) }
+            else { UserDefaults.standard.removeObject(forKey: TerminalApp.key) }
+        }
+        UserDefaults.standard.set("warp", forKey: TerminalApp.key)
+        XCTAssertEqual(TerminalApp.chosen, .terminal)
+        UserDefaults.standard.set("ghostty", forKey: TerminalApp.key)
+        XCTAssertEqual(TerminalApp.chosen, .ghostty)
+    }
+}

@@ -225,6 +225,86 @@ enum PRFilter {
     }
 }
 
+// MARK: - Terminal app
+
+/// Where "… in Terminal" opens Claude Code.
+enum TerminalApp: String, CaseIterable, Identifiable {
+    case terminal, iterm, ghostty
+
+    static let key = "terminalApp"
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .terminal: return "Terminal"
+        case .iterm: return "iTerm2"
+        case .ghostty: return "Ghostty"
+        }
+    }
+
+    var bundleID: String {
+        switch self {
+        case .terminal: return "com.apple.Terminal"
+        case .iterm: return "com.googlecode.iterm2"
+        case .ghostty: return "com.mitchellh.ghostty"
+        }
+    }
+
+    var isInstalled: Bool { NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil }
+
+    static var installed: [TerminalApp] { allCases.filter(\.isInstalled) }
+
+    /// The saved choice; Terminal if none was made or the saved value is unknown.
+    static var chosen: TerminalApp {
+        TerminalApp(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .terminal
+    }
+
+    /// Shell script the terminal runs. It uses your login PATH (terminals started with a command
+    /// may not read your shell config), reads and deletes the prompt file (it holds the diff),
+    /// deletes itself, starts Claude, and leaves you at a normal shell when Claude exits.
+    /// Exits quietly if the prompt is already gone: Ghostty can run a launch command twice. Pure, for tests.
+    static func launcherScript(claude: String, promptFile: String, path: String) -> String {
+        """
+        #!/bin/zsh
+        \(path.isEmpty ? "" : "export PATH=\(q(path))")
+        [[ -f \(q(promptFile)) ]] || exit 0
+        prompt="$(cat \(q(promptFile)))"
+        rm -f \(q(promptFile)) "$0"
+        \(claude) "$prompt"
+        exec "${SHELL:-/bin/zsh}" -l
+
+        """
+    }
+
+    /// Executable and arguments that open `launcher` in this terminal. Pure, for tests.
+    func openCommand(launcher: String) -> (String, [String]) {
+        func appleScriptString(_ s: String) -> String {
+            "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+        }
+        switch self {
+        case .terminal:
+            // Terminal runs it in a new window's shell; quoted for that shell.
+            return ("/usr/bin/osascript", ["-e", """
+                tell application "Terminal"
+                    activate
+                    do script \(appleScriptString(q(launcher)))
+                end tell
+                """])
+        case .iterm:
+            return ("/usr/bin/osascript", ["-e", """
+                tell application "iTerm"
+                    activate
+                    create window with default profile command \(appleScriptString(launcher))
+                end tell
+                """])
+        case .ghostty:
+            // No AppleScript: a new Ghostty instance runs the command. Without the save-state
+            // flag it would also reopen your previous tabs.
+            return ("/usr/bin/open", ["-na", "Ghostty", "--args", "--window-save-state=never", "-e", launcher])
+        }
+    }
+}
+
 // MARK: - Claude model and effort
 
 /// Two model/effort pairs, stored in UserDefaults:
@@ -1199,21 +1279,31 @@ enum Backend {
         }
         guard prompt.utf8.count <= maxArgBytes else {
             throw ShellError(code: 1, stderr: "Prompt is \(prompt.utf8.count / 1000) KB, too large to pass to "
-                + "Terminal (limit \(maxArgBytes / 1000) KB).")
+                + "the terminal (limit \(maxArgBytes / 1000) KB).")
         }
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("review-\(pr.number)-\(UUID().uuidString.prefix(6)).md")
-        try prompt.write(to: file, atomically: true, encoding: .utf8)
+        let id = "review-\(pr.number)-\(UUID().uuidString.prefix(6))"
+        let dir = FileManager.default.temporaryDirectory
+        let promptFile = dir.appendingPathComponent(id + ".md")
+        let launcher = dir.appendingPathComponent(id + ".sh")
+        try prompt.write(to: promptFile, atomically: true, encoding: .utf8)
 
-        // Quote the path, and delete the file once read: it holds the full diff.
-        let cmd = "\(claudeBin)\(ClaudeSettings.flags(ClaudeSettings.review)) \"$(cat \(q(file.path)); rm -f \(q(file.path)))\""
-        let escaped = cmd.replacingOccurrences(of: "\\", with: "\\\\")
-                         .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(escaped)\"\nend tell"
+        let path = (try? await sh("print -r -- $PATH").trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
+        let script = TerminalApp.launcherScript(
+            claude: "\(claudeBin)\(ClaudeSettings.flags(ClaudeSettings.review))",
+            promptFile: promptFile.path, path: path)
+        try script.write(to: launcher, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcher.path)
 
+        let app = TerminalApp.chosen
+        guard app.isInstalled else {
+            try? FileManager.default.removeItem(at: promptFile)
+            try? FileManager.default.removeItem(at: launcher)
+            throw ShellError(code: 1, stderr: "\(app.name) isn't installed. Pick another terminal in Settings.")
+        }
+        let (exe, args) = app.openCommand(launcher: launcher.path)
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", script]
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
         try p.run()
     }
 }

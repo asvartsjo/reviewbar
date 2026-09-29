@@ -27,16 +27,21 @@ enum Agent: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Shell command that reads the prompt on stdin and prints only the final answer. Pure, for tests.
-    func headlessCommand(_ pair: (model: String, effort: String)) -> String {
+    /// Shell command that reads the prompt on stdin and prints only the final answer. With
+    /// `codebase` (a worktree of the PR) it runs there and may read the code, read-only; without
+    /// it, it gets no tools at all. Pure, for tests.
+    func headlessCommand(_ pair: (model: String, effort: String), codebase: String? = nil) -> String {
         switch self {
         case .claude:
-            return "\(Backend.claudeBin) \(Backend.headlessFlags)\(ClaudeSettings.flags(pair))"
+            let tools = codebase == nil ? "--tools ''" : "--tools 'Read,Grep,Glob' --allowedTools 'Read,Grep,Glob'"
+            return (codebase.map { "cd \(q($0)) && " } ?? "")
+                + "\(Backend.claudeBin) \(Backend.headlessFlags) \(tools)\(ClaudeSettings.flags(pair))"
         case .codex:
             // Read-only sandbox: the diff is untrusted input. The answer goes to a file so
             // progress output on stdout never ends up in the saved review.
             return "f=$(mktemp -t reviewbar) || exit 1; "
                 + "\(CodexSettings.bin) exec --skip-git-repo-check --sandbox read-only --color never "
+                + (codebase.map { "--cd \(q($0)) " } ?? "")
                 + "--output-last-message \"$f\"\(CodexSettings.flags(pair)) - >/dev/null "
                 + "|| { s=$?; rm -f \"$f\"; exit $s; }; cat \"$f\"; rm -f \"$f\""
         }

@@ -33,3 +33,25 @@ final class ReviewDocTests: XCTestCase {
         XCTAssertEqual(ReviewDoc.parse("Just notes."), [.block(.paragraph("Just notes."))])
     }
 }
+
+final class PostableCommentTests: XCTestCase {
+    func testQuestionSeverityAndPostableComment() {
+        let doc = ReviewDoc.parse("""
+        ### [question] `a.swift:3` Archived projects?
+        Why: old query excluded them.
+        > question: Is this meant to include archived projects? The old query excluded them.
+        ```suggestion
+        .filter { !$0.archived }
+        ```
+        """)
+        guard case .finding(let sev, _, let blocks) = doc.first else { return XCTFail("no finding") }
+        XCTAssertEqual(sev, .question)
+        XCTAssertEqual(ReviewDoc.postable(blocks),
+                       "question: Is this meant to include archived projects? The old query excluded them.\n\n"
+                       + "```suggestion\n.filter { !$0.archived }\n```")
+    }
+
+    func testNoCommentNoButton() {
+        XCTAssertNil(ReviewDoc.postable([.paragraph("Why: x")]))
+    }
+}

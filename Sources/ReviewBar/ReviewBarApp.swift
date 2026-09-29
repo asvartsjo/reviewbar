@@ -3,7 +3,10 @@ import AppKit
 import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    private var menuBar: MenuBarController?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { menuBar = MenuBarController(vm: ReviewViewModel.shared) }
         // Menu bar only: no Dock icon or app switcher entry, also when started with `swift run`
         // (the .app bundle from scripts/make-app.sh sets LSUIElement as well).
         NSApp.setActivationPolicy(.accessory)
@@ -35,20 +38,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 @main
 struct ReviewBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var vm = ReviewViewModel.shared
 
+    // The menu bar icon and panel live in MenuBarController; an App needs at least one scene.
     var body: some Scene {
-        MenuBarExtra {
-            ContentView().environmentObject(vm)
-        } label: {
-            // One pre-rendered template image: an SF Symbol inside a Text label can vanish
-            // after the menu bar re-renders, leaving only the number.
-            Image(nsImage: MenuBarIcon.image(count: vm.badgeCount))
-        }
-        .menuBarExtraStyle(.window)
+        Settings { EmptyView() }
     }
 }
 
+/// One pre-rendered template image: an SF Symbol inside a Text label can vanish after the
+/// menu bar re-renders, leaving only the number.
 enum MenuBarIcon {
     static func image(count: Int) -> NSImage {
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)

@@ -99,3 +99,14 @@ final class PRFilterTests: XCTestCase {
         XCTAssertTrue(PRFilter.includeDrafts)
     }
 }
+
+final class MentionSnippetTests: XCTestCase {
+    func testSnippetDropsQuotesAndFences() {
+        XCTAssertEqual(Backend.snippet("> quoted\n\n@asvartsjo can you check this?\n```\ncode\n```"),
+                       "@asvartsjo can you check this? code")
+    }
+
+    func testSnippetIsShort() {
+        XCTAssertEqual(Backend.snippet(String(repeating: "a", count: 300)).count, 140)
+    }
+}

@@ -11,6 +11,8 @@ private enum Tab: String, CaseIterable {
 }
 
 struct ContentView: View {
+    @State private var systemDark = ContentView.isSystemDark
+    static var isSystemDark: Bool { UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark" }
     @EnvironmentObject var vm: ReviewViewModel
     @State private var showSettings = false
     @State private var selected: PR?
@@ -48,6 +50,13 @@ struct ContentView: View {
             }
         }
         .frame(width: 480, height: 580)
+        // Solid, and follows the system Light/Dark setting rather than the menu bar's look.
+        .background(systemDark ? Color(white: 0.11) : Color(white: 0.985))
+        .environment(\.colorScheme, systemDark ? .dark : .light)
+        .onReceive(DistributedNotificationCenter.default()
+            .publisher(for: Notification.Name("AppleInterfaceThemeChangedNotification"))) { _ in
+            systemDark = Self.isSystemDark
+        }
         // Opening the popover refreshes data older than a minute.
         .onAppear { Task { await vm.refreshIfStale() } }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
@@ -82,6 +91,7 @@ struct ContentView: View {
                     Button { selected = pr } label: { row(pr) }.buttonStyle(.plain)
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
     }
@@ -154,6 +164,7 @@ struct ContentView: View {
                         }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
     }
@@ -190,6 +201,7 @@ struct ContentView: View {
                         }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
     }
@@ -230,6 +242,7 @@ struct ContentView: View {
                         }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
             Divider()
             HStack {
@@ -433,8 +446,34 @@ struct DetailView: View {
                 reviewActions
             }
         }
+        switch vm.draftState[pr.reviewKey] ?? .idle {
+        case .done(let msg): Text(msg).font(.caption).foregroundStyle(.green)
+        case .failed(let msg): Text(msg).font(.caption).foregroundStyle(.red)
+        default: EmptyView()
+        }
         if let notice = vm.terminalNotice {
             Text(notice).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @State private var confirmDraft = false
+
+    /// "Draft on GitHub": asks first, since this is the one thing that writes to GitHub.
+    @ViewBuilder private func draftButton(_ text: String) -> some View {
+        let count = DraftReview.comments(from: text).count
+        if case .running = vm.draftState[pr.reviewKey] ?? .idle {
+            ProgressView().controlSize(.small)
+        } else {
+            Button("Draft on GitHub") { confirmDraft = true }
+                .disabled(count == 0)
+                .help(count == 0 ? "No non-nit findings with a file and line" : "Create a pending review from the findings, nits left out")
+                .confirmationDialog("Create a draft review with \(count) comment\(count == 1 ? "" : "s")?",
+                                    isPresented: $confirmDraft) {
+                    Button("Create draft review") { vm.createDraft(pr) }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Nits are left out. The review stays pending, visible only to you, until you submit it on GitHub. You can edit or delete each comment there.")
+                }
         }
     }
 
@@ -452,6 +491,7 @@ struct DetailView: View {
                     let s = vm.savedReview(for: pr)
                     ReviewPage.open(pr: pr, text: text, label: s.map(ReviewPage.label), date: s?.date)
                 }
+                draftButton(text)
                 Button("Re-run") { vm.rerun(pr) }
                 Button("Copy") {
                     NSPasteboard.general.clearContents()
@@ -484,6 +524,7 @@ struct SettingsView: View {
     @State private var input = ""
     @State private var checking = false
     @State private var problems: [String] = []
+    @State private var folders: [String: String] = [:]
     @AppStorage(ClaudeSettings.reviewModelKey) private var reviewModel = ClaudeSettings.reviewModelDefault
     @AppStorage(ClaudeSettings.reviewEffortKey) private var reviewEffort = ClaudeSettings.reviewEffortDefault
     @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
@@ -494,10 +535,12 @@ struct SettingsView: View {
     @AppStorage(CodexSettings.quickModelKey) private var codexQuickModel = ""
     @AppStorage(CodexSettings.quickEffortKey) private var codexQuickEffort = CodexSettings.quickEffortDefault
     @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
+    @AppStorage(AutoReview.key) private var autoReview = false
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
+    @AppStorage(NotifySettings.mentionsKey) private var notifyMentions = true
     @State private var notificationsAllowed: UNAuthorizationStatus?
     @State private var openAtLogin = LoginItem.isAvailable && LoginItem.status == .enabled
     @State private var loginProblem: String?
@@ -560,8 +603,34 @@ struct SettingsView: View {
                 ForEach(repos, id: \.self) { r in
                     HStack {
                         Image(systemName: "book.closed").foregroundStyle(.secondary)
-                        Text(r).font(.system(.body, design: .monospaced))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(r).font(.system(.body, design: .monospaced))
+                            if let f = folders[r.lowercased()] {
+                                Text((f as NSString).abbreviatingWithTildeInPath)
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.middle)
+                            } else if let f = RepoList.detectFolder(for: r) {
+                                Text("Found \((f as NSString).abbreviatingWithTildeInPath)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.middle)
+                            } else {
+                                Text("No local clone found: choose one to open Terminal there")
+                                    .font(.caption2).foregroundStyle(.orange)
+                            }
+                        }
                         Spacer()
+                        Button { chooseFolder(for: r) } label: {
+                            Image(systemName: folders[r.lowercased()] == nil ? "folder.badge.plus" : "folder")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(folders[r.lowercased()] == nil
+                              ? "Choose the local checkout of \(r): Terminal sessions start there"
+                              : "Change the local folder (Terminal sessions start there)")
+                        .contextMenu {
+                            if folders[r.lowercased()] != nil {
+                                Button("Forget folder") { RepoList.setFolder(nil, for: r); loadFolders() }
+                            }
+                        }
                         Button { remove(r) } label: { Image(systemName: "minus.circle") }
                             .buttonStyle(.borderless)
                             .help("Remove \(r)")
@@ -570,7 +639,8 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.bordered(alternatesRowBackgrounds: true))
-            .frame(height: 130)
+            .frame(height: 150)
+            .onAppear(perform: loadFolders)
             .overlay {
                 if repos.isEmpty {
                     Text("No repos yet").font(.callout).foregroundStyle(.secondary)
@@ -690,12 +760,18 @@ struct SettingsView: View {
             Toggle("Include draft PRs", isOn: $includeDrafts)
             Text("Applies to Awaiting me and Replies. Your own drafts always show in My PRs.")
                 .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Review new requests automatically", isOn: $autoReview)
+            Text("Runs a full review in the background when a PR first asks for your review, one at a time, "
+                 + "and notifies you when it's ready. Uses your \(Agent(rawValue: agentRaw)?.name ?? "Claude") plan; "
+                 + "PRs already waiting are left alone.")
+                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             Text("Notifications").font(.headline)
             Toggle("New review requests", isOn: $notifyRequests)
             Toggle("Replies on your review threads", isOn: $notifyReplies)
             Toggle("Feedback on your PRs", isOn: $notifyFeedback)
+            Toggle("@mentions of you or your teams", isOn: $notifyMentions)
             notificationHint
 
             Divider()
@@ -803,6 +879,45 @@ struct SettingsView: View {
     private func remove(_ r: String) {
         repos.removeAll { $0 == r }
         RepoList.save(repos)
+        RepoList.setFolder(nil, for: r)
+        loadFolders()
+    }
+
+    private func loadFolders() {
+        folders = Dictionary(uniqueKeysWithValues: repos.compactMap { r in
+            RepoList.chosenFolder(for: r).map { (r.lowercased(), $0) }
+        })
+    }
+
+    /// Picks the repo's local checkout. Warns (but still saves) if its git remotes point elsewhere.
+    private func chooseFolder(for repo: String) {
+        let open = NSOpenPanel()
+        open.canChooseDirectories = true
+        open.canChooseFiles = false
+        open.allowsMultipleSelection = false
+        open.prompt = "Use Folder"
+        open.message = "Choose your local clone of \(repo). Terminal sessions for its PRs start there."
+        if let f = RepoList.folder(for: repo) { open.directoryURL = URL(fileURLWithPath: f) }
+        MenuBarController.keepOpen = true
+        open.level = .popUpMenu + 1
+        NSApp.activate(ignoringOtherApps: true)
+        open.begin { response in
+            MenuBarController.keepOpen = false
+            guard response == .OK, let url = open.url else { return }
+            saveFolder(url, for: repo)
+        }
+    }
+
+    private func saveFolder(_ url: URL, for repo: String) {
+        RepoList.setFolder(url.path, for: repo)
+        loadFolders()
+        Task {
+            let remotes = (try? await sh("git -C \(q(url.path)) remote -v")) ?? ""
+            if !RepoList.remotesMatch(remotes, repo: repo) {
+                problems = ["\((url.path as NSString).abbreviatingWithTildeInPath) has no git remote for \(repo). "
+                            + "Saved anyway; check it's the right folder."]
+            }
+        }
     }
 }
 
@@ -849,3 +964,4 @@ struct StatusBadge: View {
         return .secondary
     }
 }
+

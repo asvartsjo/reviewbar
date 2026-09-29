@@ -12,8 +12,17 @@ final class AgentTests: XCTestCase {
 
     func testClaudeCommandsUnchanged() {
         XCTAssertEqual(Agent.claude.headlessCommand((model: "opus", effort: "")),
-                       "\(Backend.claudeBin) \(Backend.headlessFlags) --model opus")
+                       "\(Backend.claudeBin) \(Backend.headlessFlags) --tools '' --model opus")
         XCTAssertEqual(Agent.claude.interactiveCommand((model: "", effort: "")), Backend.claudeBin)
+    }
+
+    func testCodebaseGivesReadOnlyToolsInTheWorktree() {
+        let c = Agent.claude.headlessCommand((model: "", effort: ""), codebase: "/wt/it's")
+        XCTAssertTrue(c.hasPrefix(#"cd '/wt/it'\''s' && "#))
+        XCTAssertTrue(c.contains("--tools 'Read,Grep,Glob'"))
+        XCTAssertFalse(c.contains("Bash"))
+        let x = Agent.codex.headlessCommand((model: "", effort: ""), codebase: "/wt")
+        XCTAssertTrue(x.contains("--sandbox read-only --color never --cd '/wt' "))
     }
 
     func testCodexModelNamesAreShellSafe() {

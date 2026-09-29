@@ -35,8 +35,16 @@ enum AlertDiff {
 
 // MARK: - Notification settings
 
+/// Review new review requests in the background as they arrive. Off unless turned on:
+/// every review uses your Claude or ChatGPT plan.
+enum AutoReview {
+    static let key = "autoReview"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+}
+
 enum NotifySettings {
     static let requestsKey = "notifyRequests", repliesKey = "notifyReplies", feedbackKey = "notifyFeedback"
+    static let mentionsKey = "notifyMentions"
 
     /// On unless turned off.
     static func isOn(_ key: String) -> Bool {
@@ -73,6 +81,24 @@ enum Notifier {
         UNUserNotificationCenter.current().getNotificationSettings { s in
             DispatchQueue.main.async { done(s.authorizationStatus) }
         }
+    }
+
+    /// "@someone mentioned you" with the start of the comment. Clicking opens the comment.
+    static func mention(_ m: Mention) {
+        guard isAvailable, NotifySettings.isOn(NotifySettings.mentionsKey) else { return }
+        send(id: "mention-\(m.url)", title: "\(m.author) mentioned you · \(m.repo) #\(m.number)",
+             body: m.title + (m.snippet.isEmpty ? "" : "\n\(m.snippet)"), url: m.url)
+    }
+
+    /// "Review ready" for an automatic review, with its verdict. Clicking opens the PR.
+    static func reviewReady(_ pr: PR, text: String) {
+        guard isAvailable else { return }
+        var verdict = "Private notes are ready in ReviewBar."
+        if case .verdict(let v, let reason) = ReviewDoc.parse(text).first {
+            verdict = reason.isEmpty ? v.title : "\(v.title): \(reason)"
+        }
+        send(id: "ready-\(pr.reviewKey)", title: "Review ready: \(pr.repository.nameWithOwner) #\(pr.number)",
+             body: "\(pr.title)\n\(verdict)", url: pr.url)
     }
 
     static func post(_ alerts: [ReviewAlert]) {
@@ -154,4 +180,16 @@ enum LoginItem {
     static func set(_ on: Bool) throws {
         if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
     }
+}
+
+/// An @mention of you (or a team you're in) from GitHub's notifications.
+struct Mention: Equatable {
+    let repo: String
+    let number: Int
+    let title: String
+    let author: String
+    let snippet: String
+    /// The comment's page, or the PR/issue when GitHub gives no comment.
+    let url: String
+    let updatedAt: String
 }

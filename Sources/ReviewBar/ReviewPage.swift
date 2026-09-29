@@ -44,7 +44,15 @@ enum ReviewPage {
         \(body(text))
         </article>
         <footer>Private notes from ReviewBar. Nothing was posted to GitHub.</footer>
-        </main></body></html>
+        </main>
+        <script>
+        document.querySelectorAll("button.copy").forEach(b => b.addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(b.dataset.comment); b.textContent = "Copied"; }
+          catch { b.textContent = "Copy failed"; }
+          setTimeout(() => b.textContent = "Copy comment", 1500);
+        }));
+        </script>
+        </body></html>
         """
     }
 
@@ -61,7 +69,10 @@ enum ReviewPage {
                 return blocks([b])
             case .finding(let sev, let title, let bs):
                 let tag = sev.map { "<span class=\"sev \($0.rawValue)\">\($0.rawValue)</span>" } ?? ""
-                return "<section class=\"finding \(sev?.rawValue ?? "")\"><h3>\(tag)\(inline(title))</h3>\n"
+                let copy = ReviewDoc.postable(bs).map {
+                    "<button class=\"copy\" data-comment=\"\(esc($0))\">Copy comment</button>"
+                } ?? ""
+                return "<section class=\"finding \(sev?.rawValue ?? "")\"><h3>\(tag)\(inline(title))\(copy)</h3>\n"
                     + blocks(bs) + "</section>"
             }
         }.joined(separator: "\n")
@@ -86,7 +97,13 @@ enum ReviewPage {
                 case .heading(let level, let t):
                     let l = min(level + 1, 6)
                     out.append("<h\(l)>\(inline(t))</h\(l)>")
-                case .code(_, let t): out.append("<pre><code>\(esc(t))</code></pre>")
+                case .code(let lang, let t):
+                    if lang == "suggestion" {
+                        out.append("<div class=\"suggestion\"><div class=\"label\">Suggested change</div>"
+                                   + "<pre><code>\(esc(t))</code></pre></div>")
+                    } else {
+                        out.append("<pre><code>\(esc(t))</code></pre>")
+                    }
                 case .quote(let t): out.append("<blockquote>\(inline(t))</blockquote>")
                 case .paragraph(let t): out.append("<p>\(inline(t).replacingOccurrences(of: "\n", with: "<br>"))</p>")
                 case .rule: out.append("<hr>")
@@ -181,8 +198,14 @@ enum ReviewPage {
                padding:14px 18px 4px; margin:0 0 14px; background:var(--soft); }
     .finding h3 { margin:0 0 10px; font-size:16px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
     .finding.blocker { --sc:var(--red); } .finding.should-fix { --sc:var(--orange); } .finding.nit { --sc:var(--muted); }
+    .finding.question { --sc:var(--accent); }
+    .suggestion .label { font-size:12px; font-weight:700; color:var(--green); margin:0 0 4px; }
+    .suggestion pre { border-color:var(--green); }
     .finding pre { background:var(--bg); }
     .finding blockquote { border-left-color:var(--sc, var(--accent)); color:var(--fg); font-style:italic; }
+    .copy { margin-left:auto; font:500 12px -apple-system, system-ui, sans-serif; padding:4px 10px; border-radius:6px;
+            border:1px solid var(--line); background:var(--bg); color:var(--fg); cursor:pointer; }
+    .copy:hover { background:var(--code); }
     .sev { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; padding:2px 8px;
            border-radius:99px; color:#fff; background:var(--sc); flex:none; }
     .finding.nit .sev { color:var(--bg); }

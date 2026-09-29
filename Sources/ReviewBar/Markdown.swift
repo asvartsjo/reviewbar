@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// The block-level markdown Claude writes in reviews: headings, lists, fenced code, quotes and
 /// paragraphs. Inline formatting (bold, `code`, links) is left to AttributedString.
@@ -125,6 +126,15 @@ struct MarkdownView: View {
                         .foregroundStyle(sev.color)
                 }
                 Text(inline(title)).font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 4)
+                if let comment = ReviewDoc.postable(blocks) {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(comment, forType: .string)
+                    } label: { Label("Copy comment", systemImage: "doc.on.doc") }
+                    .buttonStyle(.borderless).font(.caption)
+                    .help("Copies the suggested comment (and suggestion block) to paste on GitHub")
+                }
             }
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in view(for: b) }
         }
@@ -156,7 +166,10 @@ struct MarkdownView: View {
                 Text(inline(t))
             }
             .padding(.leading, CGFloat(indent) * 12)
-        case .code(_, let t):
+        case .code(let lang, let t):
+            if lang == "suggestion" {
+                Text("Suggested change").font(.caption.bold()).foregroundStyle(.green)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(t).font(.system(size: 12, design: .monospaced)).fixedSize()
             }
@@ -191,12 +204,25 @@ enum ReviewDoc {
         }
     }
 
-    enum Severity: String { case blocker, shouldFix = "should-fix", nit }
+    enum Severity: String { case blocker, shouldFix = "should-fix", question, nit }
 
     enum Segment: Equatable {
         case verdict(Verdict, reason: String)
         case block(MarkdownBlock)
         case finding(severity: Severity?, title: String, blocks: [MarkdownBlock])
+    }
+
+    /// The text to paste on GitHub for a finding: its quoted comment(s) plus any suggestion block.
+    static func postable(_ blocks: [MarkdownBlock]) -> String? {
+        var parts: [String] = []
+        for b in blocks {
+            switch b {
+            case .quote(let t): parts.append(t)
+            case .code("suggestion", let t): parts.append("```suggestion\n\(t)\n```")
+            default: break
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 
     /// Pure, for tests. Findings are `###` headings; a finding runs until the next heading or rule.
@@ -259,7 +285,7 @@ enum ReviewDoc {
     /// "[blocker] `a.swift:3` Title" → (.blocker, "`a.swift:3` Title").
     private static func severity(_ t: String) -> (Severity?, String) {
         let s = t.trimmingCharacters(in: .whitespaces)
-        for sev in [Severity.blocker, .shouldFix, .nit] {
+        for sev in [Severity.blocker, .shouldFix, .question, .nit] {
             for form in ["[\(sev.rawValue)]", "\(sev.rawValue):", "**\(sev.rawValue)**"]
             where s.lowercased().hasPrefix(form) {
                 return (sev, s.dropFirst(form.count).trimmingCharacters(in: .whitespaces))
@@ -283,6 +309,6 @@ extension ReviewDoc.Verdict {
 
 extension ReviewDoc.Severity {
     var color: Color {
-        switch self { case .blocker: .red; case .shouldFix: .orange; case .nit: .gray }
+        switch self { case .blocker: .red; case .shouldFix: .orange; case .question: .blue; case .nit: .gray }
     }
 }

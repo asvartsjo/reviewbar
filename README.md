@@ -75,5 +75,5 @@ Without a certificate the app is ad-hoc signed: fine for your own Mac (right-cli
 - `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are unset for every `claude` call so the subscription is used, never API billing.
 - Reviews are stored in `~/Library/Application Support/ReviewBar/` (`reviews.json` plus one `.md` per review).
 - Diffs are capped at 250 KB. Terminal follow-ups refuse prompts over 800 KB (macOS argument limit).
-- Headless reviews run with `--tools '' --strict-mcp-config`, so Claude cannot run commands or use MCP servers while reading an untrusted diff. This needs a recent Claude Code (`claude update`).
+- Headless reviews never get a shell or MCP servers (`--strict-mcp-config`). When the repo has a local clone (chosen in Settings, or found under `~/Projects`, `~/Developer`, …), the review runs in a worktree of the PR's head commit with read-only tools (`Read,Grep,Glob`; Codex: `--sandbox read-only --cd <worktree>`), so it can check callers and conventions instead of asking the author. Without a clone it gets no tools (`--tools ''`) and only sees the diff. This needs a recent Claude Code (`claude update`).
 - A review is tied to the PR's head commit, so comments alone don't mark it stale; new commits do.

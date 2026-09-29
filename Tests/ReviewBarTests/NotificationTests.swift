@@ -76,3 +76,26 @@ final class NotificationTests: XCTestCase {
         XCTAssertEqual(s, "2 review requests, 1 PR with replies, 1 PR of yours with feedback")
     }
 }
+
+final class PRFilterTests: XCTestCase {
+    private func pr(_ n: Int, draft: Bool) -> PR {
+        PR(number: n, title: "PR \(n)", url: "u\(n)", isDraft: draft, updatedAt: "2026-09-01T00:00:00Z",
+           repository: .init(nameWithOwner: "o/r"), author: .init(login: "a"))
+    }
+
+    func testDraftsKeptByDefaultAndDroppedWhenOff() {
+        let prs = [pr(1, draft: false), pr(2, draft: true)]
+        XCTAssertEqual(PRFilter.others(prs, includeDrafts: true).map(\.number), [1, 2])
+        XCTAssertEqual(PRFilter.others(prs, includeDrafts: false).map(\.number), [1])
+
+        let replies = prs.map { ReplyPR(pr: $0, waiting: 1, latestAt: "x", latestBy: "b") }
+        XCTAssertEqual(PRFilter.others(replies, includeDrafts: false).map(\.pr.number), [1])
+    }
+
+    func testIncludeDraftsDefaultsToOn() {
+        let saved = UserDefaults.standard.object(forKey: PRFilter.includeDraftsKey)
+        UserDefaults.standard.removeObject(forKey: PRFilter.includeDraftsKey)
+        defer { if let saved { UserDefaults.standard.set(saved, forKey: PRFilter.includeDraftsKey) } }
+        XCTAssertTrue(PRFilter.includeDrafts)
+    }
+}

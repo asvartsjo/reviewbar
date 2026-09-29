@@ -465,6 +465,7 @@ struct SettingsView: View {
     @AppStorage(ClaudeSettings.reviewEffortKey) private var reviewEffort = ClaudeSettings.reviewEffortDefault
     @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
     @AppStorage(ClaudeSettings.quickEffortKey) private var quickEffort = ClaudeSettings.quickEffortDefault
+    @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
@@ -578,6 +579,12 @@ struct SettingsView: View {
             Text("Models follow the latest release in each family. Default uses your Claude Code settings. "
                  + "Code is always read by the review model; "
                  + "summaries are handed to it as a starting point.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            Divider()
+            Text("Pull requests").font(.headline)
+            Toggle("Include draft PRs", isOn: $includeDrafts)
+            Text("Applies to Awaiting me and Replies. Your own drafts always show in My PRs.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             Divider()

@@ -205,6 +205,26 @@ enum RepoList {
     }
 }
 
+// MARK: - Which PRs to show
+
+enum PRFilter {
+    static let includeDraftsKey = "includeDrafts"
+
+    /// On unless turned off in Settings.
+    static var includeDrafts: Bool {
+        UserDefaults.standard.object(forKey: includeDraftsKey) as? Bool ?? true
+    }
+
+    /// Other people's PRs (review requests, replies). Your own drafts are never hidden. Pure, for tests.
+    static func others(_ prs: [PR], includeDrafts: Bool) -> [PR] {
+        includeDrafts ? prs : prs.filter { !$0.isDraft }
+    }
+
+    static func others(_ replies: [ReplyPR], includeDrafts: Bool) -> [ReplyPR] {
+        includeDrafts ? replies : replies.filter { !$0.pr.isDraft }
+    }
+}
+
 // MARK: - Claude model and effort
 
 /// Two model/effort pairs, stored in UserDefaults:
@@ -1243,6 +1263,10 @@ final class ReviewViewModel: ObservableObject {
     /// After Settings change: try every repo again, then refresh.
     func settingsChanged() async {
         skippedRepos = []
+        // New repos or showing drafts again would look like a flood of new items: re-baseline.
+        seenRequests = nil
+        seenReplies = nil
+        seenFeedback = nil
         await refresh()
     }
 
@@ -1265,12 +1289,12 @@ final class ReviewViewModel: ObservableObject {
 
         // Each list only updates (and only notifies) when its own fetch succeeded.
         do {
-            prs = try await fetchedPRs
+            prs = PRFilter.others(try await fetchedPRs, includeDrafts: PRFilter.includeDrafts)
             alerts += AlertDiff.newRequests(prs, seen: seenRequests).map(ReviewAlert.request)
             seenRequests = Set(prs.map(\.url))
         } catch { errors.append(error.localizedDescription) }
         do {
-            replies = try await fetchedReplies
+            replies = PRFilter.others(try await fetchedReplies, includeDrafts: PRFilter.includeDrafts)
             alerts += AlertDiff.newer(visibleReplies, seen: seenReplies, url: \.pr.url, latestAt: \.latestAt)
                 .map(ReviewAlert.reply)
             seenReplies = AlertDiff.latestByURL(replies, url: \.pr.url, latestAt: \.latestAt)

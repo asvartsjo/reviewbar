@@ -39,6 +39,26 @@ Then click the eye in the menu bar, open the gear, and add repos as `owner/repo`
 
 The app is ad-hoc signed and not sandboxed (it runs `gh` and `claude`). No Xcode project is needed.
 
+### Releases
+
+Push a tag to build a drag-to-Applications `.dmg` (universal: Apple Silicon and Intel) and attach it to a GitHub Release:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Without a certificate the app is ad-hoc signed: fine for your own Mac (right-click › Open the first time), but macOS may ask again for notification and Terminal permissions after each update. Signing and notarization switch on by themselves once these repository secrets exist (Settings › Secrets and variables › Actions):
+
+| Secret | What |
+|---|---|
+| `MACOS_CERT_P12` | `base64 -i cert.p12`, a **Developer ID Application** certificate exported from Keychain Access |
+| `MACOS_CERT_PASSWORD` | the .p12 password |
+| `APPLE_API_KEY_P8` | `base64 -i AuthKey_XXXX.p8`, an App Store Connect API key (for notarization) |
+| `APPLE_API_KEY_ID` | that key's ID |
+| `APPLE_API_ISSUER_ID` | the issuer ID from the App Store Connect keys page |
+
+"Run workflow" on the Release workflow builds the `.dmg` as a run artifact without making a release. Locally: `scripts/make-app.sh && scripts/make-dmg.sh`.
+
 ### Developing
 
 - `swift run` starts it straight from the source tree. Notifications and Open at login need the `.app` bundle, so they are disabled there. It uses a separate settings domain from the `.app`, so add your repos in each.

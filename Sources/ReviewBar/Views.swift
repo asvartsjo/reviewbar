@@ -374,7 +374,7 @@ struct DetailView: View {
 
     /// Quick-model summary of the comments, or the button to make one.
     @ViewBuilder private var summaryBox: some View {
-        let quick = ClaudeSettings.label(ClaudeSettings.quick)
+        let quick = Agent.current.label(Agent.current.quick)
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Feedback summary").font(.caption.bold())
@@ -418,7 +418,7 @@ struct DetailView: View {
             Text(msg).foregroundStyle(.red)
         default:
             Text(vm.isMine(pr)
-                 ? "Opens Claude Code with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub."
+                 ? "Opens \(Agent.current.appName) with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub."
                  : "Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
                 .foregroundStyle(.secondary)
         }
@@ -443,7 +443,7 @@ struct DetailView: View {
             switch vm.state(for: pr) {
             case .running:
                 ProgressView().controlSize(.small)
-                Text("Claude is reading the diff…").font(.caption)
+                Text("\(Agent.current.name) is reading the diff…").font(.caption)
                 Button("Cancel") { vm.cancelReview(pr) }.font(.caption)
             case .done(let text):
                 Button(terminalLabel("Follow up")) { vm.openTerminal(pr) }
@@ -463,7 +463,7 @@ struct DetailView: View {
                         .buttonStyle(.borderedProminent)
                     Button("Full review") { vm.review(pr) }
                 } else {
-                    Button("Review with Claude") { vm.review(pr) }
+                    Button("Review with \(Agent.current.name)") { vm.review(pr) }
                         .buttonStyle(.borderedProminent)
                 }
                 Button(terminalLabel(vm.hasFollowUpContext(pr) ? "Follow up" : "Review")) {
@@ -488,6 +488,11 @@ struct SettingsView: View {
     @AppStorage(ClaudeSettings.reviewEffortKey) private var reviewEffort = ClaudeSettings.reviewEffortDefault
     @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
     @AppStorage(ClaudeSettings.quickEffortKey) private var quickEffort = ClaudeSettings.quickEffortDefault
+    @AppStorage(Agent.key) private var agentRaw = Agent.claude.rawValue
+    @AppStorage(CodexSettings.reviewModelKey) private var codexReviewModel = ""
+    @AppStorage(CodexSettings.reviewEffortKey) private var codexReviewEffort = ""
+    @AppStorage(CodexSettings.quickModelKey) private var codexQuickModel = ""
+    @AppStorage(CodexSettings.quickEffortKey) private var codexQuickEffort = CodexSettings.quickEffortDefault
     @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
@@ -576,7 +581,41 @@ struct SettingsView: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             Divider()
-            Text("Claude").font(.headline)
+            Text("AI tool").font(.headline)
+            Picker("AI tool", selection: $agentRaw) {
+                ForEach(Agent.allCases) { a in Text(a.appName).tag(a.rawValue) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 220)
+            if agentRaw == Agent.codex.rawValue {
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+                GridRow {
+                    Text("").gridColumnAlignment(.leading)
+                    Text("Model").font(.caption).foregroundStyle(.secondary)
+                    Text("Effort").font(.caption).foregroundStyle(.secondary)
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Reviews & terminal")
+                        Text("Reads the code").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    modelField($codexReviewModel, placeholder: "Default")
+                    picker($codexReviewEffort, CodexSettings.efforts, "Review effort")
+                }
+                GridRow {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Feedback summaries")
+                        Text("Reads comments only").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    modelField($codexQuickModel, placeholder: "Same as reviews")
+                    picker($codexQuickEffort, CodexSettings.efforts, "Summary effort")
+                }
+            }
+            Text("Type a model name such as gpt-5.5, or leave empty for your Codex config. "
+                 + "Uses your ChatGPT login, never an API key. Reviews run in a read-only sandbox.")
+                .font(.caption2).foregroundStyle(.secondary)
+            } else {
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 GridRow {
                     Text("").gridColumnAlignment(.leading)
@@ -605,13 +644,15 @@ struct SettingsView: View {
                  + "summaries are handed to it as a starting point.")
                 .font(.caption2).foregroundStyle(.secondary)
 
+            }
+
             Divider()
             Text("Terminal").font(.headline)
             let installed = TerminalApp.installed
             let resolved = TerminalApp.resolve(saved: terminalRaw, installed: installed)
             let automatic = TerminalApp.resolve(saved: "", installed: installed)
             HStack {
-                Text("Open Claude Code in")
+                Text("Open \(Agent(rawValue: agentRaw)?.appName ?? "Claude Code") in")
                 Picker("Terminal app", selection: $terminalRaw) {
                     Text("Automatic (\(automatic.name))").tag("")
                     Divider()
@@ -739,6 +780,14 @@ struct SettingsView: View {
             input = failed.joined(separator: " ")   // keep what didn't work, so it can be fixed
             checking = false
         }
+    }
+
+    private func modelField(_ value: Binding<String>, placeholder: String) -> some View {
+        TextField(placeholder, text: value)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 120)
+            .foregroundStyle(CodexSettings.isValidModel(value.wrappedValue) ? Color.primary : Color.red)
+            .help("Letters, digits, dots, dashes and underscores only")
     }
 
     private func picker(_ value: Binding<String>, _ options: [String], _ label: String) -> some View {

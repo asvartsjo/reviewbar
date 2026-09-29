@@ -518,7 +518,7 @@ enum ClaudeErrors {
     static func usageLimitMessage(_ output: String, now: Date = Date()) -> String? {
         let lower = output.lowercased()
         guard lower.contains("usage limit") || lower.contains("limit reached") else { return nil }
-        var message = "Claude usage limit reached."
+        var message = "\(Agent.current.name) usage limit reached."
         if let r = output.range(of: #"\|(\d{9,11})"#, options: .regularExpression),
            let secs = TimeInterval(output[r].dropFirst()) {
             let reset = Date(timeIntervalSince1970: secs)
@@ -1384,16 +1384,17 @@ enum Backend {
             \(c.diff)
             """
         }
-        let text = try await runClaude(prompt, ClaudeSettings.review)
+        let text = try await runAgent(prompt)
         return (text, fellBack)
     }
 
-    /// Runs Claude Code headlessly. A usage-limit notice (sometimes printed with exit 0)
+    /// Runs the chosen agent headlessly. A usage-limit notice (sometimes printed with exit 0)
     /// becomes a readable error instead of being saved as a review.
-    static func runClaude(_ prompt: String, _ pair: (model: String, effort: String)) async throws -> String {
+    static func runAgent(_ prompt: String, quick: Bool = false) async throws -> String {
+        let agent = Agent.current
         let text: String
         do {
-            text = try await sh("\(claudeBin) \(headlessFlags)\(ClaudeSettings.flags(pair))", input: prompt)
+            text = try await sh(agent.headlessCommand(quick ? agent.quick : agent.review), input: prompt)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch let e as ShellError {
             if let m = ClaudeErrors.usageLimitMessage(e.stderr) { throw ShellError(code: e.code, stderr: m) }
@@ -1408,7 +1409,7 @@ enum Backend {
     /// Headless review with the review model (uses your logged-in Max session).
     static func review(_ pr: PR) async throws -> String {
         let prompt = try await buildPrompt(for: pr)
-        return try await runClaude(prompt, ClaudeSettings.review)
+        return try await runAgent(prompt)
     }
 
     /// Short summary of the comments with the quick model. Reads only the feedback, never the diff,
@@ -1437,7 +1438,7 @@ enum Backend {
         FEEDBACK ON GITHUB:
         \(feedback)
         """
-        return try await runClaude(prompt, ClaudeSettings.quick)
+        return try await runAgent(prompt, quick: true)
     }
 
     /// Opens a new Terminal window with an interactive Claude Code session seeded for `mode`.
@@ -1463,7 +1464,7 @@ enum Backend {
 
         let path = (try? await sh("print -r -- $PATH").trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
         let script = TerminalApp.launcherScript(
-            claude: "\(claudeBin)\(ClaudeSettings.flags(ClaudeSettings.review))",
+            claude: Agent.current.interactiveCommand(Agent.current.review),
             promptFile: promptFile.path, path: path)
         try script.write(to: launcher, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcher.path)
@@ -1768,7 +1769,7 @@ final class ReviewViewModel: ObservableObject {
         let task = Task {
             defer { running[key] = nil }
             do {
-                let by = ClaudeSettings.label(ClaudeSettings.review)
+                let by = Agent.current.label(Agent.current.review)
                 var sinceCommit: String?, fellBack: Bool?
                 let text: String
                 if let earlier {

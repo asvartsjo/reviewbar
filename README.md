@@ -1,6 +1,6 @@
 # ReviewBar
 
-A macOS menubar app that lists GitHub pull requests awaiting your review in selected repos, and hands them to Claude Code for private review notes. Runs on your Claude Max login, not the API.
+A macOS menubar app that lists GitHub pull requests awaiting your review in selected repos, and hands them to Claude Code or OpenAI's Codex CLI for private review notes. Runs on your Claude or ChatGPT subscription login, not the API.
 
 ## What it does
 
@@ -16,6 +16,7 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 - **Notifications** for new review requests, replies on your review threads and feedback on your PRs (each can be turned off in Settings). Clicking one opens the PR; several at once are grouped. The first refresh after launch only sets a baseline, so starting the app doesn't flood you.
 - **Open at login** (Settings › Startup). Refreshes every 5 minutes and whenever you open the popover if the data is over a minute old.
 - Reviews are saved locally and reload on launch, labelled with the model and effort that wrote them.
+- **Settings › AI tool** switches between Claude Code and Codex. For Codex, type a model name (e.g. `gpt-5.5`) or leave it empty for your Codex config, and pick a reasoning effort; `OPENAI_API_KEY` is unset so it uses your ChatGPT login, and headless reviews run with `codex exec --sandbox read-only`.
 - **Settings › Claude** picks a model and effort for anything that reads code (Review with Claude, every Terminal session), (default Opus), and a separate pair (default Sonnet, low effort) for **Summarise feedback**. Models are Claude Code aliases, so they follow the latest release in each family. That summary reads only comments, never the diff, so it reports what people said and what's waiting on you, not whether a fix is right. Terminal sessions get it as a starting point together with the full comments and diff. "Default" passes no model flag, so Claude Code's own settings apply.
 - **Replies** lists open PRs you reviewed where someone answered in one of your unresolved review threads (the last comment isn't yours). Dismiss one to hide it until the next reply. The menu bar count includes them.
 - **My PRs** lists your own open PRs with reviewer feedback you haven't answered: unresolved threads where a reviewer spoke last, and approvals, change requests, review summaries or comments newer than your last commit or comment. Bots are ignored. **Work through feedback in Terminal** opens Claude Code with all of it plus the diff, starting with a grouped list of what reviewers are asking for.
@@ -26,7 +27,7 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 
 - macOS 13+ with Xcode 15+ or the Command Line Tools (Swift 5.9+)
 - [`gh`](https://cli.github.com) logged in (`gh auth login`, authorise SSO if your org needs it)
-- [Claude Code](https://claude.com/claude-code) logged in with your Max account (`claude`)
+- [Claude Code](https://claude.com/claude-code) logged in with your Max account (`claude`), or [Codex CLI](https://github.com/openai/codex) logged in with ChatGPT (`codex login`)
 
 ## Setup
 

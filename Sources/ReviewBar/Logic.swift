@@ -407,7 +407,12 @@ enum Backend {
         let search = "is:pr is:open reviewed-by:@me -author:@me " + terms.joined(separator: " ")
 
         let out = try await sh("gh api graphql -f query=\(q(repliesQuery)) -f q=\(q(search))")
-        let data = try JSONDecoder().decode(GQL<RepliesData>.self, from: Data(out.utf8)).data
+        return try parseReplies(Data(out.utf8))
+    }
+
+    /// The `repliesQuery` response → PRs with replies waiting on me. Pure, for tests.
+    static func parseReplies(_ json: Data) throws -> [ReplyPR] {
+        let data = try JSONDecoder().decode(GQL<RepliesData>.self, from: json).data
         let me = data.viewer.login
 
         return data.search.items.compactMap { n -> ReplyPR? in
@@ -485,7 +490,12 @@ enum Backend {
         let search = "is:pr is:open author:@me " + terms.joined(separator: " ")
 
         let out = try await sh("gh api graphql -f query=\(q(myPRsQuery)) -f q=\(q(search))")
-        let data = try JSONDecoder().decode(GQL<MyPRsData>.self, from: Data(out.utf8)).data
+        return try parseMyPRs(Data(out.utf8))
+    }
+
+    /// The `myPRsQuery` response → my PRs with unanswered feedback. Pure, for tests.
+    static func parseMyPRs(_ json: Data) throws -> [FeedbackPR] {
+        let data = try JSONDecoder().decode(GQL<MyPRsData>.self, from: json).data
         let me = data.viewer.login
 
         return data.search.items.compactMap { n -> FeedbackPR? in

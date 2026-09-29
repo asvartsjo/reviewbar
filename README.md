@@ -15,16 +15,29 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 
 ## Requirements
 
-- macOS 13+, Xcode 15+
+- macOS 13+ with Xcode 15+ or the Command Line Tools (Swift 5.9+)
 - [`gh`](https://cli.github.com) logged in (`gh auth login`, authorise SSO if your org needs it)
 - [Claude Code](https://claude.com/claude-code) logged in with your Max account (`claude`)
 
 ## Setup
 
-1. In Xcode create a new macOS App (SwiftUI), delete the template `ContentView.swift`, and add the files from `Sources/ReviewBar/`.
-2. Signing & Capabilities: remove **App Sandbox** (needed to run `gh` and `claude`).
-3. Target Info: add `Application is agent (UIElement)` = YES to hide the Dock icon.
-4. Run, click the gear, and add repos as `owner/repo` (or paste GitHub URLs). Each is checked with `gh` when added, because one repo `gh` can't read makes GitHub reject the whole search.
+```sh
+git clone https://github.com/asvartsjo/reviewbar && cd reviewbar
+scripts/make-app.sh              # builds build/ReviewBar.app
+mv build/ReviewBar.app /Applications/
+open /Applications/ReviewBar.app
+```
+
+Then click the eye in the menu bar, open the gear, and add repos as `owner/repo` (or paste GitHub URLs). Each is checked with `gh` when added, because one repo `gh` can't read makes GitHub reject the whole search.
+
+The app is ad-hoc signed and not sandboxed (it runs `gh` and `claude`). No Xcode project is needed.
+
+### Developing
+
+- `swift run` starts it straight from the source tree. It uses a separate settings domain from the `.app`, so add your repos in each.
+- `swift test` runs the unit tests (repo name parsing, model settings, feedback and reply counting from sample GitHub responses).
+- `open Package.swift` opens it in Xcode.
+- CI (GitHub Actions, macOS) builds, tests and bundles the app on every push; the zipped `.app` is attached to each run. A downloaded build is quarantined by macOS: right-click › Open the first time, or `xattr -dr com.apple.quarantine ReviewBar.app`.
 
 ## Notes
 

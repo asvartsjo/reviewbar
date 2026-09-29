@@ -1,0 +1,34 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Bundle app
+        run: |
+          scripts/make-app.sh
+          ditto -c -k --keepParent build/ReviewBar.app build/ReviewBar.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReviewBar
+          path: build/ReviewBar.zip
+          retention-days: 14

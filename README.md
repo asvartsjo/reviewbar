@@ -8,7 +8,8 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 - **Review with Claude** runs `claude -p` headlessly and shows a private summary, a lean (approve / comment / request changes), and findings with `file:line`, quoted code and a question to ask the author.
 - Reviews are saved locally and reload on launch.
 - **Replies** lists open PRs you reviewed where someone answered in one of your unresolved review threads (the last comment isn't yours). Dismiss one to hide it until the next reply. The menu bar count includes them.
-- **Follow up in Terminal** opens Claude Code seeded with the saved notes, the PR's review threads (your comments marked, unresolved first) and the current diff. It is offered for any PR with saved notes or replies.
+- **My PRs** lists your own open PRs with reviewer feedback you haven't answered: unresolved threads where a reviewer spoke last, and approvals, change requests, review summaries or comments newer than your last commit or comment. Bots are ignored. **Work through feedback in Terminal** opens Claude Code with all of it plus the diff, starting with a grouped list of what reviewers are asking for.
+- **Follow up in Terminal** opens Claude Code seeded with the saved notes, the PR's reviews, review threads and conversation (your comments marked, unresolved threads first) and the current diff. It is offered for any PR with saved notes or replies.
 - Nothing is ever posted to GitHub. Only read-only `gh` commands are used.
 
 ## Requirements

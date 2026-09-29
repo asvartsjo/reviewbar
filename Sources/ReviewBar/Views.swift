@@ -4,6 +4,7 @@ import AppKit
 private enum Tab: String, CaseIterable {
     case pending = "Awaiting me"
     case replies = "Replies"
+    case mine = "My PRs"
     case saved = "Saved"
 }
 
@@ -39,6 +40,7 @@ struct ContentView: View {
                 switch tab {
                 case .pending: pendingList
                 case .replies: repliesList
+                case .mine: mineList
                 case .saved: savedList
                 }
             }
@@ -136,6 +138,45 @@ struct ContentView: View {
         .contentShape(Rectangle())
     }
 
+    // MARK: my PRs
+
+    private var mineList: some View {
+        Group {
+            if vm.visibleFeedback.isEmpty && !vm.loading {
+                empty("tray", "No new feedback on your open PRs.")
+            } else {
+                List(vm.visibleFeedback) { f in
+                    Button { selected = f.pr } label: { feedbackRow(f) }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Dismiss until new feedback") { vm.dismissFeedback(f) }
+                        }
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+
+    private func feedbackRow(_ f: FeedbackPR) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("\(f.pr.repository.nameWithOwner) #\(f.pr.number)")
+                    .font(.caption).foregroundStyle(.secondary)
+                if f.pr.isDraft {
+                    Text("DRAFT").font(.caption2).padding(.horizontal, 4)
+                        .background(.quaternary, in: Capsule())
+                }
+                Spacer()
+                DecisionBadge(decision: f.decision)
+            }
+            Text(f.pr.title).font(.body).lineLimit(2)
+            Text("\(f.summary) · \(f.latestBy) \(age(f.latestAt))")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
     // MARK: saved
 
     private var savedList: some View {
@@ -183,6 +224,7 @@ struct ContentView: View {
         switch t {
         case .pending where !vm.prs.isEmpty: return "\(t.rawValue) (\(vm.prs.count))"
         case .replies where !vm.visibleReplies.isEmpty: return "\(t.rawValue) (\(vm.visibleReplies.count))"
+        case .mine where !vm.visibleFeedback.isEmpty: return "\(t.rawValue) (\(vm.visibleFeedback.count))"
         default: return t.rawValue
         }
     }
@@ -223,6 +265,17 @@ struct DetailView: View {
             Text("\(pr.repository.nameWithOwner) #\(pr.number) · \(pr.author.login)")
                 .font(.caption).foregroundStyle(.secondary)
 
+            if let f = vm.feedback(for: pr) {
+                HStack {
+                    DecisionBadge(decision: f.decision)
+                    Text("New feedback: \(f.summary). Latest from \(f.latestBy).")
+                        .font(.caption).foregroundStyle(.blue)
+                    Spacer()
+                    Button("Dismiss") { vm.dismissFeedback(f) }
+                        .buttonStyle(.borderless).font(.caption)
+                }
+            }
+
             if let r = vm.reply(for: pr) {
                 HStack {
                     Text("\(r.waiting) of your review threads \(r.waiting == 1 ? "has a reply" : "have replies") waiting. "
@@ -234,7 +287,7 @@ struct DetailView: View {
                 }
             }
 
-            if case .idle = vm.state(for: pr), vm.hasOlderReview(pr) {
+            if !vm.isMine(pr), case .idle = vm.state(for: pr), vm.hasOlderReview(pr) {
                 Text("This PR has new activity since your last review. The older one is under Saved.")
                     .font(.caption).foregroundStyle(.orange)
             }
@@ -248,7 +301,9 @@ struct DetailView: View {
                     case .done(let text): Text(rendered(text))
                     case .failed(let msg): Text(msg).foregroundStyle(.red)
                     default:
-                        Text("Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
+                        Text(vm.isMine(pr)
+                             ? "Opens Claude Code with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub."
+                             : "Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -261,6 +316,17 @@ struct DetailView: View {
     }
 
     @ViewBuilder private var actions: some View {
+        HStack {
+            if vm.isMine(pr) {
+                Button("Work through feedback in Terminal") { vm.openTerminal(pr) }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                reviewActions
+            }
+        }
+    }
+
+    @ViewBuilder private var reviewActions: some View {
         HStack {
             switch vm.state(for: pr) {
             case .running:
@@ -318,5 +384,23 @@ struct SettingsView: View {
             }
         }
         .padding(10)
+    }
+}
+
+/// GitHub's overall review decision on a PR, as a small coloured label.
+struct DecisionBadge: View {
+    let decision: String?
+
+    var body: some View {
+        switch decision ?? "" {
+        case "APPROVED":
+            Label("Approved", systemImage: "checkmark.circle.fill")
+                .font(.caption).foregroundStyle(.green)
+        case "CHANGES_REQUESTED":
+            Label("Changes requested", systemImage: "exclamationmark.circle.fill")
+                .font(.caption).foregroundStyle(.orange)
+        default:
+            EmptyView()
+        }
     }
 }

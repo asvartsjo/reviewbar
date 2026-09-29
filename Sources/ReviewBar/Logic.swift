@@ -46,6 +46,30 @@ struct ReplyPR: Identifiable, Hashable {
     var id: String { pr.url }
 }
 
+/// One of your own open PRs with reviewer feedback you have not answered yet.
+struct FeedbackPR: Identifiable, Hashable {
+    let pr: PR
+    /// GitHub's overall review decision: APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or nil.
+    let decision: String?
+    /// Unresolved review threads whose last comment is a reviewer's.
+    let threads: Int
+    /// Approvals, change requests and review summaries since your last push or comment.
+    let reviews: Int
+    /// Conversation comments since your last push or comment.
+    let comments: Int
+    let latestAt: String   // ISO 8601
+    let latestBy: String
+    var id: String { pr.url }
+
+    var summary: String {
+        func n(_ count: Int, _ word: String) -> String? {
+            count == 0 ? nil : "\(count) \(word)\(count == 1 ? "" : "s")"
+        }
+        return [n(threads, "thread"), n(reviews, "review"), n(comments, "comment")]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
 enum ReviewState {
     case idle, running
     case done(String)
@@ -308,12 +332,135 @@ enum Backend {
         }
     }
 
-    // MARK: Review threads for the follow-up prompt
+    // MARK: Feedback on your own PRs
 
-    private static let threadsQuery = """
+    private static let myPRsQuery = """
+    query($q: String!) {
+      viewer { login }
+      search(query: $q, type: ISSUE, first: 30) {
+        nodes { ... on PullRequest {
+          number title url isDraft updatedAt headRefOid reviewDecision
+          repository { nameWithOwner } author { login }
+          commits(last: 1) { nodes { commit { committedDate } } }
+          reviews(last: 20) { nodes { author { login __typename } state body submittedAt } }
+          comments(last: 20) { nodes { author { login __typename } createdAt } }
+          reviewThreads(last: 50) { nodes {
+            isResolved
+            comments(last: 1) { nodes { author { login __typename } createdAt } }
+          } }
+        } }
+      }
+    }
+    """
+
+    /// Your open PRs where a reviewer (not a bot) left something you have not answered:
+    /// an unresolved thread whose last comment is theirs, or a review or comment
+    /// newer than your last commit or comment. One read-only GraphQL query.
+    static func fetchMyPRs() async throws -> [FeedbackPR] {
+        let (owner, repos) = settingsScope()
+        var terms = repos.map { "repo:\($0)" }
+        if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
+        guard !terms.isEmpty else { return [] }
+        let search = "is:pr is:open author:@me " + terms.joined(separator: " ")
+
+        let out = try await sh("gh api graphql -f query=\(q(myPRsQuery)) -f q=\(q(search))")
+        let data = try JSONDecoder().decode(GQL<MyPRsData>.self, from: Data(out.utf8)).data
+        let me = data.viewer.login
+
+        return data.search.items.compactMap { n -> FeedbackPR? in
+            func isReviewer(_ a: GitHubUser?) -> Bool { a.map { $0.login != me && !$0.isBot } ?? false }
+
+            // Your last activity: newest commit, or anything you wrote on the PR.
+            var myLast = n.commits.items.last?.commit.committedDate ?? ""
+            let mine = n.reviews.items.filter { $0.author?.login == me }.compactMap(\.submittedAt)
+                + n.comments.items.filter { $0.author?.login == me }.map(\.createdAt)
+                + n.reviewThreads.items.compactMap(\.comments.items.last)
+                    .filter { $0.author?.login == me }.map(\.createdAt)
+            myLast = ([myLast] + mine).max() ?? myLast
+
+            var latestAt = "", latestBy = ""
+            func seen(_ at: String, _ who: GitHubUser?) {
+                if at > latestAt { latestAt = at; latestBy = who?.login ?? "" }
+            }
+
+            var threads = 0
+            for t in n.reviewThreads.items where !t.isResolved {
+                guard let last = t.comments.items.last, isReviewer(last.author) else { continue }
+                threads += 1
+                seen(last.createdAt, last.author)
+            }
+            var reviews = 0
+            for r in n.reviews.items {
+                guard isReviewer(r.author), let at = r.submittedAt, at > myLast else { continue }
+                // A plain COMMENTED review with no summary only wraps thread comments, counted above.
+                let counts = r.state == "APPROVED" || r.state == "CHANGES_REQUESTED"
+                    || (r.state == "COMMENTED" && !r.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                guard counts else { continue }
+                reviews += 1
+                seen(at, r.author)
+            }
+            var comments = 0
+            for c in n.comments.items where isReviewer(c.author) && c.createdAt > myLast {
+                comments += 1
+                seen(c.createdAt, c.author)
+            }
+            guard threads + reviews + comments > 0 else { return nil }
+
+            let pr = PR(number: n.number, title: n.title, url: n.url, isDraft: n.isDraft,
+                        updatedAt: n.updatedAt, repository: n.repository,
+                        author: n.author ?? PR.Author(login: me), headRefOid: n.headRefOid)
+            return FeedbackPR(pr: pr, decision: n.reviewDecision, threads: threads, reviews: reviews,
+                              comments: comments, latestAt: latestAt, latestBy: latestBy)
+        }
+        .sorted { $0.latestAt > $1.latestAt }
+    }
+
+    private struct MyPRsData: Decodable {
+        let viewer: Login
+        let search: Nodes<Node>
+        struct Node: Decodable {
+            let number: Int
+            let title: String
+            let url: String
+            let isDraft: Bool
+            let updatedAt: String
+            let headRefOid: String?
+            let reviewDecision: String?
+            let repository: PR.Repo
+            let author: PR.Author?
+            let commits: Nodes<CommitNode>
+            let reviews: Nodes<Review>
+            let comments: Nodes<Comment>
+            let reviewThreads: Nodes<ReviewThread>
+        }
+        struct CommitNode: Decodable {
+            let commit: Commit
+            struct Commit: Decodable { let committedDate: String }
+        }
+        struct Review: Decodable {
+            let author: GitHubUser?
+            let state: String
+            let body: String
+            let submittedAt: String?
+        }
+        struct Comment: Decodable {
+            let author: GitHubUser?
+            let createdAt: String
+        }
+        struct ReviewThread: Decodable {
+            let isResolved: Bool
+            let comments: Nodes<Comment>
+        }
+    }
+
+    // MARK: Feedback text for Terminal prompts
+
+    private static let feedbackQuery = """
     query($owner: String!, $name: String!, $number: Int!) {
       viewer { login }
       repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+        reviews(last: 30) { nodes { author { login } state body submittedAt } }
+        comments(last: 30) { nodes { author { login } body createdAt } }
         reviewThreads(first: 100) { nodes {
           isResolved isOutdated path line originalLine
           comments(first: 50) { nodes { author { login } body createdAt } }
@@ -321,45 +468,80 @@ enum Backend {
       } }
     }
     """
-    static let maxThreadBytes = 60_000
+    /// Cap per section (reviews, threads, conversation) so one noisy section can't crowd out the rest.
+    static let maxFeedbackSectionBytes = 25_000
 
-    /// The PR's review threads as plain text, unresolved first. Best effort: never throws.
-    static func reviewThreads(for pr: PR) async -> String {
+    /// The PR's reviews, review threads (unresolved first) and conversation as plain text,
+    /// with my own comments marked "(me)". Best effort: never throws.
+    static func feedback(for pr: PR) async -> String {
         let parts = pr.repository.nameWithOwner.split(separator: "/", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { return "(could not load review threads)" }
-        let cmd = "gh api graphql -f query=\(q(threadsQuery)) -f owner=\(q(parts[0])) "
+        guard parts.count == 2 else { return "(could not load feedback)" }
+        let cmd = "gh api graphql -f query=\(q(feedbackQuery)) -f owner=\(q(parts[0])) "
             + "-f name=\(q(parts[1])) -F number=\(pr.number)"
         guard let out = try? await sh(cmd),
-              let data = try? JSONDecoder().decode(GQL<ThreadsData>.self, from: Data(out.utf8)).data
-        else { return "(could not load review threads)" }
+              let data = try? JSONDecoder().decode(GQL<FeedbackData>.self, from: Data(out.utf8)).data,
+              let p = data.repository?.pullRequest
+        else { return "(could not load feedback)" }
 
         let me = data.viewer.login
-        let threads = (data.repository?.pullRequest?.reviewThreads.items ?? [])
-            .sorted { !$0.isResolved && $1.isResolved }
-        guard !threads.isEmpty else { return "(no review threads)" }
+        func who(_ a: Login?) -> String {
+            let l = a?.login ?? "ghost"
+            return "@\(l)\(l == me ? " (me)" : "")"
+        }
+        func capped(_ text: String) -> String {
+            guard text.utf8.count > maxFeedbackSectionBytes else { return text }
+            return String(decoding: Data(text.utf8.prefix(maxFeedbackSectionBytes)), as: UTF8.self)
+                + "\n(NOTE: section truncated at \(maxFeedbackSectionBytes / 1000) KB.)\n"
+        }
 
-        var text = ""
-        for (i, t) in threads.enumerated() {
+        var reviews = ""
+        for r in p.reviews.items {
+            let body = r.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            if r.state == "COMMENTED" && body.isEmpty { continue }   // only wraps thread comments
+            reviews += "\(who(r.author)) \(r.state) \(r.submittedAt ?? ""):\n\(body)\n\n"
+        }
+
+        var threads = ""
+        let sorted = p.reviewThreads.items.sorted { !$0.isResolved && $1.isResolved }
+        for (i, t) in sorted.enumerated() {
             let line = (t.line ?? t.originalLine).map { ":\($0)" } ?? ""
-            text += "--- Thread \(i + 1) · \(t.isResolved ? "resolved" : "UNRESOLVED") · "
+            threads += "--- Thread \(i + 1) · \(t.isResolved ? "resolved" : "UNRESOLVED") · "
                 + "\(t.path)\(line)\(t.isOutdated ? " (outdated)" : "")\n"
             for c in t.comments.items {
-                let who = c.author?.login ?? "ghost"
-                text += "@\(who)\(who == me ? " (me)" : "") \(c.createdAt):\n\(c.body)\n\n"
+                threads += "\(who(c.author)) \(c.createdAt):\n\(c.body)\n\n"
             }
         }
-        if text.utf8.count > maxThreadBytes {
-            text = String(decoding: Data(text.utf8.prefix(maxThreadBytes)), as: UTF8.self)
-                + "\n(NOTE: review threads truncated at \(maxThreadBytes / 1000) KB.)"
+
+        var conversation = ""
+        for c in p.comments.items {
+            conversation += "\(who(c.author)) \(c.createdAt):\n\(c.body)\n\n"
         }
-        return text
+
+        return """
+        REVIEWS (verdicts and summaries, oldest first):
+        \(reviews.isEmpty ? "(none)\n" : capped(reviews))
+        REVIEW THREADS (unresolved first):
+        \(threads.isEmpty ? "(none)\n" : capped(threads))
+        CONVERSATION (latest 30 comments):
+        \(conversation.isEmpty ? "(none)\n" : capped(conversation))
+        """
     }
 
-    private struct ThreadsData: Decodable {
+    private struct FeedbackData: Decodable {
         let viewer: Login
         let repository: Repository?
         struct Repository: Decodable { let pullRequest: PullRequest? }
-        struct PullRequest: Decodable { let reviewThreads: Nodes<ReviewThread> }
+        struct PullRequest: Decodable {
+            let reviews: Nodes<Review>
+            let comments: Nodes<Comment>
+            let reviewThreads: Nodes<ReviewThread>
+        }
+        struct Review: Decodable {
+            let author: Login?
+            let state: String
+            let body: String
+            let submittedAt: String?
+        }
         struct ReviewThread: Decodable {
             let isResolved: Bool
             let isOutdated: Bool
@@ -379,6 +561,13 @@ enum Backend {
 
     private struct GQL<T: Decodable>: Decodable { let data: T }
     private struct Login: Decodable { let login: String }
+    /// A comment or review author; `__typename` tells people from bots.
+    private struct GitHubUser: Decodable {
+        let login: String
+        let type: String?
+        var isBot: Bool { type == "Bot" }
+        enum CodingKeys: String, CodingKey { case login, type = "__typename" }
+    }
     /// A connection's `nodes`, skipping any entry that is null or fails to decode.
     private struct Nodes<T: Decodable>: Decodable {
         let nodes: [Lossy<T>]
@@ -444,19 +633,19 @@ enum Backend {
         """
     }
 
-    /// Follow-up prompt: seeds a new session with the saved review (if any), the review
-    /// threads on GitHub including replies to my comments, and the current diff.
+    /// Follow-up prompt: seeds a new session with the saved review (if any), the feedback
+    /// on GitHub including replies to my comments, and the current diff.
     static func buildFollowUpPrompt(for pr: PR, review: String?) async throws -> String {
         let c = try await context(for: pr)
-        let threads = await reviewThreads(for: pr)
+        let feedback = await feedback(for: pr)
         return """
-        You are continuing a private code review with me. Below are the PR details, the review notes you wrote earlier (if any), the review threads on GitHub, and the current diff.
+        You are continuing a private code review with me. Below are the PR details, the review notes you wrote earlier (if any), the reviews and comments on GitHub, and the current diff.
 
         \(rules)
 
         HOW TO BEHAVE
         - The review notes were written for \(pr.headRefOid.map { "commit \($0.prefix(7))" } ?? "the PR as of \(pr.updatedAt)"). The diff below is the current one, so tell me if anything in the notes no longer matches.
-        - REVIEW THREADS is the conversation on GitHub. Comments marked "(me)" are mine. Help me understand replies to my comments and whether they resolve my concern. Point out unresolved threads waiting on me.
+        - FEEDBACK ON GITHUB holds the reviews, review threads and conversation. Comments marked "(me)" are mine. Help me understand replies to my comments and whether they resolve my concern. Point out unresolved threads waiting on me.
         - Reply now with a single line saying you're ready (and how many unresolved threads are waiting on me), then wait for my questions.
         - When you refer to code, quote it and give `path:line`.
         - Only draft comment wording if I ask. I want to write my own comments.
@@ -470,13 +659,53 @@ enum Backend {
         EARLIER REVIEW NOTES:
         \(review ?? "(none saved)")
 
-        REVIEW THREADS (from GitHub):
-        \(threads)
+        FEEDBACK ON GITHUB:
+        \(feedback)
 
         \(c.note)
         CURRENT DIFF:
         \(c.diff)
         """
+    }
+
+    /// Author prompt: helps me work through reviewer feedback on my own PR.
+    static func buildAuthorPrompt(for pr: PR) async throws -> String {
+        let c = try await context(for: pr)
+        let feedback = await feedback(for: pr)
+        return """
+        You are helping me respond to review feedback on my own pull request. Below are the PR details, the reviews and comments on GitHub, and the current diff.
+
+        \(rules)
+
+        HOW TO BEHAVE
+        - FEEDBACK ON GITHUB holds the reviews, review threads and conversation. Comments marked "(me)" are mine; everyone else is a reviewer.
+        - Start with a short list of what reviewers are asking for, grouped as: must address (change requests, blockers), questions to answer, optional (nits, suggestions). Give `path:line` where there is one, and say which items the current diff already addresses.
+        - Then wait for my questions. Help me decide what to change and think through replies. If I disagree with a reviewer, help me make the case fairly.
+        - When you refer to code, quote it and give `path:line`.
+        - Only draft reply wording if I ask. I want to write my own replies.
+
+        PR: \(pr.repository.nameWithOwner)#\(pr.number) (mine)
+        URL: \(pr.url)
+
+        METADATA (JSON):
+        \(c.meta)
+
+        FEEDBACK ON GITHUB:
+        \(feedback)
+
+        \(c.note)
+        CURRENT DIFF:
+        \(c.diff)
+        """
+    }
+
+    enum TerminalMode {
+        /// Fresh review of someone else's PR.
+        case review
+        /// Continue reviewing someone else's PR, with saved notes if any.
+        case followUp(notes: String?)
+        /// Work through feedback on my own PR.
+        case author
     }
 
     /// Headless run through the Claude Code CLI (uses your logged-in Max session).
@@ -486,18 +715,17 @@ enum Backend {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Opens a new Terminal window with an interactive Claude Code session.
-    /// With `followUp` it is seeded with your saved notes (if any) and the review threads.
-    static func openInTerminal(_ pr: PR, priorReview: String?, followUp: Bool) async throws {
+    /// Opens a new Terminal window with an interactive Claude Code session seeded for `mode`.
+    static func openInTerminal(_ pr: PR, mode: TerminalMode) async throws {
         let prompt: String
-        if followUp {
-            prompt = try await buildFollowUpPrompt(for: pr, review: priorReview)
-        } else {
-            prompt = try await buildPrompt(for: pr)
+        switch mode {
+        case .review: prompt = try await buildPrompt(for: pr)
+        case .followUp(let notes): prompt = try await buildFollowUpPrompt(for: pr, review: notes)
+        case .author: prompt = try await buildAuthorPrompt(for: pr)
         }
         guard prompt.utf8.count <= maxArgBytes else {
             throw ShellError(code: 1, stderr: "Prompt is \(prompt.utf8.count / 1000) KB, too large to pass to "
-                + "Terminal (limit \(maxArgBytes / 1000) KB). Use Review with Claude instead.")
+                + "Terminal (limit \(maxArgBytes / 1000) KB).")
         }
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("review-\(pr.number)-\(UUID().uuidString.prefix(6)).md")
@@ -526,6 +754,7 @@ final class ReviewViewModel: ObservableObject {
     @Published var error: String?
     @Published var reviews: [String: ReviewState] = [:]   // keyed by PR.reviewKey
     @Published var replies: [ReplyPR] = []
+    @Published var myPRs: [FeedbackPR] = []
     /// PR url -> `latestAt` of the reply you dismissed. Newer replies bring the PR back.
     @Published private var dismissed: [String: String] =
         UserDefaults.standard.dictionary(forKey: "dismissedReplies") as? [String: String] ?? [:]
@@ -546,9 +775,11 @@ final class ReviewViewModel: ObservableObject {
         defer { loading = false }
         async let fetchedPRs = Backend.fetchPRs()
         async let fetchedReplies = Backend.fetchReplies()
+        async let fetchedMine = Backend.fetchMyPRs()
         var errors: [String] = []
         do { prs = try await fetchedPRs } catch { errors.append(error.localizedDescription) }
         do { replies = try await fetchedReplies } catch { errors.append("Replies: \(error.localizedDescription)") }
+        do { myPRs = try await fetchedMine } catch { errors.append("My PRs: \(error.localizedDescription)") }
         self.error = errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
@@ -559,14 +790,31 @@ final class ReviewViewModel: ObservableObject {
 
     func reply(for pr: PR) -> ReplyPR? { visibleReplies.first { $0.pr.url == pr.url } }
 
-    func dismissReplies(_ r: ReplyPR) {
-        dismissed[r.pr.url] = r.latestAt
+    func dismissReplies(_ r: ReplyPR) { dismiss(r.pr.url, until: r.latestAt) }
+
+    /// Your PRs with feedback you have not dismissed (or newer than what you dismissed).
+    var visibleFeedback: [FeedbackPR] {
+        myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
+    }
+
+    func feedback(for pr: PR) -> FeedbackPR? { visibleFeedback.first { $0.pr.url == pr.url } }
+
+    /// True for your own PRs (with feedback, dismissed or not).
+    func isMine(_ pr: PR) -> Bool { myPRs.contains { $0.pr.url == pr.url } }
+
+    func dismissFeedback(_ f: FeedbackPR) { dismiss(f.pr.url, until: f.latestAt) }
+
+    private func dismiss(_ url: String, until latestAt: String) {
+        dismissed[url] = latestAt
         UserDefaults.standard.set(dismissed, forKey: "dismissedReplies")
     }
 
-    /// Distinct PRs needing you: review requests plus undismissed replies.
+    /// Distinct PRs needing you: review requests, replies and feedback on your PRs.
     var badgeCount: Int {
-        Set(prs.map(\.url)).union(visibleReplies.map(\.pr.url)).count
+        Set(prs.map(\.url))
+            .union(visibleReplies.map(\.pr.url))
+            .union(visibleFeedback.map(\.pr.url))
+            .count
     }
 
     func state(for pr: PR) -> ReviewState { reviews[pr.reviewKey] ?? .idle }
@@ -621,12 +869,19 @@ final class ReviewViewModel: ObservableObject {
         priorNotes(for: pr) != nil || replies.contains { $0.pr.url == pr.url }
     }
 
-    /// Fresh review in Terminal, or a follow-up seeded with saved notes and review threads.
+    /// Your own PR: work through feedback. Otherwise a fresh review, or a follow-up
+    /// seeded with saved notes and the feedback on GitHub.
     func openTerminal(_ pr: PR) {
-        let prior = priorNotes(for: pr)
-        let followUp = hasFollowUpContext(pr)
+        let mode: Backend.TerminalMode
+        if isMine(pr) {
+            mode = .author
+        } else if hasFollowUpContext(pr) {
+            mode = .followUp(notes: priorNotes(for: pr))
+        } else {
+            mode = .review
+        }
         Task {
-            do { try await Backend.openInTerminal(pr, priorReview: prior, followUp: followUp) }
+            do { try await Backend.openInTerminal(pr, mode: mode) }
             catch { self.error = error.localizedDescription }
         }
     }

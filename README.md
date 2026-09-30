@@ -25,7 +25,7 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 
 ## Requirements
 
-- macOS 13+ to run it; Xcode 16+ or the Command Line Tools with Swift 6+ to build it (on the macOS 27 SDK SwiftUI's macros ship only with Xcode, so use Xcode there)
+- macOS 13+ to run it; Xcode 16+ or the Command Line Tools with Swift 6+ to build it
 - [`gh`](https://cli.github.com) logged in (`gh auth login`, authorise SSO if your org needs it)
 - [Claude Code](https://claude.com/claude-code) logged in with your Max account (`claude`), or [Codex CLI](https://github.com/openai/codex) logged in with ChatGPT (`codex login`)
 
@@ -67,6 +67,7 @@ Without a certificate the app is ad-hoc signed: fine for your own Mac (right-cli
 - `swift run` starts it straight from the source tree. Notifications and Open at login need the `.app` bundle, so they are disabled there. It uses a separate settings domain from the `.app`, so add your repos in each.
 - `swift test` runs the unit tests (repo name parsing, model settings, feedback and reply counting from sample GitHub responses).
 - `open Package.swift` opens it in Xcode.
+- Views use `@ViewState` instead of `@State`: on the macOS 27 SDK `@State` is a macro that only builds with Xcode, not with just the Command Line Tools.
 - CI (GitHub Actions, macOS) builds, tests and bundles the app on every push; the zipped `.app` is attached to each run. A downloaded build is quarantined by macOS: right-click › Open the first time, or `xattr -dr com.apple.quarantine ReviewBar.app`.
 
 ## Notes

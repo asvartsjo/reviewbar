@@ -12,12 +12,12 @@ private enum Tab: String, CaseIterable {
 }
 
 struct ContentView: View {
-    @State private var systemDark = ContentView.isSystemDark
+    @ViewState private var systemDark = ContentView.isSystemDark
     static var isSystemDark: Bool { UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark" }
     @EnvironmentObject var vm: ReviewViewModel
-    @State private var showSettings = false
-    @State private var selected: PR?
-    @State private var tab: Tab = .pending
+    @ViewState private var showSettings = false
+    @ViewState private var selected: PR?
+    @ViewState private var tab: Tab = .pending
 
     var body: some View {
         VStack(spacing: 0) {
@@ -493,7 +493,7 @@ struct DetailView: View {
         }
     }
 
-    @State private var confirmDraft = false
+    @ViewState private var confirmDraft = false
 
     /// "Draft on GitHub": asks first, since this is the one thing that writes to GitHub.
     @ViewBuilder private func draftButton(_ text: String) -> some View {
@@ -556,12 +556,12 @@ struct DetailView: View {
 }
 
 struct SettingsView: View {
-    @State private var repos = RepoList.load()
-    @State private var legacyOwner = UserDefaults.standard.string(forKey: RepoList.legacyOwnerKey) ?? ""
-    @State private var input = ""
-    @State private var checking = false
-    @State private var problems: [String] = []
-    @State private var folders: [String: String] = [:]
+    @ViewState private var repos = RepoList.load()
+    @ViewState private var legacyOwner = UserDefaults.standard.string(forKey: RepoList.legacyOwnerKey) ?? ""
+    @ViewState private var input = ""
+    @ViewState private var checking = false
+    @ViewState private var problems: [String] = []
+    @ViewState private var folders: [String: String] = [:]
     @AppStorage(ClaudeSettings.reviewModelKey) private var reviewModel = ClaudeSettings.reviewModelDefault
     @AppStorage(ClaudeSettings.reviewEffortKey) private var reviewEffort = ClaudeSettings.reviewEffortDefault
     @AppStorage(ClaudeSettings.quickModelKey) private var quickModel = ClaudeSettings.quickModelDefault
@@ -578,9 +578,9 @@ struct SettingsView: View {
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
     @AppStorage(NotifySettings.mentionsKey) private var notifyMentions = true
-    @State private var notificationsAllowed: UNAuthorizationStatus?
-    @State private var openAtLogin = LoginItem.isAvailable && LoginItem.status == .enabled
-    @State private var loginProblem: String?
+    @ViewState private var notificationsAllowed: UNAuthorizationStatus?
+    @ViewState private var openAtLogin = LoginItem.isAvailable && LoginItem.status == .enabled
+    @ViewState private var loginProblem: String?
     let done: () -> Void
 
     var body: some View {

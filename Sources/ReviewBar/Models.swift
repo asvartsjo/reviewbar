@@ -51,6 +51,62 @@ struct ReplyPR: Identifiable, Hashable {
     var id: String { pr.url }
 }
 
+/// A PR you review: requested from you now, or reviewed by you before.
+struct ReviewingPR: Identifiable, Hashable {
+    let pr: PR
+    /// In Awaiting me right now. With an earlier review of yours, that's a re-request.
+    var isRequested = false
+    /// Your latest review, skipping your pending draft and dismissed reviews.
+    let myLastReview: MyReview?
+    /// Unresolved threads you took part in whose last comment is someone else's (not a bot).
+    let waiting: Int
+    /// Threads you opened, and how many of those are resolved or point at changed code.
+    let myThreads: Int
+    let resolved: Int
+    let outdated: Int
+    /// Other people's current verdicts, by login. Never you, the author or a bot.
+    let verdicts: [Verdict]
+    /// Combined CI state of the head commit: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED or nil.
+    let checks: String?
+    let latestAt: String   // ISO 8601, newest review or comment by someone else
+    var id: String { pr.url }
+
+    struct MyReview: Hashable {
+        let state: String      // APPROVED, CHANGES_REQUESTED or COMMENTED
+        let commit: String?    // nil when a force-push deleted it
+        let at: String
+    }
+
+    struct Verdict: Hashable {
+        let login: String
+        let state: String      // APPROVED or CHANGES_REQUESTED
+    }
+
+    enum Turn: Equatable {
+        case yours(Reason)
+        case authors
+        /// You approved and nothing changed since.
+        case done
+    }
+
+    enum Reason: Equatable { case requested, reRequested, newCommits, reply }
+
+    /// Your last review was of an older commit. A review whose commit is gone counts too.
+    /// Replying in a thread also creates a review on GitHub, so a reply after new commits
+    /// makes them look seen; GitHub doesn't tell replies from reviews.
+    var hasNewCommits: Bool {
+        guard let mine = myLastReview, let head = pr.headRefOid else { return false }
+        return mine.commit != head
+    }
+
+    var turn: Turn {
+        if isRequested { return .yours(myLastReview == nil ? .requested : .reRequested) }
+        if hasNewCommits { return .yours(.newCommits) }
+        if waiting > 0 { return .yours(.reply) }
+        return myLastReview?.state == "APPROVED" ? .done : .authors
+    }
+}
+
 /// One of your own open PRs with reviewer feedback you have not answered yet.
 struct FeedbackPR: Identifiable, Hashable {
     let pr: PR

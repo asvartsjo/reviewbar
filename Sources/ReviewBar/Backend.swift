@@ -376,6 +376,154 @@ enum Backend {
         }
     }
 
+    // MARK: PRs you review
+
+    private static let reviewingQuery = """
+    query($q: String!) {
+      viewer { login }
+      search(query: $q, type: ISSUE, first: 30) {
+        nodes { ... on PullRequest {
+          number title url isDraft updatedAt createdAt headRefOid
+          repository { nameWithOwner } author { login }
+          commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+          reviews(last: 30) { nodes { author { login __typename } state submittedAt commit { oid } } }
+          reviewThreads(last: 50) { nodes {
+            isResolved isOutdated
+            opener: comments(first: 1) { nodes { author { login __typename } createdAt } }
+            recent: comments(last: 5) { nodes { author { login __typename } createdAt } }
+          } }
+        } }
+      }
+    }
+    """
+
+    /// Open PRs of others that you have reviewed. Requested PRs come from Awaiting me instead,
+    /// through `merge`. One read-only GraphQL query.
+    static func fetchReviewing(skipping skipped: Set<String> = []) async throws -> [ReviewingPR] {
+        let (owner, repos) = settingsScope(skipping: skipped)
+        var terms = repos.map { "repo:\($0)" }
+        if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
+        guard !terms.isEmpty else { return [] }
+        let search = "is:pr is:open reviewed-by:@me -author:@me " + terms.joined(separator: " ")
+
+        let out = try await sh("gh api graphql -f query=\(q(reviewingQuery)) -f q=\(q(search))")
+        return try parseReviewing(Data(out.utf8))
+    }
+
+    /// The `reviewingQuery` response → PRs you reviewed, newest activity first. Pure, for tests.
+    static func parseReviewing(_ json: Data) throws -> [ReviewingPR] {
+        let data = try JSONDecoder().decode(GQL<ReviewingData>.self, from: json).data
+        let me = data.viewer.login
+
+        return data.search.items.map { n -> ReviewingPR in
+            let author = n.author?.login ?? "ghost"
+            func isOther(_ u: GitHubUser?) -> Bool { u.map { $0.login != me && !$0.isBot } ?? false }
+
+            var latestAt = ""
+            var mine: ReviewingPR.MyReview?
+            var verdicts: [String: String] = [:]
+            for r in n.reviews.items {
+                if r.author?.login == me {
+                    if let at = r.submittedAt, r.state != "PENDING", r.state != "DISMISSED" {
+                        mine = ReviewingPR.MyReview(state: r.state, commit: r.commit?.oid, at: at)
+                    }
+                    continue
+                }
+                guard isOther(r.author), let who = r.author?.login, who != author else { continue }
+                latestAt = max(latestAt, r.submittedAt ?? "")
+                switch r.state {
+                case "APPROVED", "CHANGES_REQUESTED": verdicts[who] = r.state
+                case "DISMISSED": verdicts[who] = nil
+                default: break
+                }
+            }
+
+            // `waiting` is the Replies rule (`parseReplies`), with bots left out.
+            var waiting = 0, opened = 0, resolved = 0, outdated = 0
+            for t in n.reviewThreads.items {
+                let comments = t.opener.items + t.recent.items
+                for c in comments where isOther(c.author) { latestAt = max(latestAt, c.createdAt ?? "") }
+                if t.opener.items.first?.author?.login == me {
+                    opened += 1
+                    if t.isResolved { resolved += 1 }
+                    if t.isOutdated { outdated += 1 }
+                }
+                guard !t.isResolved, comments.contains(where: { $0.author?.login == me }),
+                      let last = t.recent.items.last, isOther(last.author) else { continue }
+                waiting += 1
+            }
+
+            var pr = PR(number: n.number, title: n.title, url: n.url, isDraft: n.isDraft,
+                        updatedAt: n.updatedAt, repository: n.repository,
+                        author: PR.Author(login: author), headRefOid: n.headRefOid)
+            pr.createdAt = n.createdAt
+            return ReviewingPR(pr: pr, myLastReview: mine, waiting: waiting,
+                               myThreads: opened, resolved: resolved, outdated: outdated,
+                               verdicts: verdicts.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) },
+                               checks: n.commits.items.first?.commit.statusCheckRollup?.state,
+                               latestAt: latestAt.isEmpty ? n.updatedAt : latestAt)
+        }
+        .sorted { $0.latestAt > $1.latestAt }
+    }
+
+    /// Reviewed PRs plus the Awaiting me list: a requested PR you reviewed before is marked
+    /// re-requested, one you never reviewed is added. Each PR once. Pure, for tests.
+    static func merge(_ reviewed: [ReviewingPR], requested: [PR]) -> [ReviewingPR] {
+        let requestedURLs = Set(requested.map(\.url))
+        let reviewedURLs = Set(reviewed.map(\.pr.url))
+        let marked = reviewed.map { r -> ReviewingPR in
+            var r = r
+            r.isRequested = requestedURLs.contains(r.pr.url)
+            return r
+        }
+        let added = requested.filter { !reviewedURLs.contains($0.url) }.map {
+            ReviewingPR(pr: $0, isRequested: true, myLastReview: nil, waiting: 0, myThreads: 0,
+                        resolved: 0, outdated: 0, verdicts: [], checks: nil, latestAt: $0.updatedAt)
+        }
+        return marked + added
+    }
+
+    private struct ReviewingData: Decodable {
+        let viewer: Login
+        let search: Nodes<Node>
+        struct Node: Decodable {
+            let number: Int
+            let title: String
+            let url: String
+            let isDraft: Bool
+            let updatedAt: String
+            let createdAt: String?
+            let headRefOid: String?
+            let repository: PR.Repo
+            let author: Login?
+            let commits: Nodes<CommitNode>
+            let reviews: Nodes<Review>
+            let reviewThreads: Nodes<ReviewThread>
+        }
+        struct CommitNode: Decodable {
+            let commit: Commit
+            struct Commit: Decodable { let statusCheckRollup: Rollup? }
+            struct Rollup: Decodable { let state: String }
+        }
+        struct Review: Decodable {
+            let author: GitHubUser?
+            let state: String
+            let submittedAt: String?
+            let commit: Oid?
+            struct Oid: Decodable { let oid: String }
+        }
+        struct ReviewThread: Decodable {
+            let isResolved: Bool
+            let isOutdated: Bool
+            let opener: Nodes<Comment>
+            let recent: Nodes<Comment>
+        }
+        struct Comment: Decodable {
+            let author: GitHubUser?
+            let createdAt: String?
+        }
+    }
+
     // MARK: Feedback on your own PRs
 
     private static let myPRsQuery = """

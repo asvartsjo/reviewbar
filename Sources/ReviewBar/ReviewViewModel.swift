@@ -29,6 +29,7 @@ final class ReviewViewModel: ObservableObject {
     private var seenRequests: Set<String>?
     private var seenReplies: [String: String]?
     private var seenFeedback: [String: String]?
+    private var seenReviewing: [String: ReviewingPR]?
     /// Repos left out of searches because `gh` can't read them; cleared when Settings change.
     @Published private(set) var skippedRepos: Set<String> = []
 
@@ -73,6 +74,7 @@ final class ReviewViewModel: ObservableObject {
         seenRequests = nil
         seenReplies = nil
         seenFeedback = nil
+        seenReviewing = nil
         seenMentions = nil
         await refresh()
     }
@@ -96,13 +98,13 @@ final class ReviewViewModel: ObservableObject {
         async let fetchedMentions = Backend.fetchMentions(since: week, repos: RepoList.load())
         var errors: [String] = []
         var alerts: [ReviewAlert] = []
+        var freshRequests: [PR] = []
 
         // Each list only updates (and only notifies) when its own fetch succeeded.
         do {
             prs = PRFilter.others(try await fetchedPRs, includeDrafts: PRFilter.includeDrafts)
-            let fresh = AlertDiff.newRequests(prs, seen: seenRequests)
-            alerts += fresh.map(ReviewAlert.request)
-            if AutoReview.isOn { autoReview(fresh) }
+            freshRequests = AlertDiff.newRequests(prs, seen: seenRequests)
+            if AutoReview.isOn { autoReview(freshRequests) }
             seenRequests = Set(prs.map(\.url))
         } catch { errors.append(error.localizedDescription) }
         do {
@@ -114,7 +116,12 @@ final class ReviewViewModel: ObservableObject {
         do {
             let reviewed = PRFilter.others(try await fetchedReviewing, includeDrafts: PRFilter.includeDrafts)
             reviewing = Backend.merge(reviewed, requested: prs)
+            alerts += AlertDiff.reviewing(reviewing, before: seenReviewing)
+            seenReviewing = Dictionary(reviewing.map { ($0.pr.url, $0) }, uniquingKeysWith: { a, _ in a })
         } catch { errors.append("Reviewing: \(error.localizedDescription)") }
+        // After Reviewing, so a request on a PR you reviewed reads as a re-request.
+        let reviewedURLs = Set(reviewing.filter { $0.myLastReview != nil }.map(\.pr.url))
+        alerts += AlertDiff.requests(freshRequests, reviewed: reviewedURLs)
         do {
             myPRs = try await fetchedMine
             alerts += AlertDiff.newer(visibleFeedback, seen: seenFeedback, url: \.pr.url, latestAt: \.latestAt)

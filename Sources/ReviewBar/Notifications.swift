@@ -8,8 +8,16 @@ import UserNotifications
 /// Something worth a notification.
 enum ReviewAlert: Equatable {
     case request(PR)
+    /// A request on a PR you have reviewed before.
+    case reRequest(PR)
     case reply(ReplyPR)
     case feedback(FeedbackPR)
+    /// New commits on a PR you reviewed, after your last review.
+    case pushed(ReviewingPR)
+    /// The last of your threads on a PR was resolved.
+    case allResolved(ReviewingPR)
+    /// Someone else approved or requested changes on a PR you reviewed.
+    case verdict(ReviewingPR, ReviewingPR.Verdict)
 }
 
 /// Pure comparisons between one refresh and the next. The first refresh after launch only
@@ -26,6 +34,29 @@ enum AlertDiff {
                          url: (T) -> String, latestAt: (T) -> String) -> [T] {
         guard let seen else { return [] }
         return items.filter { latestAt($0) > (seen[url($0)] ?? "") }
+    }
+
+    /// New requests, worded as re-requests for PRs in `reviewed` (URLs of PRs you've reviewed).
+    static func requests(_ fresh: [PR], reviewed: Set<String>) -> [ReviewAlert] {
+        fresh.map { reviewed.contains($0.url) ? .reRequest($0) : .request($0) }
+    }
+
+    /// Changes on PRs you reviewed since the previous refresh: the head moved and your review is
+    /// older, your last thread got resolved, or someone's verdict is new. PRs not in `before`
+    /// (such as one you just reviewed) stay quiet.
+    static func reviewing(_ now: [ReviewingPR], before: [String: ReviewingPR]?) -> [ReviewAlert] {
+        guard let before else { return [] }
+        var alerts: [ReviewAlert] = []
+        for r in now {
+            guard let old = before[r.pr.url], r.myLastReview != nil else { continue }
+            if r.hasNewCommits, r.pr.headRefOid != old.pr.headRefOid { alerts.append(.pushed(r)) }
+            if r.myThreads > 0, r.resolved == r.myThreads, old.resolved < old.myThreads {
+                alerts.append(.allResolved(r))
+            }
+            let was = Dictionary(old.verdicts.map { ($0.login, $0.state) }, uniquingKeysWith: { $1 })
+            for v in r.verdicts where was[v.login] != v.state { alerts.append(.verdict(r, v)) }
+        }
+        return alerts
     }
 
     static func latestByURL<T>(_ items: [T], url: (T) -> String, latestAt: (T) -> String) -> [String: String] {
@@ -45,6 +76,7 @@ enum AutoReview {
 enum NotifySettings {
     static let requestsKey = "notifyRequests", repliesKey = "notifyReplies", feedbackKey = "notifyFeedback"
     static let mentionsKey = "notifyMentions"
+    static let pushedKey = "notifyPushed", resolvedKey = "notifyAllResolved", verdictsKey = "notifyVerdicts"
 
     /// On unless turned off.
     static func isOn(_ key: String) -> Bool {
@@ -53,9 +85,12 @@ enum NotifySettings {
 
     static func wants(_ alert: ReviewAlert) -> Bool {
         switch alert {
-        case .request: return isOn(requestsKey)
+        case .request, .reRequest: return isOn(requestsKey)
         case .reply: return isOn(repliesKey)
         case .feedback: return isOn(feedbackKey)
+        case .pushed: return isOn(pushedKey)
+        case .allResolved: return isOn(resolvedKey)
+        case .verdict: return isOn(verdictsKey)
         }
     }
 }
@@ -118,6 +153,16 @@ enum Notifier {
         switch a {
         case .request(let pr):
             return ("request-\(pr.url)", "Review requested by \(pr.author.login)", line(pr), pr.url)
+        case .reRequest(let pr):
+            return ("rerequest-\(pr.url)-\(pr.updatedAt)", "Review re-requested by \(pr.author.login)", line(pr), pr.url)
+        case .pushed(let r):
+            return ("pushed-\(r.pr.url)-\(r.pr.headRefOid ?? "")", "New commits since your review", line(r.pr), r.pr.url)
+        case .allResolved(let r):
+            let threads = r.myThreads == 1 ? "1 thread" : "\(r.myThreads) threads"
+            return ("resolved-\(r.pr.url)-\(r.latestAt)", "All your threads resolved", "\(line(r.pr)) · \(threads)", r.pr.url)
+        case .verdict(let r, let v):
+            let did = v.state == "APPROVED" ? "approved" : "requested changes"
+            return ("verdict-\(r.pr.url)-\(v.login)-\(v.state)", "\(v.login) \(did)", line(r.pr), r.pr.url)
         case .reply(let r):
             let waiting = r.waiting == 1 ? "1 thread waiting" : "\(r.waiting) threads waiting"
             return ("reply-\(r.pr.url)-\(r.latestAt)", "\(r.latestBy) replied", "\(line(r.pr)) · \(waiting)", r.pr.url)
@@ -142,18 +187,20 @@ enum Notifier {
     }
 
     static func summary(_ alerts: [ReviewAlert]) -> String {
-        var requests = 0, replies = 0, feedback = 0
+        var requests = 0, replies = 0, feedback = 0, updates = 0
         for a in alerts {
             switch a {
-            case .request: requests += 1
+            case .request, .reRequest: requests += 1
             case .reply: replies += 1
             case .feedback: feedback += 1
+            case .pushed, .allResolved, .verdict: updates += 1
             }
         }
         func n(_ c: Int, _ one: String, _ many: String) -> String? { c == 0 ? nil : "\(c) \(c == 1 ? one : many)" }
         return [n(requests, "review request", "review requests"),
                 n(replies, "PR with replies", "PRs with replies"),
-                n(feedback, "PR of yours with feedback", "PRs of yours with feedback")]
+                n(feedback, "PR of yours with feedback", "PRs of yours with feedback"),
+                n(updates, "update on PRs you review", "updates on PRs you review")]
             .compactMap { $0 }.joined(separator: ", ")
     }
 

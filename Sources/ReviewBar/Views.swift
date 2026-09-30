@@ -642,6 +642,9 @@ struct SettingsView: View {
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
+    @AppStorage(NotifySettings.pushedKey) private var notifyPushed = true
+    @AppStorage(NotifySettings.resolvedKey) private var notifyAllResolved = true
+    @AppStorage(NotifySettings.verdictsKey) private var notifyVerdicts = true
     @AppStorage(NotifySettings.mentionsKey) private var notifyMentions = true
     @ViewState private var notificationsAllowed: UNAuthorizationStatus?
     @ViewState private var openAtLogin = LoginItem.isAvailable && LoginItem.status == .enabled
@@ -899,8 +902,11 @@ struct SettingsView: View {
 
             Divider()
             Text("Notifications").font(.headline)
-            Toggle("New review requests", isOn: $notifyRequests)
+            Toggle("New review requests and re-requests", isOn: $notifyRequests)
             Toggle("Replies on your review threads", isOn: $notifyReplies)
+            Toggle("New commits after your review", isOn: $notifyPushed)
+            Toggle("All your threads on a PR resolved", isOn: $notifyAllResolved)
+            Toggle("Other reviewers approve or request changes", isOn: $notifyVerdicts)
             Toggle("Feedback on your PRs", isOn: $notifyFeedback)
             Toggle("@mentions of you or your teams", isOn: $notifyMentions)
             notificationHint

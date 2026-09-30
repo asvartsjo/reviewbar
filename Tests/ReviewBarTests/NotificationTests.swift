@@ -76,6 +76,71 @@ struct NotificationTests {
         let s = Notifier.summary([.request(pr(1)), .request(pr(2)), .reply(reply(3, at: "x")), .feedback(f)])
         #expect(s == "2 review requests, 1 PR with replies, 1 PR of yours with feedback")
     }
+
+    // MARK: PRs you review
+
+    /// PR 5, reviewed by you at commit "c1" unless `reviewedAt` is nil (never reviewed).
+    private func reviewing(head: String = "c1", reviewedAt: String? = "c1", threads: Int = 0, resolved: Int = 0,
+                           verdicts: [(String, String)] = [], latestAt: String = "t1") -> ReviewingPR {
+        var p = pr(5)
+        p.headRefOid = head
+        return ReviewingPR(pr: p, myLastReview: reviewedAt.map { .init(state: "COMMENTED", commit: $0, at: "t0") },
+                           waiting: 0, myThreads: threads, resolved: resolved, outdated: 0,
+                           verdicts: verdicts.map { .init(login: $0.0, state: $0.1) }, checks: nil, latestAt: latestAt)
+    }
+
+    private func diff(_ before: ReviewingPR?, _ now: ReviewingPR) -> [ReviewAlert] {
+        AlertDiff.reviewing([now], before: before.map { [$0.pr.url: $0] } ?? [:])
+    }
+
+    @Test func reviewingIsQuietOnBaselineAndForNewPRs() {
+        #expect(AlertDiff.reviewing([reviewing(head: "c2")], before: nil).isEmpty)
+        #expect(diff(nil, reviewing(head: "c2", threads: 1, resolved: 1, verdicts: [("anna", "APPROVED")])).isEmpty)
+    }
+
+    @Test func newHeadAfterYourReviewAlertsOnce() {
+        let pushed = reviewing(head: "c2")
+        #expect(diff(reviewing(), pushed) == [.pushed(pushed)])
+        #expect(diff(pushed, pushed).isEmpty)                                   // same head next refresh
+        #expect(diff(reviewing(), reviewing(head: "c2", reviewedAt: "c2")).isEmpty)   // you reviewed the new head
+        #expect(diff(reviewing(reviewedAt: nil), reviewing(head: "c2", reviewedAt: nil)).isEmpty)   // never reviewed
+    }
+
+    @Test func lastThreadResolvedAlerts() {
+        let done = reviewing(threads: 2, resolved: 2)
+        #expect(diff(reviewing(threads: 2, resolved: 1), done) == [.allResolved(done)])
+        #expect(diff(done, done).isEmpty)
+        #expect(diff(reviewing(threads: 3, resolved: 1), reviewing(threads: 3, resolved: 2)).isEmpty)
+    }
+
+    @Test func newOrChangedVerdictsAlert() {
+        let before = reviewing(verdicts: [("anna", "CHANGES_REQUESTED"), ("bob", "APPROVED")])
+        let now = reviewing(verdicts: [("anna", "APPROVED"), ("bob", "APPROVED"), ("cara", "CHANGES_REQUESTED")])
+        #expect(diff(before, now) == [.verdict(now, .init(login: "anna", state: "APPROVED")),
+                                      .verdict(now, .init(login: "cara", state: "CHANGES_REQUESTED"))])
+    }
+
+    @Test func requestOnAReviewedPRIsARerequest() {
+        #expect(AlertDiff.requests([pr(1), pr(2)], reviewed: [pr(2).url]) == [.request(pr(1)), .reRequest(pr(2))])
+        #expect(Notifier.content(.reRequest(pr(2, author: "priya-s"))).title == "Review re-requested by priya-s")
+    }
+
+    @Test func reviewingContent() {
+        let r = reviewing(head: "c2", threads: 3, resolved: 3)
+        #expect(Notifier.content(.pushed(r)).title == "New commits since your review")
+        #expect(Notifier.content(.pushed(r)).body == "o/r #5: PR 5")
+        #expect(Notifier.content(.allResolved(r)).body == "o/r #5: PR 5 · 3 threads")
+        #expect(Notifier.content(.verdict(r, .init(login: "anna", state: "CHANGES_REQUESTED"))).title
+                == "anna requested changes")
+        #expect(Notifier.content(.pushed(r)).id != Notifier.content(.pushed(reviewing(head: "c3"))).id)
+    }
+
+    @Test func summaryCountsReviewingUpdates() {
+        let r = reviewing()
+        let s = Notifier.summary([.reRequest(pr(1)), .pushed(r), .allResolved(r),
+                                  .verdict(r, .init(login: "anna", state: "APPROVED"))])
+        #expect(s == "1 review request, 3 updates on PRs you review")
+    }
 }
 
 struct PRFilterTests {

@@ -393,6 +393,7 @@ struct ContentView: View {
 struct DetailView: View {
     @EnvironmentObject var vm: ReviewViewModel
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
+    @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     private var terminal: TerminalApp { TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed) }
 
     /// "Follow up in Ghostty", or "Follow up (copy command)" when no terminal can be driven.
@@ -588,15 +589,28 @@ struct DetailView: View {
                     Button("Review changes since \(earlier.pr.versionLabel)") { vm.reviewChanges(pr, since: earlier) }
                         .buttonStyle(.borderedProminent)
                     Button("Full review") { vm.review(pr) }
+                    terminalButton
+                } else if runsReviewCommand {
+                    terminalButton.buttonStyle(.borderedProminent)
+                    Button("Review with \(Agent.current.name)") { vm.review(pr) }
+                        .help("Quick read-only review with the built-in prompt; notes are saved here")
                 } else {
                     Button("Review with \(Agent.current.name)") { vm.review(pr) }
                         .buttonStyle(.borderedProminent)
-                }
-                Button(terminalLabel(vm.hasFollowUpContext(pr) ? "Follow up" : "Review")) {
-                    vm.openTerminal(pr)
+                    terminalButton
                 }
             }
         }
+    }
+
+    private var terminalButton: some View {
+        Button(terminalLabel(vm.hasFollowUpContext(pr) ? "Follow up" : "Review")) { vm.openTerminal(pr) }
+    }
+
+    /// The terminal button sends your Review command (Settings › Terminal), so it becomes the main one.
+    private var runsReviewCommand: Bool {
+        !vm.hasFollowUpContext(pr) && Agent.current == .claude
+            && ClaudeSettings.command(reviewCommand, url: pr.url) != nil
     }
 
     private func open(_ url: String) {

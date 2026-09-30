@@ -418,9 +418,10 @@ final class ReviewViewModel: ObservableObject {
 
     // MARK: Review all
 
-    /// PRs "Review all" would pick up: no review of this version yet, and none running.
+    /// PRs "Review all" would pick up: not muted, no review of this version yet, and none running.
     var unreviewed: [PR] {
         prs.filter { pr in
+            if let r = reviewingPR(for: pr), isMuted(r) { return false }
             switch state(for: pr) { case .idle, .failed: return true; default: return false }
         }
     }

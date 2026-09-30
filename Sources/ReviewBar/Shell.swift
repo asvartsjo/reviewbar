@@ -85,6 +85,8 @@ func sh(_ command: String, input: String? = nil) async throws -> String {
     return try await withTaskCancellationHandler {
         guard running.attach(p) else { throw CancellationError() }
         try p.run()
+        // A cancel between attach and run found nothing running to stop.
+        if running.isCancelled { running.cancel() }
 
         async let outData = blocking { outP.fileHandleForReading.readDataToEndOfFile() }
         async let errData = blocking { errP.fileHandleForReading.readDataToEndOfFile() }

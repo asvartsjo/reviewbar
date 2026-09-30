@@ -41,9 +41,14 @@ struct ShellTests {
         #expect(e.stderr.filter { $0 == "e" }.count == 500_000)
     }
 
-    /// Early enough that zsh is still reading its startup files.
+    /// Early enough that zsh is still reading its startup files, when they are slow.
     @Test func cancellingStopsTheCommand() async {
         await expectCancelStops(after: .milliseconds(500))
+    }
+
+    /// An interactive zsh ignores SIGTERM, so a loop in the shell itself stops only by SIGKILL.
+    @Test func cancellingALoopInTheShellStopsIt() async {
+        await expectCancelStops(after: .seconds(2), command: "while :; do :; done")
     }
 
     /// Late enough that the command itself is running.

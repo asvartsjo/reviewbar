@@ -30,7 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     /// Clicking a notification opens the PR on GitHub. Its Verify fixes button opens a Verify
-    /// session instead, falling back to the PR when that can't start.
+    /// session instead, or the PR when Verify stopped being possible after the notification
+    /// (e.g. the terminal is now Copy command). A launch that fails shows its error in the panel.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         if let s = response.notification.request.content.userInfo[Notifier.urlKey] as? String,
@@ -38,8 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let verify = response.actionIdentifier == Notifier.verifyAction
             Task { @MainActor in
                 let vm = ReviewViewModel.shared
-                if verify, let pr = vm.reviewing.first(where: { $0.pr.url == s })?.pr,
-                   ClaudeSettings.verifyCommand(for: s) != nil {
+                if verify, Notifier.canVerify, let pr = vm.reviewing.first(where: { $0.pr.url == s })?.pr {
                     vm.verifyInTerminal(pr)
                 } else {
                     NSWorkspace.shared.open(url)

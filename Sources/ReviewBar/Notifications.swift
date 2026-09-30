@@ -187,7 +187,7 @@ enum Notifier {
 
     /// Verify fixes would open a session: Claude, a Verify command, and a terminal the app can
     /// drive (Copy command only shows its notice in the panel, which is closed).
-    private static var canVerify: Bool {
+    static var canVerify: Bool {
         Agent.current == .claude && ClaudeSettings.verifyCommand(for: "") != nil && TerminalApp.chosen != .copy
     }
 

@@ -102,12 +102,17 @@ enum NotifySettings {
 enum Notifier {
     static var isAvailable: Bool { Bundle.main.bundleIdentifier != nil }
     static let urlKey = "url"
+    /// "New commits since your review" carries a Verify fixes button (`verifyAction`).
+    static let verifyCategory = "verify", verifyAction = "verify"
     /// More than this many at once become one summary notification.
     static let maxIndividual = 3
 
     static func requestAuthorization() {
         guard isAvailable else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        let verify = UNNotificationAction(identifier: verifyAction, title: "Verify fixes", options: [.foreground])
+        UNUserNotificationCenter.current().setNotificationCategories(
+            [UNNotificationCategory(identifier: verifyCategory, actions: [verify], intentIdentifiers: [])])
     }
 
     /// Whether macOS allows our notifications, for the Settings hint.
@@ -141,10 +146,23 @@ enum Notifier {
             send(id: "summary-\(UUID().uuidString)", title: "ReviewBar", body: summary(wanted), url: nil)
             return
         }
+        let verify = canVerify
         for a in wanted {
             let c = content(a)
-            send(id: c.id, title: c.title, body: c.body, url: c.url)
+            send(id: c.id, title: c.title, body: c.body, url: c.url, category: category(for: a, verifyAvailable: verify))
         }
+    }
+
+    /// Verify fixes would open a session: Claude, a Verify command, and a terminal the app can
+    /// drive (Copy command only shows its notice in the panel, which is closed).
+    private static var canVerify: Bool {
+        Agent.current == .claude && ClaudeSettings.verifyCommand(for: "") != nil && TerminalApp.chosen != .copy
+    }
+
+    /// The category (action buttons) for an alert. Pure, for tests.
+    static func category(for a: ReviewAlert, verifyAvailable: Bool) -> String? {
+        if case .pushed = a, verifyAvailable { return verifyCategory }
+        return nil
     }
 
     /// Title, body and click-through URL for one alert. Pure, for tests.
@@ -204,12 +222,13 @@ enum Notifier {
             .compactMap { $0 }.joined(separator: ", ")
     }
 
-    private static func send(id: String, title: String, body: String, url: String?) {
+    private static func send(id: String, title: String, body: String, url: String?, category: String? = nil) {
         let c = UNMutableNotificationContent()
         c.title = title
         c.body = body
         c.sound = .default
         if let url { c.userInfo = [urlKey: url] }
+        if let category { c.categoryIdentifier = category }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil))
     }
 }

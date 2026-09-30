@@ -26,12 +26,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         completionHandler([.banner, .sound])
     }
 
-    /// Clicking a notification opens the PR on GitHub.
+    /// Clicking a notification opens the PR on GitHub. Its Verify fixes button opens a Verify
+    /// session instead, falling back to the PR when that can't start.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         if let s = response.notification.request.content.userInfo[Notifier.urlKey] as? String,
            let url = URL(string: s), url.scheme == "https", url.host == "github.com" {
-            Task { @MainActor in NSWorkspace.shared.open(url) }
+            let verify = response.actionIdentifier == Notifier.verifyAction
+            Task { @MainActor in
+                let vm = ReviewViewModel.shared
+                if verify, let pr = vm.reviewing.first(where: { $0.pr.url == s })?.pr,
+                   ClaudeSettings.verifyCommand(for: s) != nil {
+                    vm.verifyInTerminal(pr)
+                } else {
+                    NSWorkspace.shared.open(url)
+                }
+            }
         }
         completionHandler()
     }

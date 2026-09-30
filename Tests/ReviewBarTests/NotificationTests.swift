@@ -135,6 +135,15 @@ struct NotificationTests {
         #expect(Notifier.content(.pushed(r)).id != Notifier.content(.pushed(reviewing(head: "c3"))).id)
     }
 
+    @Test func onlyNewCommitsGetTheVerifyButton() {
+        let r = reviewing(head: "c2")
+        #expect(Notifier.category(for: .pushed(r), verifyAvailable: true) == Notifier.verifyCategory)
+        #expect(Notifier.category(for: .pushed(r), verifyAvailable: false) == nil)
+        #expect(Notifier.category(for: .allResolved(r), verifyAvailable: true) == nil)
+        #expect(Notifier.category(for: .reply(reply(5, at: "x")), verifyAvailable: true) == nil)
+        #expect(Notifier.category(for: .request(pr(5)), verifyAvailable: true) == nil)
+    }
+
     @Test func summaryCountsReviewingUpdates() {
         let r = reviewing()
         let s = Notifier.summary([.reRequest(pr(1)), .pushed(r), .allResolved(r),

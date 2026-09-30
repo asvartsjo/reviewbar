@@ -99,7 +99,7 @@ struct ReviewingDetailBox: View {
             }
             if d.activityCapped {
                 line {
-                    Button("Older activity is on GitHub") {
+                    Button("Older activity is on GitHub", systemImage: "arrow.up.right.square") {
                         if let u = URL(string: reviewing.pr.url) { NSWorkspace.shared.open(u) }
                     }
                     .buttonStyle(.link)
@@ -146,7 +146,7 @@ struct ReviewingDetailBox: View {
     @ViewBuilder private var verifyButton: some View {
         if Agent.current == .claude, ClaudeSettings.command(verifyCommand, url: reviewing.pr.url) != nil {
             let terminal = TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed)
-            Button(terminal.label("Verify fixes")) { vm.verifyInTerminal(reviewing.pr) }
+            Button(terminal.label("Verify fixes"), systemImage: TerminalApp.symbol) { vm.verifyInTerminal(reviewing.pr) }
                 .buttonStyle(.borderedProminent)
                 .help("Checks each of your threads against the commits since your review")
         }

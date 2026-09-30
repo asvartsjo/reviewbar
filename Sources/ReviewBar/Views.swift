@@ -88,11 +88,11 @@ struct ContentView: View {
                 ProgressView(value: Double(b.done), total: Double(b.total)).frame(width: 120)
                 Text("Reviewed \(b.done) of \(b.total)").font(.caption)
                 Spacer()
-                Button("Stop") { vm.cancelAll() }.font(.caption)
+                Button("Stop", systemImage: "stop.circle") { vm.cancelAll() }.font(.caption)
             } else if !vm.unreviewed.isEmpty {
                 Text("\(vm.unreviewed.count) without a review").font(.caption)
                 Spacer()
-                Menu("Review all") {
+                Menu("Review all", systemImage: "sparkles") {
                     Button("One by one") { vm.reviewAll(parallel: false) }
                     Button("In parallel (3 at a time)") { vm.reviewAll(parallel: true) }
                 }
@@ -137,12 +137,12 @@ struct ContentView: View {
                                     .opacity(s.group == .muted ? 0.55 : 1)
                                     .contextMenu {
                                         if vm.isMuted(r) {
-                                            Button("Unmute") { vm.unmute(r) }
+                                            Button("Unmute", systemImage: "bell") { vm.unmute(r) }
                                         } else if !r.isRequested {
-                                            Button("Mute until something happens") { vm.muteUntilSomethingHappens(r) }
-                                            Button("Mute for good") { vm.muteForGood(r) }
+                                            Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(r) }
+                                            Button("Mute for good", systemImage: "bell.slash.fill") { vm.muteForGood(r) }
                                         } else if r.myLastReview == nil {   // a re-request always shows
-                                            Button("Mute for good") { vm.muteForGood(r) }
+                                            Button("Mute for good", systemImage: "bell.slash.fill") { vm.muteForGood(r) }
                                         }
                                     }
                             }
@@ -193,7 +193,7 @@ struct ContentView: View {
                 List(vm.visibleMentions) { m in
                     Button { if let u = URL(string: m.url) { NSWorkspace.shared.open(u) } } label: { mentionRow(m) }
                         .buttonStyle(.plain)
-                        .contextMenu { Button("Dismiss") { vm.dismissMention(m) } }
+                        .contextMenu { Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) } }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -207,7 +207,7 @@ struct ContentView: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 numberedTitle(m.number, m.title)
                 Spacer(minLength: 4)
-                Button("Dismiss") { vm.dismissMention(m) }.buttonStyle(.borderless).font(.caption)
+                Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) }.buttonStyle(.borderless).font(.caption)
             }
             (Text(m.author).foregroundStyle(.primary)
                 + Text(" mentioned you \(age(m.updatedAt))").foregroundStyle(.secondary))
@@ -230,7 +230,7 @@ struct ContentView: View {
                     Button { selected = f.pr } label: { feedbackRow(f) }
                         .buttonStyle(.plain)
                         .contextMenu {
-                            Button("Dismiss until new feedback") { vm.dismissFeedback(f) }
+                            Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
                         }
                 }
                 .listStyle(.plain)
@@ -267,7 +267,7 @@ struct ContentView: View {
                     Button { selected = s.pr } label: { savedRow(s) }
                         .buttonStyle(.plain)
                         .contextMenu {
-                            Button("Delete", role: .destructive) { vm.delete(s) }
+                            Button("Delete", systemImage: "trash", role: .destructive) { vm.delete(s) }
                         }
                 }
                 .listStyle(.plain)
@@ -275,7 +275,7 @@ struct ContentView: View {
             }
             Divider()
             HStack {
-                Button("Reveal in Finder") {
+                Button("Reveal in Finder", systemImage: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([Store.dir])
                 }
                 Spacer()
@@ -366,8 +366,8 @@ struct DetailView: View {
             HStack {
                 Button { back() } label: { Label("Back", systemImage: "chevron.left") }
                 Spacer()
-                Button("Open PR") { open(pr.url) }
-                Button("Files") { open(pr.url + "/files") }
+                Button("Open PR", systemImage: "arrow.up.right.square") { open(pr.url) }
+                Button("Files", systemImage: "doc.text") { open(pr.url + "/files") }
             }
             .buttonStyle(.borderless)
 
@@ -383,7 +383,7 @@ struct DetailView: View {
                          : "New feedback: \(f.summary). Latest from \(f.latestBy).")
                         .font(.caption).foregroundStyle(.blue)
                     Spacer()
-                    Button("Dismiss") { vm.dismissFeedback(f) }
+                    Button("Dismiss", systemImage: "xmark") { vm.dismissFeedback(f) }
                         .buttonStyle(.borderless).font(.caption)
                 }
             }
@@ -395,10 +395,10 @@ struct DetailView: View {
                         .font(.caption).foregroundStyle(.blue)
                     Spacer()
                     if let rv = vm.reviewingPR(for: pr) {
-                        Button("Mute until something happens") { vm.muteUntilSomethingHappens(rv) }
+                        Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(rv) }
                             .buttonStyle(.borderless).font(.caption)
                     } else {
-                        Button("Dismiss") { vm.dismissReplies(r) }
+                        Button("Dismiss", systemImage: "xmark") { vm.dismissReplies(r) }
                             .buttonStyle(.borderless).font(.caption)
                     }
                 }
@@ -448,9 +448,9 @@ struct DetailView: View {
                 case .running:
                     ProgressView().controlSize(.small)
                 case .done:
-                    Button("Redo") { vm.summarise(pr) }.buttonStyle(.borderless).font(.caption)
+                    Button("Redo", systemImage: "arrow.counterclockwise") { vm.summarise(pr) }.buttonStyle(.borderless).font(.caption)
                 default:
-                    Button("Summarise feedback") { vm.summarise(pr) }.font(.caption)
+                    Button("Summarise feedback", systemImage: "text.alignleft") { vm.summarise(pr) }.font(.caption)
                 }
             }
             switch vm.summaryState(for: pr) {
@@ -491,7 +491,7 @@ struct DetailView: View {
     @ViewBuilder private var actions: some View {
         HStack {
             if vm.isMine(pr) {
-                Button(terminalLabel("Work through feedback")) { vm.openTerminal(pr) }
+                Button(terminalLabel("Work through feedback"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
             } else {
                 reviewActions
@@ -515,7 +515,7 @@ struct DetailView: View {
         if case .running = vm.draftState[pr.reviewKey] ?? .idle {
             ProgressView().controlSize(.small)
         } else {
-            Button("Draft on GitHub") { confirmDraft = true }
+            Button("Draft on GitHub", systemImage: "square.and.pencil") { confirmDraft = true }
                 .disabled(count == 0)
                 .help(count == 0 ? "No non-nit findings with a file and line" : "Create a pending review from the findings, nits left out")
                 .confirmationDialog("Create a draft review with \(count) comment\(count == 1 ? "" : "s")?",
@@ -534,32 +534,32 @@ struct DetailView: View {
             case .running:
                 ProgressView().controlSize(.small)
                 Text("\(Agent.current.name) is reading the diff…").font(.caption)
-                Button("Cancel") { vm.cancelReview(pr) }.font(.caption)
+                Button("Cancel", systemImage: "stop.circle") { vm.cancelReview(pr) }.font(.caption)
             case .done(let text):
-                Button(terminalLabel("Follow up")) { vm.openTerminal(pr) }
+                Button(terminalLabel("Follow up"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
-                Button("Open in browser") {
+                Button("Open in browser", systemImage: "arrow.up.right.square") {
                     let s = vm.savedReview(for: pr)
                     ReviewPage.open(pr: pr, text: text, label: s.map(ReviewPage.label), date: s?.date)
                 }
                 draftButton(text)
-                Button("Re-run") { vm.rerun(pr) }
-                Button("Copy") {
+                Button("Re-run", systemImage: "arrow.counterclockwise") { vm.rerun(pr) }
+                Button("Copy", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
             default:
                 if let earlier = vm.earlierReview(for: pr) {
-                    Button("Review changes since \(earlier.pr.versionLabel)") { vm.reviewChanges(pr, since: earlier) }
+                    Button("Review changes since \(earlier.pr.versionLabel)", systemImage: "sparkles") { vm.reviewChanges(pr, since: earlier) }
                         .buttonStyle(.borderedProminent)
-                    Button("Full review") { vm.review(pr) }
+                    Button("Full review", systemImage: "sparkles") { vm.review(pr) }
                     terminalButton
                 } else if runsReviewCommand {
                     terminalButton.buttonStyle(.borderedProminent)
-                    Button("Review with \(Agent.current.name)") { vm.review(pr) }
+                    Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
                         .help("Quick read-only review with the built-in prompt; notes are saved here")
                 } else {
-                    Button("Review with \(Agent.current.name)") { vm.review(pr) }
+                    Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
                         .buttonStyle(.borderedProminent)
                     terminalButton
                 }
@@ -568,7 +568,7 @@ struct DetailView: View {
     }
 
     private var terminalButton: some View {
-        Button(terminalLabel(vm.hasFollowUpContext(pr) ? "Follow up" : "Review")) { vm.openTerminal(pr) }
+        Button(terminalLabel(vm.hasFollowUpContext(pr) ? "Follow up" : "Review"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
     }
 
     /// The terminal button sends your Review command (Settings › Terminal), so it becomes the main one.

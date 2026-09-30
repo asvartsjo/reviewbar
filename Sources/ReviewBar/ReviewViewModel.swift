@@ -166,6 +166,34 @@ final class ReviewViewModel: ObservableObject {
 
     var yourTurnCount: Int { reviewing.filter { $0.group == .yours }.count }
 
+    func reviewingPR(for pr: PR) -> ReviewingPR? { reviewing.first { $0.pr.url == pr.url } }
+
+    struct DetailLoad {
+        var detail: ReviewingDetail?
+        var loading = false
+        var error: String?
+    }
+
+    /// By PR url. Reloaded each time a PR is opened; the previous result shows meanwhile.
+    @Published private(set) var details: [String: DetailLoad] = [:]
+
+    func detailLoad(for pr: PR) -> DetailLoad { details[pr.url] ?? DetailLoad() }
+
+    func loadDetail(_ r: ReviewingPR) {
+        let url = r.pr.url
+        guard details[url]?.loading != true else { return }
+        details[url, default: DetailLoad()].loading = true
+        details[url]?.error = nil
+        Task {
+            do {
+                details[url]?.detail = try await Backend.fetchReviewingDetail(r)
+            } catch {
+                details[url]?.error = error.localizedDescription
+            }
+            details[url]?.loading = false
+        }
+    }
+
     @Published var mentions: [Mention] = []
     private var seenMentions: [String: String]?
 

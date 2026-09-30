@@ -455,6 +455,9 @@ struct DetailView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    if !vm.isMine(pr), let r = vm.reviewingPR(for: pr), r.myLastReview != nil {
+                        ReviewingDetailBox(reviewing: r)
+                    }
                     if vm.canSummarise(pr) { summaryBox }
                     reviewContent
                 }

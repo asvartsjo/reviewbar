@@ -157,6 +157,86 @@ struct ReviewingPR: Identifiable, Hashable {
     }
 }
 
+/// What happened on a PR you review since your last review, loaded when you open it.
+struct ReviewingDetail: Equatable {
+    var commits: Commits = .unknown
+    /// Threads you opened: ones with a reply first, then open, then resolved.
+    let myThreads: [MyThread]
+    /// Unresolved threads other people opened, by login. Never you, the author or a bot.
+    let openThreadsBy: [String: Int]
+
+    struct MyThread: Equatable {
+        let path: String
+        let line: Int?
+        let snippet: String
+        let url: String?
+        let state: State
+        /// The code it points at has changed since.
+        let isOutdated: Bool
+
+        enum State: Equatable {
+            /// Unresolved, and someone else (not a bot) spoke last.
+            case replied(by: String)
+            case open, resolved
+        }
+
+        var location: String { line.map { "\(path):\($0)" } ?? path }
+
+        var stateText: String {
+            let s = switch state {
+            case .replied(let who): "\(who) replied"
+            case .open: "open"
+            case .resolved: "resolved"
+            }
+            return isOutdated ? s + " · code changed" : s
+        }
+    }
+
+    /// How the branch moved between the commit you last reviewed and the head.
+    enum Commits: Equatable {
+        case same
+        case new(count: Int, commits: [Backend.CompareInfo.Commit])
+        case rebased
+        /// Your review has no commit: a force-push deleted it.
+        case gone
+        /// You haven't reviewed it, or the compare failed.
+        case unknown
+
+        init(review: ReviewingPR.MyReview?, head: String?, compare: Backend.CompareInfo?) {
+            guard let review else { self = .unknown; return }
+            guard let reviewed = review.commit else { self = .gone; return }
+            if reviewed == head { self = .same; return }
+            guard let compare else { self = .unknown; return }
+            self = compare.isIncremental ? .new(count: compare.aheadBy, commits: compare.commits) : .rebased
+        }
+
+        var summary: String {
+            switch self {
+            case .same: "No new commits since your review"
+            case .new(let n, _): "\(n) new commit\(n == 1 ? "" : "s") since your review"
+            case .rebased: "The branch was rebased since your review, so the new commits can't be told apart"
+            case .gone: "The commit you reviewed is gone (force-push)"
+            case .unknown: "Couldn't compare with the commit you reviewed"
+            }
+        }
+    }
+
+    struct Reviewer: Equatable {
+        let login: String
+        let text: String
+    }
+
+    /// People with a verdict (from the list) or unresolved threads (from here), by login.
+    func reviewers(_ verdicts: [ReviewingPR.Verdict]) -> [Reviewer] {
+        let byLogin = Dictionary(verdicts.map { ($0.login, $0.state) }, uniquingKeysWith: { $1 })
+        return Set(byLogin.keys).union(openThreadsBy.keys).sorted().map { login in
+            let verdict = byLogin[login].map { $0 == "APPROVED" ? "approved" : "requested changes" }
+            let open = openThreadsBy[login].map { "\($0) open thread\($0 == 1 ? "" : "s")" }
+            return Reviewer(login: login, text: [verdict, open].compactMap { $0 }.joined(separator: " · "))
+        }
+    }
+}
+
 /// One of your own open PRs with reviewer feedback you have not answered yet.
 struct FeedbackPR: Identifiable, Hashable {
     let pr: PR

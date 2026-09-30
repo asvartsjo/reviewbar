@@ -524,6 +524,97 @@ enum Backend {
         }
     }
 
+    // MARK: Detail of a PR you review
+
+    private static let reviewingDetailQuery = """
+    query($owner: String!, $name: String!, $number: Int!) {
+      viewer { login }
+      repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+        reviewThreads(first: 100) { nodes {
+          isResolved isOutdated path line originalLine
+          opener: comments(first: 1) { nodes { author { login __typename } body url } }
+          recent: comments(last: 1) { nodes { author { login __typename } } }
+        } }
+      } }
+    }
+    """
+
+    /// Your threads, other people's open threads, and how the branch moved since your last
+    /// review. Two read-only calls (about 2 GraphQL points), made each time the PR is opened.
+    static func fetchReviewingDetail(_ r: ReviewingPR) async throws -> ReviewingDetail {
+        let repo = r.pr.repository.nameWithOwner
+        let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { throw ShellError(code: 1, stderr: "Not an owner/repo name: \(repo)") }
+        async let out = sh("gh api graphql -f query=\(q(reviewingDetailQuery)) -f owner=\(q(parts[0])) "
+            + "-f name=\(q(parts[1])) -F number=\(r.pr.number)")
+
+        var compared: CompareInfo?
+        if let base = r.myLastReview?.commit, let head = r.pr.headRefOid, base != head {
+            compared = await compare(repo, base: base, head: head)
+        }
+        var detail = try parseReviewingDetail(Data(try await out.utf8), author: r.pr.author.login)
+        detail.commits = .init(review: r.myLastReview, head: r.pr.headRefOid, compare: compared)
+        return detail
+    }
+
+    /// The `reviewingDetailQuery` response → your threads and other people's open ones. Pure, for tests.
+    static func parseReviewingDetail(_ json: Data, author: String) throws -> ReviewingDetail {
+        let data = try JSONDecoder().decode(GQL<ReviewingDetailData>.self, from: json).data
+        guard let pr = data.repository?.pullRequest else {
+            throw ShellError(code: 1, stderr: "Couldn't load the PR's review threads.")
+        }
+        let me = data.viewer.login
+
+        var mine: [ReviewingDetail.MyThread] = [], openBy: [String: Int] = [:]
+        for t in pr.reviewThreads.items {
+            guard let first = t.opener.items.first, let by = first.author else { continue }
+            guard by.login == me else {
+                if !t.isResolved, !by.isBot, by.login != author { openBy[by.login, default: 0] += 1 }
+                continue
+            }
+            let state: ReviewingDetail.MyThread.State
+            if t.isResolved {
+                state = .resolved
+            } else if let last = t.recent.items.last?.author, last.login != me, !last.isBot {
+                state = .replied(by: last.login)
+            } else {
+                state = .open
+            }
+            mine.append(.init(path: t.path, line: t.line ?? t.originalLine,
+                              snippet: snippet(first.body ?? "").replacingOccurrences(of: "**", with: ""),
+                              url: first.url, state: state, isOutdated: t.isOutdated))
+        }
+
+        func rank(_ s: ReviewingDetail.MyThread.State) -> Int {
+            switch s { case .replied: 0; case .open: 1; case .resolved: 2 }
+        }
+        let sorted = mine.enumerated()
+            .sorted { (rank($0.element.state), $0.offset) < (rank($1.element.state), $1.offset) }
+            .map(\.element)
+        return ReviewingDetail(myThreads: sorted, openThreadsBy: openBy)
+    }
+
+    private struct ReviewingDetailData: Decodable {
+        let viewer: Login
+        let repository: Repository?
+        struct Repository: Decodable { let pullRequest: PullRequest? }
+        struct PullRequest: Decodable { let reviewThreads: Nodes<ReviewThread> }
+        struct ReviewThread: Decodable {
+            let isResolved: Bool
+            let isOutdated: Bool
+            let path: String
+            let line: Int?
+            let originalLine: Int?
+            let opener: Nodes<Comment>
+            let recent: Nodes<Comment>
+        }
+        struct Comment: Decodable {
+            let author: GitHubUser?
+            let body: String?
+            let url: String?
+        }
+    }
+
     // MARK: Feedback on your own PRs
 
     private static let myPRsQuery = """
@@ -968,6 +1059,15 @@ enum Backend {
     private static let compareJQ =
         #"{status: .status, ahead_by: .ahead_by, commits: [.commits[] | {sha: .sha[0:7], message: (.commit.message | split("\n")[0])}]}"#
 
+    /// GitHub's compare of `base...head`, trimmed by `compareJQ`. Nil when it fails, e.g. when
+    /// `base` was force-pushed away.
+    static func compare(_ repo: String, base: String, head: String) async -> CompareInfo? {
+        guard isCommitSHA(base), isCommitSHA(head),
+              let out = try? await sh("gh api \(q("repos/\(repo)/compare/\(base)...\(head)")) --jq \(q(compareJQ))")
+        else { return nil }
+        return try? parseCompare(Data(out.utf8))
+    }
+
     static func isCommitSHA(_ s: String) -> Bool {
         s.range(of: "^[0-9a-f]{7,40}$", options: .regularExpression) != nil
     }
@@ -983,10 +1083,7 @@ enum Backend {
         let path = "repos/\(repo)/compare/\(base)...\(head)"
 
         // A missing base commit (force-pushed away) also lands here: fall back to the full diff.
-        var info: CompareInfo?
-        if let out = try? await sh("gh api \(q(path)) --jq \(q(compareJQ))") {
-            info = try? parseCompare(Data(out.utf8))
-        }
+        let info = await compare(repo, base: base, head: head)
         let feedback = await feedback(for: pr)
 
         var diff = "", note = "", fellBack = true

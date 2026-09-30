@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// "Since your review" on a PR you reviewed: commits since, your threads, other reviewers.
+/// "Since your review" on a PR you reviewed: commits and activity since, your threads, other reviewers.
 struct ReviewingDetailBox: View {
     @EnvironmentObject var vm: ReviewViewModel
     let reviewing: ReviewingPR
@@ -22,10 +22,11 @@ struct ReviewingDetailBox: View {
             }
             if let d = load.detail {
                 commits(d.commits)
+                activity(d)
                 threads(d.myThreads)
                 reviewers(d.reviewers(reviewing.verdicts))
             } else if load.loading {
-                Text("Loading threads and commits…").font(.caption).foregroundStyle(.secondary)
+                Text("Loading activity, threads and commits…").font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(8)
@@ -43,6 +44,36 @@ struct ReviewingDetailBox: View {
             }
             if count > min(list.count, Self.maxCommits) {
                 Text("+ \(count - min(list.count, Self.maxCommits)) more").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private static let isoParser = ISO8601DateFormatter()
+
+    @ViewBuilder private func activity(_ d: ReviewingDetail) -> some View {
+        if d.activity.isEmpty {
+            Text("No activity since your review").font(.caption).foregroundStyle(.secondary)
+        } else {
+            Text("Activity").font(.caption.bold()).padding(.top, 2)
+            ForEach(Array(d.activity.enumerated()), id: \.offset) { _, a in
+                let when = Self.isoParser.date(from: a.at)?.formatted(.relative(presentation: .named)) ?? ""
+                Button { if let u = URL(string: a.url ?? reviewing.pr.url) { NSWorkspace.shared.open(u) } } label: {
+                    HStack(spacing: 6) {
+                        Text(verbatim: a.text).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(when).foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open on GitHub")
+            }
+            if d.activityCapped {
+                Button("Older activity is on GitHub") {
+                    if let u = URL(string: reviewing.pr.url) { NSWorkspace.shared.open(u) }
+                }
+                .buttonStyle(.link).font(.caption)
             }
         }
     }

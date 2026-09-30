@@ -21,9 +21,15 @@ struct ReviewingDetailTests {
         """
     }
 
-    private func parse(_ threads: [String]) throws -> ReviewingDetail {
-        let json = #"{"data": {"viewer": {"login": "me"}, "repository": {"pullRequest": {"reviewThreads": {"nodes": [\#(threads.joined(separator: ","))]}}}}}"#
-        return try Backend.parseReviewingDetail(Data(json.utf8), author: "author")
+    private func parse(_ threads: [String] = [], reviews: [String] = [], timeline: [String] = [],
+                       since: String? = nil) throws -> ReviewingDetail {
+        let json = """
+        {"data": {"viewer": {"login": "me"}, "repository": {"pullRequest": {
+          "reviewThreads": {"nodes": [\(threads.joined(separator: ","))]},
+          "reviews": {"nodes": [\(reviews.joined(separator: ","))]},
+          "timelineItems": {"nodes": [\(timeline.joined(separator: ","))]}}}}}
+        """
+        return try Backend.parseReviewingDetail(Data(json.utf8), author: "author", since: since)
     }
 
     // MARK: Your threads
@@ -67,6 +73,117 @@ struct ReviewingDetailTests {
         #expect(people == [.init(login: "anna", text: "approved · 2 open threads"),
                            .init(login: "bob", text: "1 open thread"),
                            .init(login: "carol", text: "requested changes")])
+    }
+
+    // MARK: Activity since your review
+
+    private let since = "2026-09-24T18:43:32Z"
+
+    /// `replies` of the `comments` answer existing threads.
+    private func review(_ login: String, _ state: String, at: String, comments: Int = 0, replies: Int = 0,
+                        bot: Bool = false) -> String {
+        let nodes = (0..<comments).map { $0 < replies ? #"{"replyTo": {"id": "c"}}"# : #"{"replyTo": null}"# }
+        return """
+        {"author": \(user(login, bot: bot)), "state": "\(state)", "submittedAt": "\(at)", "url": "https://x/r-\(at)",
+         "comments": {"totalCount": \(comments), "nodes": [\(nodes.joined(separator: ","))]}}
+        """
+    }
+
+    private func event(_ type: String, _ login: String, at: String, bot: Bool = false, extra: String = "") -> String {
+        let who = type == "IssueComment" ? "author" : "actor"
+        return #"{"__typename": "\#(type)", "\#(who)": \#(user(login, bot: bot)), "createdAt": "\#(at)"\#(extra)}"#
+    }
+
+    @Test func activityIsNewestFirstAndOnlyAfterYourReview() throws {
+        let d = try parse(reviews: [
+            review("anna", "APPROVED", at: "2026-09-20T10:00:00Z"),                  // before your review
+            review("anna", "APPROVED", at: "2026-09-25T10:00:00Z"),
+            review("bob", "CHANGES_REQUESTED", at: "2026-09-26T10:00:00Z", comments: 3),
+            review("carol", "COMMENTED", at: "2026-09-27T10:00:00Z", comments: 2, replies: 1),
+            review("dave", "COMMENTED", at: "2026-09-27T11:00:00Z"),
+        ], timeline: [
+            event("IssueComment", "author", at: "2026-09-28T10:00:00Z", extra: #", "url": "https://x/c""#),
+            event("HeadRefForcePushedEvent", "author", at: "2026-09-29T10:00:00Z"),
+        ], since: since)
+        #expect(d.activity.map(\.text) == [
+            "author force-pushed", "author commented on the PR", "dave commented in a review",
+            "carol reviewed · 2 comments", "bob requested changes · 3 comments", "anna approved",
+        ])
+        #expect(d.activity[0].url == nil)
+        #expect(d.activity[1].url == "https://x/c")
+        #expect(!d.activityCapped)
+    }
+
+    @Test func forcePushesInARowAreMergedToo() throws {
+        let d = try parse(timeline: [
+            event("HeadRefForcePushedEvent", "author", at: "2026-09-25T10:00:00Z"),
+            event("HeadRefForcePushedEvent", "author", at: "2026-09-25T11:00:00Z"),
+            event("IssueComment", "author", at: "2026-09-25T12:00:00Z"),
+            event("HeadRefForcePushedEvent", "author", at: "2026-09-25T13:00:00Z"),
+            event("HeadRefForcePushedEvent", "author", at: "2026-09-25T14:00:00Z"),
+            event("HeadRefForcePushedEvent", "author", at: "2026-09-25T15:00:00Z"),
+        ], since: since)
+        #expect(d.activity.map(\.text) == ["author force-pushed 3 times", "author commented on the PR",
+                                           "author force-pushed 2 times"])
+    }
+
+    @Test func threadRepliesAreMergedPerPersonInARow() throws {
+        let d = try parse(reviews: [
+            review("simon", "COMMENTED", at: "2026-09-25T10:00:00Z", comments: 1, replies: 1),
+            review("simon", "COMMENTED", at: "2026-09-25T10:01:00Z", comments: 1, replies: 1),
+            review("setn", "COMMENTED", at: "2026-09-25T10:02:00Z", comments: 1, replies: 1),
+            review("simon", "COMMENTED", at: "2026-09-25T10:03:00Z", comments: 1, replies: 1),
+            review("simon", "COMMENTED", at: "2026-09-25T10:04:00Z", comments: 1, replies: 1),
+        ], since: since)
+        #expect(d.activity.map(\.text) == ["simon replied in 2 threads", "setn replied in 1 thread",
+                                           "simon replied in 2 threads"])
+        #expect(d.activity[0].at == "2026-09-25T10:04:00Z")   // the newest of the merged ones
+    }
+
+    @Test func activityLeavesOutYouAndBots() throws {
+        let d = try parse(reviews: [
+            review("me", "COMMENTED", at: "2026-09-25T10:00:00Z", comments: 1, replies: 1),
+            review("coderabbitai", "COMMENTED", at: "2026-09-25T11:00:00Z", comments: 4, bot: true),
+        ], timeline: [
+            event("IssueComment", "coderabbitai", at: "2026-09-25T12:00:00Z", bot: true),
+            event("HeadRefForcePushedEvent", "me", at: "2026-09-25T13:00:00Z"),
+        ], since: since)
+        #expect(d.activity.isEmpty)
+    }
+
+    @Test func requestsAndDismissalsSayWhenTheyAreAboutYou() throws {
+        let d = try parse(timeline: [
+            event("ReviewRequestedEvent", "author", at: "2026-09-25T10:00:00Z",
+                  extra: #", "requestedReviewer": {"login": "me"}"#),
+            event("ReviewRequestedEvent", "author", at: "2026-09-25T11:00:00Z",
+                  extra: #", "requestedReviewer": {"name": "backend"}"#),
+            event("ReviewDismissedEvent", "author", at: "2026-09-25T12:00:00Z",
+                  extra: #", "review": {"author": {"login": "me"}}"#),
+            event("ReviewDismissedEvent", "author", at: "2026-09-25T13:00:00Z",
+                  extra: #", "review": {"author": {"login": "anna"}}"#),
+            event("ConvertToDraftEvent", "author", at: "2026-09-25T14:00:00Z"),
+            event("ReadyForReviewEvent", "author", at: "2026-09-25T15:00:00Z"),
+        ], since: since)
+        #expect(d.activity.map(\.text) == [
+            "author marked it ready for review", "author converted it to a draft",
+            "author dismissed anna's review", "author dismissed your review",
+            "author requested a review from backend", "author requested your review",
+        ])
+    }
+
+    @Test func aFullPageAfterYourReviewIsCapped() throws {
+        let full = (0..<Backend.activityLimit).map {
+            review("anna", "COMMENTED", at: String(format: "2026-09-25T10:%02d:00Z", $0), comments: 1)
+        }
+        #expect(try parse(reviews: full, since: since).activityCapped)
+        // The same page reaching back before your review has everything since.
+        let reaching = [review("anna", "APPROVED", at: "2026-09-01T10:00:00Z")] + full.dropFirst()
+        #expect(try !parse(reviews: reaching, since: since).activityCapped)
+    }
+
+    @Test func noActivityWithoutAReview() throws {
+        let d = try parse(reviews: [review("anna", "APPROVED", at: "2026-09-25T10:00:00Z")])
+        #expect(d.activity.isEmpty)
     }
 
     // MARK: Commits since your review

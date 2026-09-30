@@ -164,6 +164,51 @@ struct ReviewingDetail: Equatable {
     let myThreads: [MyThread]
     /// Unresolved threads other people opened, by login. Never you, the author or a bot.
     let openThreadsBy: [String: Int]
+    /// What other people did after your last review, newest first. Never you or a bot.
+    /// Resolving a thread has no date on GitHub, so it isn't here; Your threads shows it.
+    var activity: [Activity] = []
+    /// More happened than one query reads: older activity is only on GitHub.
+    var activityCapped = false
+
+    struct Activity: Equatable {
+        let login: String
+        let kind: Kind
+        let at: String   // ISO 8601
+        let url: String?
+
+        enum Kind: Equatable {
+            case approved
+            case changesRequested(comments: Int)
+            /// A review that is neither approval nor change request: a summary, new comments, or both.
+            case reviewed(comments: Int)
+            /// Answers in existing threads only. GitHub stores each as a review, but not in the timeline.
+            case replied(threads: Int)
+            /// On the PR's conversation, not in a thread.
+            case commented
+            case forcePushed(times: Int)
+            /// Nil: from you.
+            case reviewRequested(from: String?)
+            case dismissedReview(of: String?)
+            case readyForReview, convertedToDraft
+        }
+
+        var text: String {
+            func plural(_ n: Int, _ word: String) -> String { "\(n) \(word)\(n == 1 ? "" : "s")" }
+            let what = switch kind {
+            case .approved: "approved"
+            case .changesRequested(let n): "requested changes" + (n > 0 ? " · " + plural(n, "comment") : "")
+            case .reviewed(let n): n > 0 ? "reviewed · " + plural(n, "comment") : "commented in a review"
+            case .replied(let n): "replied in " + plural(n, "thread")
+            case .commented: "commented on the PR"
+            case .forcePushed(let n): n == 1 ? "force-pushed" : "force-pushed \(n) times"
+            case .reviewRequested(let who): who.map { "requested a review from \($0)" } ?? "requested your review"
+            case .dismissedReview(let who): who.map { "dismissed \($0)'s review" } ?? "dismissed your review"
+            case .readyForReview: "marked it ready for review"
+            case .convertedToDraft: "converted it to a draft"
+            }
+            return "\(login) \(what)"
+        }
+    }
 
     struct MyThread: Equatable {
         let path: String

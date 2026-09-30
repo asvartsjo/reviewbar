@@ -526,8 +526,11 @@ enum Backend {
 
     // MARK: Detail of a PR you review
 
+    /// Activity reads reviews and the timeline separately: thread replies are stored as reviews
+    /// but never appear in the timeline. The timeline's `since` is by submit time for reviews
+    /// but by commit date for commits, so commits come from the compare call instead.
     private static let reviewingDetailQuery = """
-    query($owner: String!, $name: String!, $number: Int!) {
+    query($owner: String!, $name: String!, $number: Int!, $since: DateTime) {
       viewer { login }
       repository(owner: $owner, name: $name) { pullRequest(number: $number) {
         reviewThreads(first: 100) { nodes {
@@ -535,30 +538,49 @@ enum Backend {
           opener: comments(first: 1) { nodes { author { login __typename } body url } }
           recent: comments(last: 1) { nodes { author { login __typename } } }
         } }
+        reviews(last: \(activityLimit)) { nodes {
+          author { login __typename } state submittedAt url
+          comments(first: 10) { totalCount nodes { replyTo { id } } }
+        } }
+        timelineItems(since: $since, last: \(activityLimit), itemTypes: [ISSUE_COMMENT, HEAD_REF_FORCE_PUSHED_EVENT,
+            REVIEW_REQUESTED_EVENT, REVIEW_DISMISSED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT]) { nodes {
+          __typename
+          ... on IssueComment { author { login __typename } createdAt url }
+          ... on HeadRefForcePushedEvent { actor { login __typename } createdAt }
+          ... on ReviewRequestedEvent { actor { login __typename } createdAt
+            requestedReviewer { ... on User { login } ... on Team { name } } }
+          ... on ReviewDismissedEvent { actor { login __typename } createdAt review { author { login } } }
+          ... on ReadyForReviewEvent { actor { login __typename } createdAt }
+          ... on ConvertToDraftEvent { actor { login __typename } createdAt }
+        } }
       } }
     }
     """
+    static let activityLimit = 30
 
-    /// Your threads, other people's open threads, and how the branch moved since your last
-    /// review. Two read-only calls (about 2 GraphQL points), made each time the PR is opened.
+    /// Your threads, other people's open threads, what happened and how the branch moved since
+    /// your last review. Two read-only calls (about 3 GraphQL points), made each time the PR is opened.
     static func fetchReviewingDetail(_ r: ReviewingPR) async throws -> ReviewingDetail {
         let repo = r.pr.repository.nameWithOwner
         let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { throw ShellError(code: 1, stderr: "Not an owner/repo name: \(repo)") }
+        let since = r.myLastReview.map { "-f since=\(q($0.at)) " } ?? ""
         async let out = sh("gh api graphql -f query=\(q(reviewingDetailQuery)) -f owner=\(q(parts[0])) "
-            + "-f name=\(q(parts[1])) -F number=\(r.pr.number)")
+            + "-f name=\(q(parts[1])) -F number=\(r.pr.number) " + since)
 
         var compared: CompareInfo?
         if let base = r.myLastReview?.commit, let head = r.pr.headRefOid, base != head {
             compared = await compare(repo, base: base, head: head)
         }
-        var detail = try parseReviewingDetail(Data(try await out.utf8), author: r.pr.author.login)
+        var detail = try parseReviewingDetail(Data(try await out.utf8), author: r.pr.author.login,
+                                              since: r.myLastReview?.at)
         detail.commits = .init(review: r.myLastReview, head: r.pr.headRefOid, compare: compared)
         return detail
     }
 
-    /// The `reviewingDetailQuery` response → your threads and other people's open ones. Pure, for tests.
-    static func parseReviewingDetail(_ json: Data, author: String) throws -> ReviewingDetail {
+    /// The `reviewingDetailQuery` response → your threads, other people's open ones, and activity
+    /// after `since` (none without it). Pure, for tests.
+    static func parseReviewingDetail(_ json: Data, author: String, since: String? = nil) throws -> ReviewingDetail {
         let data = try JSONDecoder().decode(GQL<ReviewingDetailData>.self, from: json).data
         guard let pr = data.repository?.pullRequest else {
             throw ShellError(code: 1, stderr: "Couldn't load the PR's review threads.")
@@ -591,14 +613,108 @@ enum Backend {
         let sorted = mine.enumerated()
             .sorted { (rank($0.element.state), $0.offset) < (rank($1.element.state), $1.offset) }
             .map(\.element)
-        return ReviewingDetail(myThreads: sorted, openThreadsBy: openBy)
+        var detail = ReviewingDetail(myThreads: sorted, openThreadsBy: openBy)
+        if let since { (detail.activity, detail.activityCapped) = activity(pr, me: me, since: since) }
+        return detail
+    }
+
+    /// Newest first, with a person's back-to-back replies, or force-pushes, merged into one line.
+    private static func activity(_ pr: ReviewingDetailData.PullRequest, me: String,
+                                 since: String) -> ([ReviewingDetail.Activity], Bool) {
+        typealias A = ReviewingDetail.Activity
+        func isOther(_ u: GitHubUser?) -> Bool { u.map { $0.login != me && !$0.isBot } ?? true }
+
+        var items: [A] = pr.reviews.items.compactMap { r in
+            guard let at = r.submittedAt, at > since, isOther(r.author) else { return nil }
+            let comments = r.comments.totalCount
+            let onlyReplies = comments > 0 && comments == r.comments.nodes.count
+                && r.comments.nodes.allSatisfy { $0.replyTo != nil }
+            let kind: A.Kind = switch r.state {
+            case "APPROVED": .approved
+            case "CHANGES_REQUESTED": .changesRequested(comments: comments)
+            case "COMMENTED" where onlyReplies: .replied(threads: comments)
+            case "COMMENTED": .reviewed(comments: comments)
+            default: .reviewed(comments: comments)   // DISMISSED; PENDING drafts aren't visible to you
+            }
+            return A(login: r.author?.login ?? "ghost", kind: kind, at: at, url: r.url)
+        }
+        items += pr.timelineItems.items.compactMap { e in
+            let who = e.author ?? e.actor
+            guard e.createdAt > since, isOther(who) else { return nil }
+            let kind: A.Kind
+            switch e.type {
+            case "IssueComment": kind = .commented
+            case "HeadRefForcePushedEvent": kind = .forcePushed(times: 1)
+            case "ReviewRequestedEvent":
+                let to = e.requestedReviewer?.login ?? e.requestedReviewer?.name ?? "a team"
+                kind = .reviewRequested(from: to == me ? nil : to)
+            case "ReviewDismissedEvent":
+                let of = e.review?.author?.login ?? "ghost"
+                kind = .dismissedReview(of: of == me ? nil : of)
+            case "ReadyForReviewEvent": kind = .readyForReview
+            case "ConvertToDraftEvent": kind = .convertedToDraft
+            default: return nil
+            }
+            return A(login: who?.login ?? "ghost", kind: kind, at: e.createdAt, url: e.url)
+        }
+
+        var merged: [A] = []
+        for a in items.sorted(by: { $0.at > $1.at }) {
+            let kind: A.Kind? = switch (merged.last?.kind, a.kind) {
+            case (.replied(let n)?, .replied(let m)): .replied(threads: n + m)
+            case (.forcePushed(let n)?, .forcePushed(let m)): .forcePushed(times: n + m)
+            default: nil
+            }
+            if let kind, let last = merged.last, last.login == a.login {
+                merged[merged.count - 1] = A(login: a.login, kind: kind, at: last.at, url: last.url)
+            } else {
+                merged.append(a)
+            }
+        }
+        // A full page whose oldest entry is still after your review may have more before it.
+        let reviews = pr.reviews.items
+        let capped = (reviews.count == activityLimit && (reviews.first?.submittedAt ?? "") > since)
+            || pr.timelineItems.items.count == activityLimit
+        return (merged, capped)
     }
 
     private struct ReviewingDetailData: Decodable {
         let viewer: Login
         let repository: Repository?
         struct Repository: Decodable { let pullRequest: PullRequest? }
-        struct PullRequest: Decodable { let reviewThreads: Nodes<ReviewThread> }
+        struct PullRequest: Decodable {
+            let reviewThreads: Nodes<ReviewThread>
+            let reviews: Nodes<Review>
+            let timelineItems: Nodes<Event>
+        }
+        struct Review: Decodable {
+            let author: GitHubUser?
+            let state: String
+            let submittedAt: String?
+            let url: String?
+            let comments: Counted<ReviewComment>
+        }
+        struct Counted<T: Decodable>: Decodable {
+            let totalCount: Int
+            let nodes: [T]
+        }
+        struct ReviewComment: Decodable { let replyTo: Ref? }
+        struct Ref: Decodable { let id: String }
+        /// One timeline item; which fields are set depends on `type`.
+        struct Event: Decodable {
+            let type: String
+            let author: GitHubUser?
+            let actor: GitHubUser?
+            let createdAt: String
+            let url: String?
+            let requestedReviewer: Reviewer?
+            let review: DismissedReview?
+            struct Reviewer: Decodable { let login: String?; let name: String? }
+            struct DismissedReview: Decodable { let author: Login? }
+            enum CodingKeys: String, CodingKey {
+                case type = "__typename", author, actor, createdAt, url, requestedReviewer, review
+            }
+        }
         struct ReviewThread: Decodable {
             let isResolved: Bool
             let isOutdated: Bool

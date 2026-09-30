@@ -94,7 +94,7 @@ struct ReviewingDetailBox: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverRow)
                 .help("Open on GitHub")
             }
             if d.activityCapped {
@@ -103,6 +103,7 @@ struct ReviewingDetailBox: View {
                         if let u = URL(string: reviewing.pr.url) { NSWorkspace.shared.open(u) }
                     }
                     .buttonStyle(.link)
+                    .pointingHand()
                 }
             }
         }
@@ -136,7 +137,7 @@ struct ReviewingDetailBox: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverRow)
                 .help(t.fullText.isEmpty ? "Open this thread on GitHub" : t.fullText + "\n\nClick to open on GitHub")
             }
         }
@@ -147,7 +148,7 @@ struct ReviewingDetailBox: View {
         if Agent.current == .claude, ClaudeSettings.command(verifyCommand, url: reviewing.pr.url) != nil {
             let terminal = TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed)
             Button(terminal.label("Verify fixes"), systemImage: TerminalApp.symbol) { vm.verifyInTerminal(reviewing.pr) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.borderedProminent).controlSize(.large)
                 .help("Checks each of your threads against the commits since your review")
         }
     }

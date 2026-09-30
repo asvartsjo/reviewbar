@@ -132,7 +132,7 @@ struct MarkdownView: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(comment, forType: .string)
                     } label: { Label("Copy comment", systemImage: "doc.on.doc") }
-                    .buttonStyle(.borderless).font(.caption)
+                    .buttonStyle(.hoverBorderless).font(.caption)
                     .help("Copies the suggested comment (and suggestion block) to paste on GitHub")
                 }
             }

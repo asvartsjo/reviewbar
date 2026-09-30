@@ -76,7 +76,7 @@ struct ContentView: View {
             Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }
             Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power") }
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.hoverBorderless)
         .padding(10)
     }
 
@@ -97,6 +97,7 @@ struct ContentView: View {
                     Button("In parallel (3 at a time)") { vm.reviewAll(parallel: true) }
                 }
                 .menuStyle(.borderlessButton).fixedSize().font(.caption)
+                .modifier(HoverHighlight(inset: 4))
             }
         }
         .padding(.horizontal, 10)
@@ -133,7 +134,7 @@ struct ContentView: View {
                         Section(s.group.title) {
                             ForEach(s.prs) { r in
                                 Button { selected = r.pr } label: { reviewingRow(r) }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.hoverRow)
                                     .opacity(s.group == .muted ? 0.55 : 1)
                                     .contextMenu {
                                         if vm.isMuted(r) {
@@ -192,7 +193,7 @@ struct ContentView: View {
             } else {
                 List(vm.visibleMentions) { m in
                     Button { if let u = URL(string: m.url) { NSWorkspace.shared.open(u) } } label: { mentionRow(m) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.hoverRow)
                         .contextMenu { Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) } }
                 }
                 .listStyle(.plain)
@@ -207,7 +208,7 @@ struct ContentView: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 numberedTitle(m.number, m.title)
                 Spacer(minLength: 4)
-                Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) }.buttonStyle(.borderless).font(.caption)
+                Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) }.buttonStyle(.hoverBorderless).font(.caption)
             }
             (Text(m.author).foregroundStyle(.primary)
                 + Text(" mentioned you \(age(m.updatedAt))").foregroundStyle(.secondary))
@@ -228,7 +229,7 @@ struct ContentView: View {
             } else {
                 List(vm.visibleFeedback) { f in
                     Button { selected = f.pr } label: { feedbackRow(f) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.hoverRow)
                         .contextMenu {
                             Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
                         }
@@ -265,7 +266,7 @@ struct ContentView: View {
             } else {
                 List(vm.saved) { s in
                     Button { selected = s.pr } label: { savedRow(s) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.hoverRow)
                         .contextMenu {
                             Button("Delete", systemImage: "trash", role: .destructive) { vm.delete(s) }
                         }
@@ -281,7 +282,7 @@ struct ContentView: View {
                 Spacer()
                 Text("Right-click a row to delete").font(.caption2).foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.hoverBorderless)
             .padding(8)
         }
     }
@@ -369,7 +370,7 @@ struct DetailView: View {
                 Button("Open PR", systemImage: "arrow.up.right.square") { open(pr.url) }
                 Button("Files", systemImage: "doc.text") { open(pr.url + "/files") }
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.hoverBorderless)
 
             Text(pr.title).font(.headline)
             Text(verbatim: "\(pr.repository.nameWithOwner) #\(pr.number) · \(pr.author.login)")
@@ -384,7 +385,7 @@ struct DetailView: View {
                         .font(.caption).foregroundStyle(.blue)
                     Spacer()
                     Button("Dismiss", systemImage: "xmark") { vm.dismissFeedback(f) }
-                        .buttonStyle(.borderless).font(.caption)
+                        .buttonStyle(.hoverBorderless).font(.caption)
                 }
             }
 
@@ -396,10 +397,10 @@ struct DetailView: View {
                     Spacer()
                     if let rv = vm.reviewingPR(for: pr) {
                         Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(rv) }
-                            .buttonStyle(.borderless).font(.caption)
+                            .buttonStyle(.hoverBorderless).font(.caption)
                     } else {
                         Button("Dismiss", systemImage: "xmark") { vm.dismissReplies(r) }
-                            .buttonStyle(.borderless).font(.caption)
+                            .buttonStyle(.hoverBorderless).font(.caption)
                     }
                 }
             }
@@ -415,7 +416,7 @@ struct DetailView: View {
                 }
             }
 
-            actions
+            actions.controlSize(.large)
 
             Divider()
             ScrollView {
@@ -448,7 +449,7 @@ struct DetailView: View {
                 case .running:
                     ProgressView().controlSize(.small)
                 case .done:
-                    Button("Redo", systemImage: "arrow.counterclockwise") { vm.summarise(pr) }.buttonStyle(.borderless).font(.caption)
+                    Button("Redo", systemImage: "arrow.counterclockwise") { vm.summarise(pr) }.buttonStyle(.hoverBorderless).font(.caption)
                 default:
                     Button("Summarise feedback", systemImage: "text.alignleft") { vm.summarise(pr) }.font(.caption)
                 }
@@ -668,7 +669,7 @@ struct SettingsView: View {
                         UserDefaults.standard.removeObject(forKey: RepoList.legacyOwnerKey)
                         legacyOwner = ""
                     }
-                    .buttonStyle(.borderless).font(.caption)
+                    .buttonStyle(.hoverBorderless).font(.caption)
                 }
             }
 
@@ -695,7 +696,7 @@ struct SettingsView: View {
                         Button { chooseFolder(for: r) } label: {
                             Image(systemName: folders[r.lowercased()] == nil ? "folder.badge.plus" : "folder")
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(.hoverBorderless)
                         .help(folders[r.lowercased()] == nil
                               ? "Choose the local checkout of \(r): Terminal sessions start there"
                               : "Change the local folder (Terminal sessions start there)")
@@ -705,7 +706,7 @@ struct SettingsView: View {
                             }
                         }
                         Button { remove(r) } label: { Image(systemName: "minus.circle") }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.hoverBorderless)
                             .help("Remove \(r)")
                             .accessibilityLabel("Remove \(r)")
                     }
@@ -924,7 +925,7 @@ struct SettingsView: View {
                         NSWorkspace.shared.open(url)
                     }
                 }
-                .buttonStyle(.borderless).font(.caption2)
+                .buttonStyle(.hoverBorderless).font(.caption2)
             }
         } else {
             Text("Clicking a notification opens the PR on GitHub. Several at once are grouped into one.")

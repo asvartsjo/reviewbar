@@ -66,7 +66,8 @@ func sh(_ command: String, input: String? = nil) async throws -> String {
                 guard running.attach(p) else { cont.resume(throwing: CancellationError()); return }
                 do { try p.run() } catch { cont.resume(throwing: error); return }
 
-                var errData = Data()
+                // Written on another queue; group.wait() below orders that write before the read.
+                nonisolated(unsafe) var errData = Data()
                 let group = DispatchGroup()
                 group.enter()
                 DispatchQueue.global().async {

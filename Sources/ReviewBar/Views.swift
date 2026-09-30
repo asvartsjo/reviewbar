@@ -593,7 +593,7 @@ struct SettingsView: View {
             }
             .padding(10)
         }
-        .onAppear { Notifier.authorizationStatus { notificationsAllowed = $0 } }
+        .task { notificationsAllowed = await Notifier.authorizationStatus() }
     }
 
     private var form: some View {

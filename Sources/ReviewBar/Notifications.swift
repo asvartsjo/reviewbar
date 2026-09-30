@@ -76,11 +76,9 @@ enum Notifier {
     }
 
     /// Whether macOS allows our notifications, for the Settings hint.
-    static func authorizationStatus(_ done: @escaping (UNAuthorizationStatus) -> Void) {
-        guard isAvailable else { return done(.denied) }
-        UNUserNotificationCenter.current().getNotificationSettings { s in
-            DispatchQueue.main.async { done(s.authorizationStatus) }
-        }
+    static func authorizationStatus() async -> UNAuthorizationStatus {
+        guard isAvailable else { return .denied }
+        return await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
     /// "@someone mentioned you" with the start of the comment. Clicking opens the comment.

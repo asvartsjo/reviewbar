@@ -97,7 +97,7 @@ struct ReviewingDetailBox: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Open this thread on GitHub")
+                .help(t.fullText.isEmpty ? "Open this thread on GitHub" : t.fullText + "\n\nClick to open on GitHub")
             }
         }
     }

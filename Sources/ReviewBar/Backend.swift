@@ -188,6 +188,27 @@ enum Backend {
         return text.count > 140 ? String(text.prefix(139)) + "…" : text
     }
 
+    /// A review comment's first real line, bold dropped: "🟡 LOW — title" for the pr-review skill's
+    /// comments, whose Description / Consequence / Suggested fix paragraphs follow. Pure, for tests.
+    static func threadTitle(_ body: String) -> String {
+        let first = body.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && !$0.hasPrefix(">") && !$0.hasPrefix("```") } ?? ""
+        let text = first.replacingOccurrences(of: "**", with: "")
+        return text.count > 140 ? String(text.prefix(139)) + "…" : text
+    }
+
+    /// The whole comment for a tooltip: paragraphs kept, code blocks and bold dropped. Pure, for tests.
+    static func threadText(_ body: String) -> String {
+        var inCode = false, lines: [String] = []
+        for line in body.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") { inCode.toggle(); continue }
+            if !inCode { lines.append(line) }
+        }
+        return lines.joined(separator: "\n").replacingOccurrences(of: "**", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// One conditional request for the newest notification. Nil when gh or the network failed.
     static func pollNotifications(etag: String?) async -> NotificationPoll? {
         let header = etag.map { "-H \(q("If-None-Match: \($0)")) " } ?? ""
@@ -603,7 +624,7 @@ enum Backend {
                 state = .open
             }
             mine.append(.init(path: t.path, line: t.line ?? t.originalLine,
-                              snippet: snippet(first.body ?? "").replacingOccurrences(of: "**", with: ""),
+                              snippet: threadTitle(first.body ?? ""), fullText: threadText(first.body ?? ""),
                               url: first.url, state: state, isOutdated: t.isOutdated))
         }
 

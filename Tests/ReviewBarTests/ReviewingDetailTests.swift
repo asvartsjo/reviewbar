@@ -56,6 +56,22 @@ struct ReviewingDetailTests {
         #expect(d.myThreads[1].location == "file-level.ts")
     }
 
+    /// The pr-review skill's shape: a title line, then paragraphs and a code block. JSON-escaped.
+    private let skillComment = #"🟡 **LOW** — Logic in the controller\r\n\r\n**Description:** Move it.\r\n\r\n"#
+        + #"**Suggested fix:** An Action.\r\n```php\r\nnew Action();\r\n```"#
+
+    @Test func snippetIsTheTitleAndTooltipDropsCode() throws {
+        let d = try parse([thread("me", body: skillComment)])
+        #expect(d.myThreads[0].snippet == "🟡 LOW — Logic in the controller")
+        #expect(d.myThreads[0].fullText
+                == "🟡 LOW — Logic in the controller\n\nDescription: Move it.\n\nSuggested fix: An Action.")
+    }
+
+    @Test func titleSkipsQuotesAndBlankLines() {
+        #expect(Backend.threadTitle("\n> quoted\n\nReal title\nmore") == "Real title")
+        #expect(Backend.threadTitle(String(repeating: "a", count: 300)).count == 140)
+    }
+
     // MARK: Other reviewers
 
     @Test func otherOpenThreadsLeaveOutResolvedBotsTheAuthorAndGhosts() throws {

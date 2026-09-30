@@ -213,7 +213,10 @@ struct ReviewingDetail: Equatable {
     struct MyThread: Equatable {
         let path: String
         let line: Int?
+        /// The comment's first line.
         let snippet: String
+        /// The whole comment without code blocks, for the tooltip.
+        let fullText: String
         let url: String?
         let state: State
         /// The code it points at has changed since.

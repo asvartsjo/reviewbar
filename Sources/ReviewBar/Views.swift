@@ -138,8 +138,10 @@ struct ContentView: View {
                                     .contextMenu {
                                         if vm.isMuted(r) {
                                             Button("Unmute") { vm.unmute(r) }
-                                        } else if !r.isRequested {   // a request always shows
+                                        } else if !r.isRequested {
                                             Button("Mute until something happens") { vm.muteUntilSomethingHappens(r) }
+                                            Button("Mute for good") { vm.muteForGood(r) }
+                                        } else if r.myLastReview == nil {   // a re-request always shows
                                             Button("Mute for good") { vm.muteForGood(r) }
                                         }
                                     }

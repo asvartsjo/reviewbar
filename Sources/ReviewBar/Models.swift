@@ -81,10 +81,11 @@ struct ReviewingPR: Identifiable, Hashable {
         (lastOtherAt ?? "") > s.at || (pr.headRefOid != nil && pr.headRefOid != s.head)
     }
 
-    /// Muted for good, or until something changes after `until`. A request always shows:
-    /// someone asked for you. Pure, for tests.
+    /// Muted for good, or until something changes after `until`. A request you never reviewed
+    /// can only be muted for good (such as a long-lived POC); a re-request always shows, since
+    /// someone asked again. Pure, for tests.
     func isMuted(forever: Bool, until: PRSnapshot?) -> Bool {
-        guard !isRequested else { return false }
+        if isRequested { return forever && myLastReview == nil }
         return forever || until.map { !changed(since: $0) } ?? false
     }
 

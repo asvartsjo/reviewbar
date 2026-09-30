@@ -123,11 +123,16 @@ struct ReviewingTests {
         #expect(r.isMuted(forever: true, until: before))
     }
 
-    @Test func aRequestIsNeverMuted() throws {
-        let r = Backend.merge(try parse([node(1, reviews: [review("me", "COMMENTED")])]),
-                              requested: [try one(node(1)).pr])[0]
-        #expect(r.isRequested)
-        #expect(!r.isMuted(forever: true, until: nil))
+    @Test func aRequestMutesOnlyForGoodAndAReRequestNever() throws {
+        let request = Backend.merge([], requested: [try one(node(1)).pr])[0]
+        #expect(request.isRequested && request.myLastReview == nil)
+        #expect(request.isMuted(forever: true, until: nil))
+        #expect(!request.isMuted(forever: false, until: PRSnapshot(at: "2099-01-01T00:00:00Z", head: head)))
+
+        let reRequest = Backend.merge(try parse([node(1, reviews: [review("me", "COMMENTED")])]),
+                                      requested: [try one(node(1)).pr])[0]
+        #expect(reRequest.turn == .yours(.reRequested))
+        #expect(!reRequest.isMuted(forever: true, until: nil))
     }
 
     @Test func mutedPRsGetTheirOwnLastSection() throws {

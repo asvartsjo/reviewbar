@@ -436,7 +436,7 @@ struct DetailView: View {
                         + "Latest from \(r.latestBy).")
                         .font(.caption).foregroundStyle(.orange)
                     Spacer()
-                    if let rv = vm.reviewingPR(for: pr) {
+                    if let rv = vm.reviewingPR(for: pr), !rv.isRequested {
                         Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(rv) }
                             .buttonStyle(.hoverBorderless).font(.caption)
                             .help("Move this PR to Muted until a new commit, comment or review arrives")

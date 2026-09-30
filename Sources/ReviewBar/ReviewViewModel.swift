@@ -220,8 +220,11 @@ final class ReviewViewModel: ObservableObject {
     // MARK: New since you last looked
 
     private static let seenKey = "reviewingSeen", seenSeededKey = "reviewingSeenSeeded"
+    private static let lastListedKey = "reviewingLastListed"
     /// PR url -> when you last opened it, and its head then. Survives restarts.
     @Published private var seen = loadSnapshots(seenKey)
+    /// PR url -> when a Reviewing fetch last listed it, for PRs with a seen or mute snapshot.
+    private var lastListed = UserDefaults.standard.dictionary(forKey: lastListedKey) as? [String: String] ?? [:]
     /// The snapshot each PR had before this session's latest opening, for the open detail.
     private var seenBefore: [String: PRSnapshot] = [:]
 
@@ -238,22 +241,25 @@ final class ReviewViewModel: ObservableObject {
         saveSeen()
     }
 
-    /// After a successful Reviewing fetch: the first time ever, record every listed PR so they
-    /// don't all start as new; after that, forget PRs gone from the list for a month.
+    /// After a successful Reviewing fetch: the first time there is a list, record every listed PR
+    /// so they don't all start as new; after that, forget PRs gone from the list for a month.
     /// Skipped in demo mode, so demo PRs start as new and real snapshots are never pruned.
     private func updateSeen() {
         guard !DemoData.isOn else { return }
-        if !UserDefaults.standard.bool(forKey: Self.seenSeededKey) {
-            let now = Self.isoNow()
+        let now = Self.isoNow()
+        if !UserDefaults.standard.bool(forKey: Self.seenSeededKey), !reviewing.isEmpty {
             for r in reviewing where seen[r.pr.url] == nil { seen[r.pr.url] = PRSnapshot(at: now, head: r.pr.headRefOid) }
             UserDefaults.standard.set(true, forKey: Self.seenSeededKey)
         }
         let month = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30 * 86_400))
         let listed = Set(reviewing.map(\.pr.url))
-        seen = PRSnapshot.pruned(seen, listed: listed, cutoff: month)
-        mutedUntil = PRSnapshot.pruned(mutedUntil, listed: listed, cutoff: month)
+        for url in listed { lastListed[url] = now }
+        seen = PRSnapshot.pruned(seen, listed: listed, lastListed: lastListed, cutoff: month)
+        mutedUntil = PRSnapshot.pruned(mutedUntil, listed: listed, lastListed: lastListed, cutoff: month)
+        lastListed = lastListed.filter { seen[$0.key] != nil || mutedUntil[$0.key] != nil }
         saveSeen()
         Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+        UserDefaults.standard.set(lastListed, forKey: Self.lastListedKey)
     }
 
     private func saveSeen() { Self.saveSnapshots(seen, Self.seenKey) }
@@ -614,8 +620,8 @@ final class ReviewViewModel: ObservableObject {
     /// Changes when new comments arrive, so an old summary isn't shown as current.
     private func summaryKey(_ pr: PR) -> String {
         let latest = myPRs.first { $0.pr.url == pr.url }?.latestAt
-            ?? replies.first { $0.pr.url == pr.url }?.latestAt
-            ?? reviewingPR(for: pr)?.latestAt ?? ""
+            ?? [replies.first { $0.pr.url == pr.url }?.latestAt, reviewingPR(for: pr)?.latestAt].compactMap { $0 }.max()
+            ?? ""
         return pr.url + "#" + latest
     }
 

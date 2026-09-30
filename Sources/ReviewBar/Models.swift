@@ -202,21 +202,25 @@ struct PRSnapshot: Codable, Equatable {
 
     /// The old Replies tab's dismissals that still hide a reply, as "mute until something
     /// happens" from now on: the later of the dismissal and the PR's last activity by others,
-    /// since a thread reply is also a review whose time can be a little later. Pure, for tests.
+    /// since a thread reply is also a review whose time can be a little later. The head is the
+    /// one you reviewed, so commits since then still show (a dismissal only hid replies). Pure, for tests.
     static func mutes(fromDismissed dismissed: [String: String], replies: [ReplyPR],
                       reviewing: [ReviewingPR]) -> [String: PRSnapshot] {
         var out: [String: PRSnapshot] = [:]
         for reply in replies {
             guard let at = dismissed[reply.pr.url], at >= reply.latestAt,
                   let r = reviewing.first(where: { $0.pr.url == reply.pr.url }) else { continue }
-            out[reply.pr.url] = PRSnapshot(at: max(at, r.lastOtherAt ?? ""), head: r.pr.headRefOid)
+            out[reply.pr.url] = PRSnapshot(at: max(at, r.lastOtherAt ?? ""),
+                                           head: r.myLastReview?.commit ?? r.pr.headRefOid)
         }
         return out
     }
 
-    /// Drops snapshots of PRs no longer listed, once they're older than `cutoff`. Pure, for tests.
-    static func pruned(_ all: [String: PRSnapshot], listed: Set<String>, cutoff: String) -> [String: PRSnapshot] {
-        all.filter { listed.contains($0.key) || $0.value.at > cutoff }
+    /// Drops snapshots of PRs not listed since `cutoff`. `lastListed` says when each PR was
+    /// last in the list; without an entry, the snapshot's own time stands in. Pure, for tests.
+    static func pruned(_ all: [String: PRSnapshot], listed: Set<String>, lastListed: [String: String],
+                       cutoff: String) -> [String: PRSnapshot] {
+        all.filter { listed.contains($0.key) || (lastListed[$0.key] ?? $0.value.at) > cutoff }
     }
 }
 

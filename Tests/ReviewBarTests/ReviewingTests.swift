@@ -128,8 +128,18 @@ struct ReviewingTests {
         let all = ["a": PRSnapshot(at: "2026-08-01T00:00:00Z", head: nil),
                    "b": PRSnapshot(at: "2026-08-01T00:00:00Z", head: nil),
                    "c": PRSnapshot(at: "2026-09-20T00:00:00Z", head: nil)]
-        let kept = PRSnapshot.pruned(all, listed: ["a"], cutoff: "2026-09-01T00:00:00Z")
+        let kept = PRSnapshot.pruned(all, listed: ["a"], lastListed: [:], cutoff: "2026-09-01T00:00:00Z")
         #expect(Set(kept.keys) == ["a", "c"])
+    }
+
+    /// An old snapshot of a PR that was in the list a moment ago (its repo skipped this time,
+    /// or drafts hidden) stays.
+    @Test func snapshotsArePrunedByWhenThePRWasLastListed() {
+        let all = ["a": PRSnapshot(at: "2026-08-01T00:00:00Z", head: nil),
+                   "b": PRSnapshot(at: "2026-08-01T00:00:00Z", head: nil)]
+        let kept = PRSnapshot.pruned(all, listed: [], lastListed: ["a": "2026-09-30T00:00:00Z", "b": "2026-08-15T00:00:00Z"],
+                                     cutoff: "2026-09-01T00:00:00Z")
+        #expect(Set(kept.keys) == ["a"])
     }
 
     // MARK: Mute
@@ -183,6 +193,14 @@ struct ReviewingTests {
         #expect(mutes == [url(1): PRSnapshot(at: "2026-09-10T00:00:00Z", head: head),
                           url(4): PRSnapshot(at: "2026-09-10T00:00:02Z", head: head)])
         #expect(listed(4).isMuted(forever: false, until: mutes[url(4)]))
+
+        // Commits after your review still show: the dismissal only hid the reply.
+        let pushed = try one(node(5, reviews: [review("me", "APPROVED", at: "2026-09-09T00:00:00Z", commit: "old1234")]))
+        let mute = PRSnapshot.mutes(fromDismissed: [url(5): "2026-09-10T00:00:00Z"],
+                                    replies: [ReplyPR(pr: pushed.pr, waiting: 1, latestAt: "2026-09-10T00:00:00Z", latestBy: "author")],
+                                    reviewing: [pushed])[url(5)]
+        #expect(mute?.head == "old1234")
+        #expect(!pushed.isMuted(forever: false, until: mute))
     }
 
     @Test func approvedWithNothingNewIsDone() throws {

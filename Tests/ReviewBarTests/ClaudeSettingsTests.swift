@@ -60,6 +60,8 @@ final class ClaudeSettingsTests {
 
     @Test func reviewCommand() {
         let url = "https://github.com/o/r/pull/7"
+        #expect(ClaudeSettings.reviewCommand(for: url) == nil)
+        UserDefaults.standard.set("/pr-review {url}", forKey: ClaudeSettings.reviewCommandKey)
         #expect(ClaudeSettings.reviewCommand(for: url) == "/pr-review \(url)")
         #expect(ClaudeSettings.command("/pr-review {url} --deep", url: url) == "/pr-review \(url) --deep")
         #expect(ClaudeSettings.command("  /pr-review  ", url: url) == "/pr-review \(url)")

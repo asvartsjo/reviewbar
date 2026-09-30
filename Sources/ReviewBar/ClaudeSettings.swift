@@ -15,7 +15,7 @@ enum ClaudeSettings {
     static let quickModelKey = "quickModel", quickEffortKey = "quickEffort"
     static let reviewModelDefault = "opus", reviewEffortDefault = ""
     static let quickModelDefault = "sonnet", quickEffortDefault = "low"
-    static let reviewCommandKey = "reviewCommand", reviewCommandDefault = "/pr-review {url}"
+    static let reviewCommandKey = "reviewCommand", reviewCommandDefault = ""
     static let verifyCommandKey = "verifyCommand"
     static let verifyCommandDefault = "Verify fixes on {url}. My earlier review comments on GitHub are the baseline. "
         + "For each thread I started, check the commits since then and say: fixed / partly / not fixed / "

@@ -122,7 +122,7 @@ struct ReviewingDetailBox: View {
                 }
                 if d.blockingOpen > 0 {
                     Text(verbatim: " · \(d.blockingOpen) blocking").font(.callout.bold()).foregroundStyle(.red)
-                        .help("Open 🚨/🔴 threads: your pr-review skill says these block a merge")
+                        .help("Open 🚨/🔴 threads: marked as merge-blocking")
                 }
             }
             .padding(.top, 4)

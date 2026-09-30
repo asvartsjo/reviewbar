@@ -439,7 +439,7 @@ enum Backend {
     }
     """
 
-    /// Open PRs of others that you have reviewed. Requested PRs come from Awaiting me instead,
+    /// Open PRs of others that you have reviewed. Requested PRs come from `fetchPRs` instead,
     /// through `merge`. One read-only GraphQL query.
     static func fetchReviewing(skipping skipped: Set<String> = []) async throws -> [ReviewingPR] {
         if DemoData.isOn { return await DemoData.reviewing() }
@@ -517,7 +517,7 @@ enum Backend {
         .sorted { $0.latestAt > $1.latestAt }
     }
 
-    /// Reviewed PRs plus the Awaiting me list: a requested PR you reviewed before is marked
+    /// Reviewed PRs plus your review requests (`fetchPRs`): a requested PR you reviewed before is marked
     /// re-requested, one you never reviewed is added. Each PR once. Pure, for tests.
     static func merge(_ reviewed: [ReviewingPR], requested: [PR]) -> [ReviewingPR] {
         let requestedURLs = Set(requested.map(\.url))
@@ -615,7 +615,8 @@ enum Backend {
     static let activityLimit = 30
 
     /// Your threads, other people's open threads, what happened and how the branch moved since
-    /// your last review. Two read-only calls (about 3 GraphQL points), made each time the PR is opened.
+    /// your last review. One read-only GraphQL query (about 2 points), plus a REST compare after
+    /// new commits, made each time the PR is opened.
     static func fetchReviewingDetail(_ r: ReviewingPR) async throws -> ReviewingDetail {
         if DemoData.isOn { return await DemoData.detail(for: r) }
         let repo = r.pr.repository.nameWithOwner

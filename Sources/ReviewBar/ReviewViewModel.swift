@@ -118,7 +118,7 @@ final class ReviewViewModel: ObservableObject {
                 .map(ReviewAlert.reply)
             seenReplies = AlertDiff.latestByURL(replies, url: \.pr.url, latestAt: \.latestAt)
             repliesLoaded = true
-        } catch { errors.append("Replies: \(error.localizedDescription)") }
+        } catch { errors.append("Thread replies: \(error.localizedDescription)") }
         var reviewingLoaded = false
         do {
             reviewed = PRFilter.others(try await fetchedReviewing, includeDrafts: PRFilter.includeDrafts)

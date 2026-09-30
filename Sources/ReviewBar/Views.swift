@@ -202,14 +202,16 @@ struct ContentView: View {
     }
 
     private func mentionRow(_ m: Mention) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(verbatim: "\(m.repo) #\(m.number)").font(.caption).foregroundStyle(.secondary)
-                Spacer()
+        VStack(alignment: .leading, spacing: 2) {
+            repoCaption(m.repo, draft: false)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                numberedTitle(m.number, m.title)
+                Spacer(minLength: 4)
                 Button("Dismiss") { vm.dismissMention(m) }.buttonStyle(.borderless).font(.caption)
             }
-            Text(m.title).font(.body).lineLimit(2)
-            Text("\(m.author) mentioned you \(age(m.updatedAt))").font(.caption).foregroundStyle(.blue)
+            (Text(m.author).foregroundStyle(.primary)
+                + Text(" mentioned you \(age(m.updatedAt))").foregroundStyle(.secondary))
+                .font(.caption)
             if !m.snippet.isEmpty {
                 Text(m.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -238,21 +240,17 @@ struct ContentView: View {
     }
 
     private func feedbackRow(_ f: FeedbackPR) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(verbatim: "\(f.pr.repository.nameWithOwner) #\(f.pr.number)")
-                    .font(.caption).foregroundStyle(.secondary)
-                if f.pr.isDraft {
-                    Text("DRAFT").font(.caption2).padding(.horizontal, 4)
-                        .background(.quaternary, in: Capsule())
-                }
-                Spacer()
+        VStack(alignment: .leading, spacing: 2) {
+            repoCaption(f.pr.repository.nameWithOwner, draft: f.pr.isDraft)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                numberedTitle(f.pr.number, f.pr.title)
+                Spacer(minLength: 4)
                 StatusBadge(feedback: f)
                 DecisionBadge(decision: f.decision)
             }
-            Text(f.pr.title).font(.body).lineLimit(2)
-            Text("\(f.summary) · \(f.latestBy) \(age(f.latestAt))")
-                .font(.caption).foregroundStyle(.secondary)
+            (Text(verbatim: f.latestBy).foregroundStyle(.primary)
+                + Text(verbatim: " \(age(f.latestAt)) · \(f.summary)").foregroundStyle(.secondary))
+                .font(.caption)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -289,14 +287,14 @@ struct ContentView: View {
     }
 
     private func savedRow(_ s: SavedReview) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(verbatim: "\(s.pr.repository.nameWithOwner) #\(s.pr.number)")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(s.pr.title).lineLimit(2)
-            Text("\(s.pr.author.login) · reviewed \(s.date.formatted(.relative(presentation: .named)))"
-                 + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
-                 + (s.producedBy.map { " · \($0)" } ?? ""))
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 2) {
+            repoCaption(s.pr.repository.nameWithOwner, draft: false)
+            numberedTitle(s.pr.number, s.pr.title)
+            (Text(verbatim: s.pr.author.login).foregroundStyle(.primary)
+                + Text(" · reviewed \(s.date.formatted(.relative(presentation: .named)))"
+                       + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
+                       + (s.producedBy.map { " · \($0)" } ?? "")).foregroundStyle(.secondary))
+                .font(.caption)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

@@ -428,10 +428,11 @@ enum Backend {
           commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
           reviews(last: 30) { nodes { author { login __typename } state submittedAt commit { oid } } }
           viewerLatestReview { state submittedAt commit { oid } }
+          comments(last: 5) { nodes { author { login __typename } createdAt } }
           reviewThreads(last: 50) { nodes {
             isResolved isOutdated
             opener: comments(first: 1) { nodes { author { login __typename } createdAt } }
-            recent: comments(last: 5) { nodes { author { login __typename } createdAt } }
+            recent: comments(last: 10) { nodes { author { login __typename } createdAt } }
           } }
         } }
       }
@@ -485,6 +486,7 @@ enum Backend {
             }
 
             mine = submitted(n.viewerLatestReview, after: mine) ?? mine
+            for c in n.comments?.items ?? [] where isOther(c.author) { latestAt = max(latestAt, c.createdAt ?? "") }
 
             // `waiting` is the Replies rule (`parseReplies`), with bots left out.
             var waiting = 0, opened = 0, resolved = 0, outdated = 0
@@ -550,6 +552,8 @@ enum Backend {
             /// Your latest review, which a busy PR's `reviews` window (thread replies and bots
             /// count) can leave out. It may be pending or dismissed; then the window decides.
             let viewerLatestReview: Review?
+            /// The PR's conversation, outside review threads.
+            let comments: Nodes<Comment>?
             let reviewThreads: Nodes<ReviewThread>
         }
         struct CommitNode: Decodable {

@@ -439,7 +439,7 @@ struct DetailView: View {
                     if let rv = vm.reviewingPR(for: pr) {
                         Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(rv) }
                             .buttonStyle(.hoverBorderless).font(.caption)
-                            .help("Move this PR to Muted until a new commit, reply or review arrives")
+                            .help("Move this PR to Muted until a new commit, comment or review arrives")
                     } else {
                         Button("Dismiss", systemImage: "xmark") { vm.dismissReplies(r) }
                             .buttonStyle(.hoverBorderless).font(.caption)

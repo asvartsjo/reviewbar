@@ -31,8 +31,9 @@ struct ReviewingTests {
         """
     }
 
-    private func node(_ number: Int, reviews: [String] = [], viewerLatest: String = "null", threads: [String] = [],
-                      checks: String? = "SUCCESS", createdAt: String = "2026-08-20T00:00:00Z") -> String {
+    private func node(_ number: Int, reviews: [String] = [], viewerLatest: String = "null", comments: [String] = [],
+                      threads: [String] = [], checks: String? = "SUCCESS",
+                      createdAt: String = "2026-08-20T00:00:00Z") -> String {
         let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
         return """
         {"number": \(number), "title": "PR \(number)", "url": "https://github.com/o/r/pull/\(number)",
@@ -40,6 +41,7 @@ struct ReviewingTests {
          "headRefOid": "\(head)", "repository": {"nameWithOwner": "o/r"}, "author": {"login": "author"},
          "commits": {"nodes": [{"commit": {"statusCheckRollup": \(rollup)}}]},
          "reviews": {"nodes": [\(reviews.joined(separator: ","))]}, "viewerLatestReview": \(viewerLatest),
+         "comments": {"nodes": [\(comments.joined(separator: ","))]},
          "reviewThreads": {"nodes": [\(threads.joined(separator: ","))]}}
         """
     }
@@ -102,6 +104,15 @@ struct ReviewingTests {
         #expect(!before.othersSpokeSinceReview)
         let neverReviewed = try one(node(3, reviews: [review("anna", "APPROVED", at: "2026-09-11T10:00:00Z")]))
         #expect(!neverReviewed.othersSpokeSinceReview)
+    }
+
+    @Test func conversationCommentsCountButNotBotsOrMine() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", at: "2026-09-10T10:00:00Z")],
+                             comments: [comment("author", "2026-09-11T10:00:00Z"),
+                                        comment("coderabbitai", "2026-09-12T10:00:00Z", bot: true),
+                                        comment("me", "2026-09-13T10:00:00Z")]))
+        #expect(r.lastOtherAt == "2026-09-11T10:00:00Z")
+        #expect(r.othersSpokeSinceReview)
     }
 
     @Test func changedSinceASnapshot() throws {
@@ -317,7 +328,8 @@ struct ReviewingTests {
         #expect(r.outdated == 2)
     }
 
-    /// Reviewing replaces Replies later, so for people (not bots) both must count the same threads.
+    /// Replies still drives reply notifications and the PR detail's banner, Reviewing the row
+    /// and the count, so for people (not bots) both must count the same threads.
     @Test func waitingMatchesTheRepliesRule() throws {
         let threads = [
             thread(opener: "me", recent: [comment("alice", "2026-09-02T10:00:00Z")]),                     // waiting

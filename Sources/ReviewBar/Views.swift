@@ -585,6 +585,7 @@ struct SettingsView: View {
     @AppStorage(AutoReview.key) private var autoReview = false
     @AppStorage(StayOpen.key) private var stayOpen = false
     @AppStorage(AsWindow.key) private var asWindow = false
+    @AppStorage(ReviewViewModel.badgeCountsMyPRsKey) private var badgeCountsMyPRs = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
@@ -863,6 +864,9 @@ struct SettingsView: View {
 
             Divider()
             Text("Panel").font(.headline)
+            Toggle("Count feedback on your PRs in the menu bar", isOn: $badgeCountsMyPRs)
+            Text("The menu bar number is PRs in Your turn and mentions, plus your PRs with new feedback when this is on.")
+                .font(.caption2).foregroundStyle(.secondary)
             Toggle("Open as a window", isOn: $asWindow)
             Text("A normal window you can move and resize, open until you close it. Takes effect the next time you click the menu bar icon.")
                 .font(.caption2).foregroundStyle(.secondary)

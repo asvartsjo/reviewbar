@@ -330,13 +330,16 @@ final class ReviewViewModel: ObservableObject {
         UserDefaults.standard.set(dismissed, forKey: "dismissedReplies")
     }
 
+    static let badgeCountsMyPRsKey = "badgeCountsMyPRs"
+    /// Settings › Panel; on unless turned off.
+    static var badgeCountsMyPRs: Bool { UserDefaults.standard.object(forKey: badgeCountsMyPRsKey) as? Bool ?? true }
+
     /// Distinct PRs needing you: Reviewing's Your turn (requests, new commits since your review,
-    /// replies in your threads; not muted), feedback on your PRs, and mentions.
+    /// replies in your threads; not muted), feedback on your PRs unless turned off, and mentions.
     var badgeCount: Int {
-        Set(reviewing.filter { $0.group == .yours && !isMuted($0) }.map(\.pr.url))
-            .union(visibleFeedback.map(\.pr.url))
-            .union(visibleMentions.map(\.url))
-            .count
+        var urls = Set(reviewing.filter { $0.group == .yours && !isMuted($0) }.map(\.pr.url))
+        if Self.badgeCountsMyPRs { urls.formUnion(visibleFeedback.map(\.pr.url)) }
+        return urls.union(visibleMentions.map(\.url)).count
     }
 
     func state(for pr: PR) -> ReviewState { reviews[pr.reviewKey] ?? .idle }

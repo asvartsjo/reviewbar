@@ -98,7 +98,8 @@ enum TerminalApp: String, CaseIterable, Identifiable {
 
         var ref: String { "refs/reviewbar/pr-\(number)" }
 
-        /// Shell lines: fetch the PR head, create or update the worktree, cd into it. Any failure
+        /// Shell lines: fetch the PR head, create or update the worktree, cd into it. A worktree
+        /// with local changes, or commits the PR doesn't have yet, stays where it is. Any failure
         /// falls back to the clone itself, with a message. Pure, for tests.
         var script: String {
             let repo = q(repoFolder), wt = q(path)
@@ -107,8 +108,12 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             if git -C \(repo) fetch --quiet origin +pull/\(number)/head:\(ref); then
               git -C \(repo) worktree prune
               if [[ -d \(wt) ]]; then
-                git -C \(wt) checkout --quiet --detach \(ref) \
-                  || print "Kept the worktree as it is: it has local changes."
+                if (cd \(wt) && \(Self.exitOnLocalCommits(notIn: [ref]))); then
+                  git -C \(wt) checkout --quiet --detach \(ref) \
+                    || print "Kept the worktree as it is: it has local changes."
+                else
+                  print "Kept the worktree as it is: it has commits the PR doesn't have yet."
+                fi
               else
                 mkdir -p "$(dirname \(wt))"
                 git -C \(repo) worktree add --quiet --detach \(wt) \(ref)
@@ -173,25 +178,33 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             }
         }
 
-        /// Shell lines that remove this worktree and its ref only if nothing would be lost: the
-        /// ref exists, `git status` is empty (ignored files such as a copied `vendor/` don't count;
-        /// untracked ones do, whatever `status.showUntrackedFiles` says), and HEAD and every commit
-        /// made in the worktree are the PR's last head on GitHub or already in the ref, so no
-        /// unpushed commit goes, even one a relaunch moved HEAD away from (it's only in the reflog,
-        /// which the removal deletes). `git worktree remove` runs without `--force`.
+        /// Shell lines that remove this worktree and its ref only if nothing would be lost:
+        /// `git status` is empty (ignored files such as a copied `vendor/` don't count; untracked
+        /// ones do, whatever `status.showUntrackedFiles` says), and HEAD and every commit made in
+        /// the worktree are the PR's last head on GitHub or already in the ref, so no unpushed
+        /// commit goes. `git worktree remove` runs without `--force`. The ref may already be gone
+        /// (the PR's worktree in the other location took it); then only the last head counts.
         /// Exits non-zero when it keeps the worktree. Pure, for tests.
         func removeScript(finalHead: String?) -> String {
             let repo = q(repoFolder), wt = q(path), final = q(finalHead ?? "")
             return """
             cd \(wt) || exit 1
-            git -C \(repo) rev-parse --verify --quiet \(ref) >/dev/null || exit 1
             [[ -z "$(git status --porcelain --untracked-files=all)" ]] || exit 1
             [[ "$(git rev-parse HEAD)" == \(final) ]] || git merge-base --is-ancestor HEAD \(ref) || exit 1
-            for c in $(git log -g --format='%H %gs' HEAD | awk '$2 ~ /^(commit|cherry-pick|revert|merge|rebase|am)/ { print $1 }'); do
-              git merge-base --is-ancestor $c \(ref) 2>/dev/null || git merge-base --is-ancestor $c \(final) 2>/dev/null || exit 1
-            done
+            \(Self.exitOnLocalCommits(notIn: [ref, final]))
             cd /
-            git -C \(repo) worktree remove \(wt) && git -C \(repo) update-ref -d \(ref)
+            git -C \(repo) worktree remove \(wt) && { git -C \(repo) update-ref -d \(ref) 2>/dev/null; true; }
+            """
+        }
+
+        /// Shell lines that exit 1 when a commit made in the worktree (read from its HEAD reflog)
+        /// is in none of `refs`: a local commit, even one HEAD has since moved away from.
+        /// Checkouts and resets only move to commits that already exist, so they don't count.
+        private static func exitOnLocalCommits(notIn refs: [String]) -> String {
+            let inRefs = refs.map { "git merge-base --is-ancestor $c \($0) 2>/dev/null" }.joined(separator: " || ")
+            return """
+            for c in $(git log -g --format='%H %gs' HEAD 2>/dev/null | awk '$2 ~ /^(commit|cherry-pick|revert|merge|rebase|am)/ { print $1 }'); do \
+            \(inRefs) || exit 1; done
             """
         }
     }

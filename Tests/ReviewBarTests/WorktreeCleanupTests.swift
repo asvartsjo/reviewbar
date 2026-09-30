@@ -68,11 +68,15 @@ struct WorktreeCleanupTests {
 
     /// Runs `removeScript` and says whether the worktree went. Its ref goes with it, or neither does.
     private func remove(_ w: Worktree, finalHead: String?) async -> Bool {
-        let refGone = (try? await sh(w.removeScript(finalHead: finalHead)
-            + "\ngit -C \(q(w.repoFolder)) rev-parse --verify --quiet \(w.ref) || print gone")) == "gone\n"
+        _ = try? await sh(w.removeScript(finalHead: finalHead))
+        let refGone = (try? await sh("git -C \(q(w.repoFolder)) rev-parse --verify --quiet \(w.ref)")) == nil
         let dirGone = !FileManager.default.fileExists(atPath: w.path)
         #expect(refGone == dirGone)
         return dirGone
+    }
+
+    private func head(_ folder: String) async throws -> String {
+        try await sh("git -C \(q(folder)) rev-parse HEAD").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     @Test func removesACleanWorktreeAndItsRef() async throws {
@@ -111,5 +115,44 @@ struct WorktreeCleanupTests {
         let t = try await makeWorktree(commit + " && git checkout -q --detach HEAD~1")
         defer { try? FileManager.default.removeItem(at: t.root) }
         #expect(await !remove(t.worktree, finalHead: t.head))
+    }
+
+    /// Both locations can hold PR 7 (the setting changed in between); they share one ref.
+    @Test func theWorktreeInTheOtherLocationGoesToo() async throws {
+        let t = try await makeWorktree()
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        let other = Worktree(repoFolder: t.worktree.repoFolder, path: t.root.appendingPathComponent("support/pr-7").path,
+                             number: 7)
+        _ = try await sh("git -C \(q(other.repoFolder)) worktree add --quiet --detach \(q(other.path)) \(other.ref)")
+        #expect(await remove(t.worktree, finalHead: t.head))
+        #expect(await remove(other, finalHead: t.head))
+    }
+
+    // MARK: Relaunching
+
+    /// The clone is its own `origin`, with the PR head at `refs/pull/7/head`.
+    private func publish(_ t: (root: URL, worktree: Worktree, head: String), head: String) async throws {
+        let repo = q(t.worktree.repoFolder)
+        _ = try await sh("git -C \(repo) remote get-url origin >/dev/null 2>&1 || git -C \(repo) remote add origin \(repo); "
+            + "git -C \(repo) update-ref refs/pull/7/head \(head)")
+    }
+
+    @Test func aRelaunchMovesACleanWorktreeToTheNewHead() async throws {
+        let t = try await makeWorktree()
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        _ = try await sh("git -C \(q(t.worktree.repoFolder)) -c user.name=t -c user.email=t@t commit -q --allow-empty -m next")
+        let next = try await head(t.worktree.repoFolder)
+        try await publish(t, head: next)
+        _ = try await sh(t.worktree.script)
+        #expect(try await head(t.worktree.path) == next)
+    }
+
+    @Test func aRelaunchKeepsLocalCommits() async throws {
+        let t = try await makeWorktree("print y > fix.txt && git add fix.txt && git -c user.name=t -c user.email=t@t commit -qm fix")
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        try await publish(t, head: t.worktree.ref)
+        let out = try await sh(t.worktree.script)
+        #expect(try await head(t.worktree.path) == t.head)
+        #expect(out.contains("commits the PR doesn't have yet"))
     }
 }

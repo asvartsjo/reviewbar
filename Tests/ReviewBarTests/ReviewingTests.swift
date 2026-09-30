@@ -110,6 +110,35 @@ struct ReviewingTests {
         #expect(Set(kept.keys) == ["a", "c"])
     }
 
+    // MARK: Mute
+
+    @Test func muteUntilSomethingChangesOrForGood() throws {
+        let r = try one(node(1, reviews: [review("anna", "APPROVED", at: "2026-09-11T10:00:00Z")]))
+        let before = PRSnapshot(at: "2026-09-11T09:00:00Z", head: head)
+        let after = PRSnapshot(at: "2026-09-11T12:00:00Z", head: head)
+        #expect(!r.isMuted(forever: false, until: nil))
+        #expect(r.isMuted(forever: false, until: after))
+        #expect(!r.isMuted(forever: false, until: before))                                   // anna came after
+        #expect(!r.isMuted(forever: false, until: PRSnapshot(at: after.at, head: "old1234")))   // pushed since
+        #expect(r.isMuted(forever: true, until: before))
+    }
+
+    @Test func aRequestIsNeverMuted() throws {
+        let r = Backend.merge(try parse([node(1, reviews: [review("me", "COMMENTED")])]),
+                              requested: [try one(node(1)).pr])[0]
+        #expect(r.isRequested)
+        #expect(!r.isMuted(forever: true, until: nil))
+    }
+
+    @Test func mutedPRsGetTheirOwnLastSection() throws {
+        let prs = try parse([node(1, reviews: [review("me", "APPROVED", commit: "old1234")]),   // your turn
+                             node(2, reviews: [review("me", "APPROVED", commit: "old1234")]),   // your turn, muted
+                             node(3, reviews: [review("me", "APPROVED")])])                     // done
+        let sections = ReviewingPR.sections(prs, muted: { $0.pr.number == 2 })
+        #expect(sections.map(\.group) == [.yours, .done, .muted])
+        #expect(sections.map { $0.prs.map(\.pr.number) } == [[1], [3], [2]])
+    }
+
     @Test func approvedWithNothingNewIsDone() throws {
         #expect(try one(node(1, reviews: [review("me", "APPROVED")])).turn == .done)
     }

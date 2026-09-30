@@ -79,6 +79,13 @@ struct ReviewingPR: Identifiable, Hashable {
         (lastOtherAt ?? "") > s.at || (pr.headRefOid != nil && pr.headRefOid != s.head)
     }
 
+    /// Muted for good, or until something changes after `until`. A request always shows:
+    /// someone asked for you. Pure, for tests.
+    func isMuted(forever: Bool, until: PRSnapshot?) -> Bool {
+        guard !isRequested else { return false }
+        return forever || until.map { !changed(since: $0) } ?? false
+    }
+
     struct MyReview: Hashable {
         let state: String      // APPROVED, CHANGES_REQUESTED or COMMENTED
         let commit: String?    // nil when a force-push deleted it
@@ -119,7 +126,8 @@ struct ReviewingPR: Identifiable, Hashable {
 
     /// The Reviewing tab's sections, in display order.
     enum Group: Int, CaseIterable, Comparable {
-        case yours, authors, done
+        /// `muted` is never a PR's own group: `sections` puts muted PRs there.
+        case yours, authors, done, muted
         static func < (a: Group, b: Group) -> Bool { a.rawValue < b.rawValue }
 
         var title: String {
@@ -127,6 +135,7 @@ struct ReviewingPR: Identifiable, Hashable {
             case .yours: "Your turn"
             case .authors: "Author's turn"
             case .done: "Done"
+            case .muted: "Muted"
             }
         }
     }
@@ -139,9 +148,11 @@ struct ReviewingPR: Identifiable, Hashable {
         }
     }
 
-    /// Non-empty sections in display order, newest activity first inside each. Pure, for tests.
-    static func sections(_ prs: [ReviewingPR]) -> [(group: Group, prs: [ReviewingPR])] {
-        Dictionary(grouping: prs, by: \.group)
+    /// Non-empty sections in display order, newest activity first inside each; muted PRs last,
+    /// in their own section. Pure, for tests.
+    static func sections(_ prs: [ReviewingPR], muted: (ReviewingPR) -> Bool = { _ in false })
+        -> [(group: Group, prs: [ReviewingPR])] {
+        Dictionary(grouping: prs, by: { muted($0) ? .muted : $0.group })
             .sorted { $0.key < $1.key }
             .map { ($0.key, $0.value.sorted { $0.latestAt > $1.latestAt }) }
     }

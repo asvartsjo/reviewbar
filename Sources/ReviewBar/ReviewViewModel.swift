@@ -116,7 +116,7 @@ final class ReviewViewModel: ObservableObject {
         do {
             let reviewed = PRFilter.others(try await fetchedReviewing, includeDrafts: PRFilter.includeDrafts)
             reviewing = Backend.merge(reviewed, requested: prs)
-            alerts += AlertDiff.reviewing(reviewing, before: seenReviewing)
+            alerts += AlertDiff.reviewing(reviewing.filter { !mutedForever.contains($0.pr.url) }, before: seenReviewing)
             seenReviewing = Dictionary(reviewing.map { ($0.pr.url, $0) }, uniquingKeysWith: { a, _ in a })
             updateSeen()
         } catch { errors.append("Reviewing: \(error.localizedDescription)") }
@@ -170,9 +170,11 @@ final class ReviewViewModel: ObservableObject {
 
     func dismissReplies(_ r: ReplyPR) { dismiss(r.pr.url, until: r.latestAt) }
 
-    var reviewingSections: [(group: ReviewingPR.Group, prs: [ReviewingPR])] { ReviewingPR.sections(reviewing) }
+    var reviewingSections: [(group: ReviewingPR.Group, prs: [ReviewingPR])] {
+        ReviewingPR.sections(reviewing, muted: isMuted)
+    }
 
-    var yourTurnCount: Int { reviewing.filter { $0.group == .yours }.count }
+    var yourTurnCount: Int { reviewing.filter { $0.group == .yours && !isMuted($0) }.count }
 
     func reviewingPR(for pr: PR) -> ReviewingPR? { reviewing.first { $0.pr.url == pr.url } }
 
@@ -180,10 +182,7 @@ final class ReviewViewModel: ObservableObject {
 
     private static let seenKey = "reviewingSeen", seenSeededKey = "reviewingSeenSeeded"
     /// PR url -> when you last opened it, and its head then. Survives restarts.
-    @Published private var seen: [String: PRSnapshot] = {
-        guard let data = UserDefaults.standard.data(forKey: seenKey) else { return [:] }
-        return (try? JSONDecoder().decode([String: PRSnapshot].self, from: data)) ?? [:]
-    }()
+    @Published private var seen = loadSnapshots(seenKey)
     /// The snapshot each PR had before this session's latest opening, for the open detail.
     private var seenBefore: [String: PRSnapshot] = [:]
 
@@ -209,15 +208,54 @@ final class ReviewViewModel: ObservableObject {
             UserDefaults.standard.set(true, forKey: Self.seenSeededKey)
         }
         let month = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30 * 86_400))
-        seen = PRSnapshot.pruned(seen, listed: Set(reviewing.map(\.pr.url)), cutoff: month)
+        let listed = Set(reviewing.map(\.pr.url))
+        seen = PRSnapshot.pruned(seen, listed: listed, cutoff: month)
+        mutedUntil = PRSnapshot.pruned(mutedUntil, listed: listed, cutoff: month)
         saveSeen()
+        Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
     }
 
-    private func saveSeen() {
-        if let data = try? JSONEncoder().encode(seen) { UserDefaults.standard.set(data, forKey: Self.seenKey) }
+    private func saveSeen() { Self.saveSnapshots(seen, Self.seenKey) }
+
+    private static func loadSnapshots(_ key: String) -> [String: PRSnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [:] }
+        return (try? JSONDecoder().decode([String: PRSnapshot].self, from: data)) ?? [:]
+    }
+
+    private static func saveSnapshots(_ s: [String: PRSnapshot], _ key: String) {
+        if let data = try? JSONEncoder().encode(s) { UserDefaults.standard.set(data, forKey: key) }
     }
 
     private static func isoNow() -> String { ISO8601DateFormatter().string(from: Date()) }
+
+    // MARK: Mute
+
+    private static let mutedUntilKey = "reviewingMutedUntil", mutedForeverKey = "reviewingMutedForever"
+    /// PR url -> the moment you muted it: it comes back when something changes after that.
+    @Published private var mutedUntil = loadSnapshots(mutedUntilKey)
+    /// PRs muted for good: no new-commits, resolved or verdict notifications either.
+    @Published private var mutedForever = Set(UserDefaults.standard.stringArray(forKey: mutedForeverKey) ?? [])
+
+    func isMuted(_ r: ReviewingPR) -> Bool {
+        r.isMuted(forever: mutedForever.contains(r.pr.url), until: mutedUntil[r.pr.url])
+    }
+
+    func muteUntilSomethingHappens(_ r: ReviewingPR) {
+        mutedUntil[r.pr.url] = PRSnapshot(at: Self.isoNow(), head: r.pr.headRefOid)
+        Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+    }
+
+    func muteForGood(_ r: ReviewingPR) {
+        mutedForever.insert(r.pr.url)
+        UserDefaults.standard.set(Array(mutedForever), forKey: Self.mutedForeverKey)
+    }
+
+    func unmute(_ r: ReviewingPR) {
+        mutedUntil[r.pr.url] = nil
+        mutedForever.remove(r.pr.url)
+        Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+        UserDefaults.standard.set(Array(mutedForever), forKey: Self.mutedForeverKey)
+    }
 
     struct DetailLoad {
         var detail: ReviewingDetail?
@@ -278,7 +316,7 @@ final class ReviewViewModel: ObservableObject {
     var badgeCount: Int {
         Set(prs.map(\.url))
             .union(visibleReplies.map(\.pr.url))
-            .union(reviewing.filter { $0.turn == .yours(.newCommits) }.map(\.pr.url))
+            .union(reviewing.filter { $0.turn == .yours(.newCommits) && !isMuted($0) }.map(\.pr.url))
             .union(visibleFeedback.map(\.pr.url))
             .union(visibleMentions.map(\.url))
             .count

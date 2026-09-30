@@ -165,7 +165,17 @@ struct ContentView: View {
                     ForEach(vm.reviewingSections, id: \.group) { s in
                         Section(s.group.title) {
                             ForEach(s.prs) { r in
-                                Button { selected = r.pr } label: { reviewingRow(r) }.buttonStyle(.plain)
+                                Button { selected = r.pr } label: { reviewingRow(r) }
+                                    .buttonStyle(.plain)
+                                    .opacity(s.group == .muted ? 0.55 : 1)
+                                    .contextMenu {
+                                        if vm.isMuted(r) {
+                                            Button("Unmute") { vm.unmute(r) }
+                                        } else if !r.isRequested {   // a request always shows
+                                            Button("Mute until something happens") { vm.muteUntilSomethingHappens(r) }
+                                            Button("Mute for good") { vm.muteForGood(r) }
+                                        }
+                                    }
                             }
                         }
                     }

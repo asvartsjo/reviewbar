@@ -591,15 +591,23 @@ final class ReviewViewModel: ObservableObject {
 
     // MARK: Quick summaries
 
-    /// Summaries are offered where there are comments to read: replies to you, or your own PRs.
+    /// Summaries are offered where there are comments to read: replies to you, your own PRs,
+    /// or a PR where others spoke after your review.
     func canSummarise(_ pr: PR) -> Bool {
-        isMine(pr) || replies.contains { $0.pr.url == pr.url }
+        isMine(pr) || replies.contains { $0.pr.url == pr.url } || summarySince(pr) != nil
+    }
+
+    /// Your last review, when others spoke after it: the summary then covers what happened since.
+    func summarySince(_ pr: PR) -> String? {
+        guard !isMine(pr), let r = reviewingPR(for: pr), r.othersSpokeSinceReview else { return nil }
+        return r.myLastReview?.at
     }
 
     /// Changes when new comments arrive, so an old summary isn't shown as current.
     private func summaryKey(_ pr: PR) -> String {
         let latest = myPRs.first { $0.pr.url == pr.url }?.latestAt
-            ?? replies.first { $0.pr.url == pr.url }?.latestAt ?? ""
+            ?? replies.first { $0.pr.url == pr.url }?.latestAt
+            ?? reviewingPR(for: pr)?.latestAt ?? ""
         return pr.url + "#" + latest
     }
 
@@ -613,10 +621,11 @@ final class ReviewViewModel: ObservableObject {
     func summarise(_ pr: PR) {
         let key = summaryKey(pr)
         let mine = isMine(pr)
+        let since = summarySince(pr)
         summaries[key] = .running
         Task {
             do {
-                let text = try await Backend.summariseFeedback(pr, mine: mine)
+                let text = try await Backend.summariseFeedback(pr, mine: mine, since: since)
                 summaries[key] = .done(text)
             } catch {
                 summaries[key] = .failed(error.localizedDescription)

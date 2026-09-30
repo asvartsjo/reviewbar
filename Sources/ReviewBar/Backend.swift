@@ -946,8 +946,8 @@ enum Backend {
     static let maxFeedbackSectionBytes = 25_000
 
     /// The PR's reviews, review threads (unresolved first) and conversation as plain text,
-    /// with my own comments marked "(me)". Best effort: never throws.
-    static func feedback(for pr: PR) async -> String {
+    /// with my own comments marked "(me)" and, given `since`, later ones marked "NEW". Best effort: never throws.
+    static func feedback(for pr: PR, since: String? = nil) async -> String {
         let parts = pr.repository.nameWithOwner.split(separator: "/", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return "(could not load feedback)" }
         let cmd = "gh api graphql -f query=\(q(feedbackQuery)) -f owner=\(q(parts[0])) "
@@ -962,6 +962,10 @@ enum Backend {
             let l = a?.login ?? "ghost"
             return "@\(l)\(l == me ? " (me)" : "")"
         }
+        func new(_ at: String?) -> String {
+            guard let since, let at, at > since else { return "" }
+            return " NEW"
+        }
         func capped(_ text: String) -> String {
             guard text.utf8.count > maxFeedbackSectionBytes else { return text }
             return String(decoding: Data(text.utf8.prefix(maxFeedbackSectionBytes)), as: UTF8.self)
@@ -972,7 +976,7 @@ enum Backend {
         for r in p.reviews.items {
             let body = r.body.trimmingCharacters(in: .whitespacesAndNewlines)
             if r.state == "COMMENTED" && body.isEmpty { continue }   // only wraps thread comments
-            reviews += "\(who(r.author)) \(r.state) \(r.submittedAt ?? ""):\n\(body)\n\n"
+            reviews += "\(who(r.author)) \(r.state) \(r.submittedAt ?? "")\(new(r.submittedAt)):\n\(body)\n\n"
         }
 
         var threads = ""
@@ -982,13 +986,13 @@ enum Backend {
             threads += "--- Thread \(i + 1) · \(t.isResolved ? "resolved" : "UNRESOLVED") · "
                 + "\(t.path)\(line)\(t.isOutdated ? " (outdated)" : "")\n"
             for c in t.comments.items {
-                threads += "\(who(c.author)) \(c.createdAt):\n\(c.body)\n\n"
+                threads += "\(who(c.author)) \(c.createdAt)\(new(c.createdAt)):\n\(c.body)\n\n"
             }
         }
 
         var conversation = ""
         for c in p.comments.items {
-            conversation += "\(who(c.author)) \(c.createdAt):\n\(c.body)\n\n"
+            conversation += "\(who(c.author)) \(c.createdAt)\(new(c.createdAt)):\n\(c.body)\n\n"
         }
 
         return """
@@ -1429,15 +1433,22 @@ enum Backend {
 
     /// Short summary of the comments with the quick model. Reads only the feedback, never the diff,
     /// so it reports what people said and what is waiting on me, not whether the code is right.
-    static func summariseFeedback(_ pr: PR, mine: Bool) async throws -> String {
-        let feedback = await feedback(for: pr)
-        let task = mine
-            ? """
-              This is MY pull request. Summarise what reviewers are asking for, grouped as: must address, questions to answer, optional. One line each: `path:line` if there is one, who, and what they want. Then one line on anything reviewers are waiting on me for.
-              """
-            : """
-              I reviewed this pull request. For each UNRESOLVED thread I took part in where someone else spoke last, give one line: `path:line`, who replied, and whether it is an answer, a question for me, pushback, or a claim that it is fixed. Then one line on what is left for me to do.
-              """
+    /// With `since` (my last review), it covers what others said after it, marked NEW in the feedback.
+    static func summariseFeedback(_ pr: PR, mine: Bool, since: String? = nil) async throws -> String {
+        let feedback = await feedback(for: pr, since: mine ? nil : since)
+        let task = if mine {
+            """
+            This is MY pull request. Summarise what reviewers are asking for, grouped as: must address, questions to answer, optional. One line each: `path:line` if there is one, who, and what they want. Then one line on anything reviewers are waiting on me for.
+            """
+        } else if since != nil {
+            """
+            I reviewed this pull request. Entries marked NEW came after my last review; the rest is only context. First, one line per person on what they did since: a verdict, replies, new comments. Then, for each thread with a NEW reply from someone else, one line: `path:line`, who, and whether it is an answer, a question for me, pushback, or a claim that it is fixed. Then one line on what is left for me to do. Nothing marked NEW from others: say so in one line.
+            """
+        } else {
+            """
+            I reviewed this pull request. For each UNRESOLVED thread I took part in where someone else spoke last, give one line: `path:line`, who replied, and whether it is an answer, a question for me, pushback, or a claim that it is fixed. Then one line on what is left for me to do.
+            """
+        }
         let prompt = """
         You are summarising code review comments for me, briefly.
 

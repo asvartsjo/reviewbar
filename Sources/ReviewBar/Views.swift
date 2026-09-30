@@ -483,9 +483,10 @@ struct DetailView: View {
     /// Quick-model summary of the comments, or the button to make one.
     @ViewBuilder private var summaryBox: some View {
         let quick = Agent.current.label(Agent.current.quick)
+        let sinceReview = vm.summarySince(pr) != nil
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Feedback summary").font(.callout.bold())
+                Text(sinceReview ? "Since your review, summarised" : "Feedback summary").font(.callout.bold())
                 Text(quick).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 switch vm.summaryState(for: pr) {
@@ -495,7 +496,7 @@ struct DetailView: View {
                     Button("Redo", systemImage: "arrow.counterclockwise") { vm.summarise(pr) }.buttonStyle(.hoverBorderless).font(.caption)
                         .help("Summarise the comments again")
                 default:
-                    Button("Summarise feedback", systemImage: "text.alignleft") { vm.summarise(pr) }.font(.caption)
+                    Button(sinceReview ? "Summarise what happened" : "Summarise feedback", systemImage: "text.alignleft") { vm.summarise(pr) }.font(.caption)
                         .help("\(quick) reads the comments, not the code, and sums up who said what")
                 }
             }
@@ -509,7 +510,9 @@ struct DetailView: View {
             case .failed(let msg):
                 Text(msg).foregroundStyle(.red)
             case .idle:
-                Text("A quick read of who said what and what's waiting on you. It doesn't see the code.")
+                Text(sinceReview
+                     ? "A quick read of what people said since your review and what's waiting on you. It doesn't see the code."
+                     : "A quick read of who said what and what's waiting on you. It doesn't see the code.")
                     .foregroundStyle(.secondary)
             }
         }

@@ -93,6 +93,17 @@ struct ReviewingTests {
         #expect(busy.lastOtherAt == "2026-09-11T10:00:00Z")
     }
 
+    @Test func othersSpokeSinceReviewOnlyAfterMyLatestReview() throws {
+        let after = try one(node(1, reviews: [review("me", "COMMENTED", at: "2026-09-10T10:00:00Z"),
+                                              review("anna", "APPROVED", at: "2026-09-11T10:00:00Z")]))
+        #expect(after.othersSpokeSinceReview)
+        let before = try one(node(2, reviews: [review("anna", "APPROVED", at: "2026-09-11T10:00:00Z"),
+                                               review("me", "COMMENTED", at: "2026-09-12T10:00:00Z")]))
+        #expect(!before.othersSpokeSinceReview)
+        let neverReviewed = try one(node(3, reviews: [review("anna", "APPROVED", at: "2026-09-11T10:00:00Z")]))
+        #expect(!neverReviewed.othersSpokeSinceReview)
+    }
+
     @Test func changedSinceASnapshot() throws {
         let r = try one(node(1, reviews: [review("anna", "APPROVED", at: "2026-09-11T10:00:00Z")]))
         #expect(!r.changed(since: PRSnapshot(at: "2026-09-11T12:00:00Z", head: head)))

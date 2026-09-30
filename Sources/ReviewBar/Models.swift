@@ -117,6 +117,12 @@ struct ReviewingPR: Identifiable, Hashable {
         return mine.commit != head
     }
 
+    /// Someone else reviewed or commented after your last review.
+    var othersSpokeSinceReview: Bool {
+        guard let mine = myLastReview, let other = lastOtherAt else { return false }
+        return other > mine.at
+    }
+
     /// New commits or a reply in your threads since your review: something to verify.
     var verifyIsDue: Bool { hasNewCommits || waiting > 0 }
 

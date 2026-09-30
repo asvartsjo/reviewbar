@@ -66,6 +66,7 @@ Without a certificate the app is ad-hoc signed: fine for your own Mac (right-cli
 ### Developing
 
 - `swift run` starts it straight from the source tree. Notifications and Open at login need the `.app` bundle, so they are disabled there. It uses a separate settings domain from the `.app`, so add your repos in each.
+- `swift run ReviewBar --demo` (or `open build/ReviewBar.app --args --demo` for notifications) shows made-up PRs covering every Reviewing state, without calling `gh`. The next refresh (↻, or reopening the panel a minute later) plays a second step: a push, a resolved thread, a new approval and a new request. Reviews are never saved in demo mode; actions that need GitHub or Claude fail on the fake repos.
 - `swift test` runs the unit tests (repo name parsing, model settings, feedback, reply and reviewing parsing from sample GitHub responses). With only the Command Line Tools, SwiftPM may not find the Swift Testing macros ("plugin for module 'TestingMacros' not found"); pass the plugin path: `swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing`.
 - `open Package.swift` opens it in Xcode.
 - Views use `@ViewState` instead of `@State`: on the macOS 27 SDK `@State` is a macro that only builds with Xcode, not with just the Command Line Tools.

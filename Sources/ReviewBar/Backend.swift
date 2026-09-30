@@ -108,6 +108,7 @@ enum Backend {
     }
 
     static func fetchPRs(skipping skipped: Set<String> = []) async throws -> [PR] {
+        if DemoData.isOn { return await DemoData.requests() }
         let (owner, repos) = settingsScope(skipping: skipped)
         var scope = repos.map { "--repo \(q($0))" }.joined(separator: " ")
         if scope.isEmpty, !owner.isEmpty { scope = "--owner \(q(owner))" }
@@ -143,6 +144,7 @@ enum Backend {
 
     /// @mentions since `since`, read on GitHub or not, in the given repos (all when empty). Read-only.
     static func fetchMentions(since: String, repos: [String]) async -> [Mention] {
+        if DemoData.isOn { return DemoData.mentions() }
         let jq = #"[.[] | select(.reason == "mention" or .reason == "team_mention") | "#
             + #"{repo: .repository.full_name, title: .subject.title, url: .subject.url, "#
             + #"comment: .subject.latest_comment_url, updatedAt: .updated_at}]"#
@@ -211,6 +213,7 @@ enum Backend {
 
     /// One conditional request for the newest notification. Nil when gh or the network failed.
     static func pollNotifications(etag: String?) async -> NotificationPoll? {
+        if DemoData.isOn { return nil }
         let header = etag.map { "-H \(q("If-None-Match: \($0)")) " } ?? ""
         // gh exits non-zero on 304, so read the status line instead of the exit code.
         guard let out = try? await sh("gh api -i \(header)'notifications?per_page=1' 2>/dev/null; true")
@@ -354,6 +357,7 @@ enum Backend {
     /// Open PRs you have reviewed with an unresolved thread you took part in
     /// whose last comment is from someone else. One read-only GraphQL query.
     static func fetchReplies(skipping skipped: Set<String> = []) async throws -> [ReplyPR] {
+        if DemoData.isOn { return DemoData.replies() }
         let (owner, repos) = settingsScope(skipping: skipped)
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
@@ -436,6 +440,7 @@ enum Backend {
     /// Open PRs of others that you have reviewed. Requested PRs come from Awaiting me instead,
     /// through `merge`. One read-only GraphQL query.
     static func fetchReviewing(skipping skipped: Set<String> = []) async throws -> [ReviewingPR] {
+        if DemoData.isOn { return await DemoData.reviewing() }
         let (owner, repos) = settingsScope(skipping: skipped)
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
@@ -598,6 +603,7 @@ enum Backend {
     /// Your threads, other people's open threads, what happened and how the branch moved since
     /// your last review. Two read-only calls (about 3 GraphQL points), made each time the PR is opened.
     static func fetchReviewingDetail(_ r: ReviewingPR) async throws -> ReviewingDetail {
+        if DemoData.isOn { return await DemoData.detail(for: r) }
         let repo = r.pr.repository.nameWithOwner
         let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { throw ShellError(code: 1, stderr: "Not an owner/repo name: \(repo)") }
@@ -798,6 +804,7 @@ enum Backend {
     /// an unresolved thread whose last comment is theirs, or a review or comment
     /// newer than your last commit or comment. One read-only GraphQL query.
     static func fetchMyPRs(skipping skipped: Set<String> = []) async throws -> [FeedbackPR] {
+        if DemoData.isOn { return DemoData.myPRs() }
         let (owner, repos) = settingsScope(skipping: skipped)
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }

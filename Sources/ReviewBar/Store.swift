@@ -13,6 +13,7 @@ enum Store {
     private static var jsonURL: URL { dir.appendingPathComponent("reviews.json") }
 
     static func load() -> [SavedReview] {
+        if DemoData.isOn { return DemoData.saved }
         guard let data = try? Data(contentsOf: jsonURL) else { return [] }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
@@ -20,6 +21,7 @@ enum Store {
     }
 
     static func save(_ reviews: [SavedReview]) {
+        guard !DemoData.isOn else { return }
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -34,6 +36,7 @@ enum Store {
     }
 
     static func writeMarkdown(_ pr: PR, _ text: String) {
+        guard !DemoData.isOn else { return }
         let url = markdownURL(pr)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
@@ -42,6 +45,7 @@ enum Store {
     }
 
     static func deleteMarkdown(_ pr: PR) {
+        guard !DemoData.isOn else { return }
         try? FileManager.default.removeItem(at: markdownURL(pr))
     }
 }

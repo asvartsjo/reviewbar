@@ -89,6 +89,7 @@ final class ReviewViewModel: ObservableObject {
         // One at a time; a request made meanwhile (e.g. after editing Settings) runs right after.
         if loading { refreshAgain = true; return }
         loading = true
+        if DemoData.isOn { DemoData.advance() }
         let skip = skippedRepos
         async let fetchedPRs = Backend.fetchPRs(skipping: skip)
         async let fetchedReplies = Backend.fetchReplies(skipping: skip)
@@ -105,7 +106,7 @@ final class ReviewViewModel: ObservableObject {
         do {
             prs = PRFilter.others(try await fetchedPRs, includeDrafts: PRFilter.includeDrafts)
             freshRequests = AlertDiff.newRequests(prs, seen: seenRequests)
-            if AutoReview.isOn { autoReview(freshRequests) }
+            if AutoReview.isOn, !DemoData.isOn { autoReview(freshRequests) }
             seenRequests = Set(prs.map(\.url))
         } catch { errors.append(error.localizedDescription) }
         do {
@@ -209,7 +210,9 @@ final class ReviewViewModel: ObservableObject {
 
     /// After a successful Reviewing fetch: the first time ever, record every listed PR so they
     /// don't all start as new; after that, forget PRs gone from the list for a month.
+    /// Skipped in demo mode, so demo PRs start as new and real snapshots are never pruned.
     private func updateSeen() {
+        guard !DemoData.isOn else { return }
         if !UserDefaults.standard.bool(forKey: Self.seenSeededKey) {
             let now = Self.isoNow()
             for r in reviewing where seen[r.pr.url] == nil { seen[r.pr.url] = PRSnapshot(at: now, head: r.pr.headRefOid) }
@@ -263,6 +266,7 @@ final class ReviewViewModel: ObservableObject {
     /// Once: Replies dismissals that still hide a reply become mutes, now that Reviewing
     /// replaces the Replies tab.
     private func migrateReplyDismissals() {
+        guard !DemoData.isOn else { return }
         guard !UserDefaults.standard.bool(forKey: Self.migratedDismissalsKey) else { return }
         let mutes = PRSnapshot.mutes(fromDismissed: dismissed, replies: replies, reviewing: reviewing)
         mutedUntil.merge(mutes) { current, _ in current }

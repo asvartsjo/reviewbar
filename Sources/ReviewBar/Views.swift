@@ -625,6 +625,7 @@ struct SettingsView: View {
     @AppStorage(StayOpen.key) private var stayOpen = false
     @AppStorage(AsWindow.key) private var asWindow = false
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
+    @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
@@ -842,6 +843,17 @@ struct SettingsView: View {
                 }
             }
             .font(.caption2).foregroundStyle(.secondary)
+            HStack {
+                Text("Review command")
+                TextField("Review command", text: $reviewCommand, prompt: Text("Built-in review prompt"))
+                    .labelsHidden()
+                    .disabled(agentRaw == Agent.codex.rawValue)
+            }
+            Text(agentRaw == Agent.codex.rawValue
+                 ? "Claude Code only. Codex reviews use the built-in prompt."
+                 : "The first message of a new review in the terminal, with {url} as the PR's link. "
+                   + "Leave it empty for the built-in review prompt.")
+                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             Text("Pull requests").font(.headline)

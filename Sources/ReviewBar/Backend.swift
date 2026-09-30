@@ -1408,10 +1408,19 @@ enum Backend {
 
     /// Opens a new Terminal window with an interactive Claude Code session seeded for `mode`.
     /// Returns a command to copy instead when the chosen terminal is "Copy command".
+    /// A new Claude review sends only the Review command from Settings, since anything after
+    /// a slash command becomes its arguments.
     static func openInTerminal(_ pr: PR, mode: TerminalMode) async throws -> String? {
         var prompt: String
+        var isCommand = false
         switch mode {
-        case .review: prompt = try await buildPrompt(for: pr)
+        case .review:
+            if Agent.current == .claude, let command = ClaudeSettings.reviewCommand(for: pr.url) {
+                prompt = command
+                isCommand = true
+            } else {
+                prompt = try await buildPrompt(for: pr)
+            }
         case .followUp(let notes, let summary):
             prompt = try await buildFollowUpPrompt(for: pr, review: notes, summary: summary)
         case .author(let summary):
@@ -1419,7 +1428,7 @@ enum Backend {
         }
         let worktree = RepoList.folder(for: pr.repository.nameWithOwner)
             .map { TerminalApp.Worktree.forPR(pr, repoFolder: $0) }
-        if let worktree {
+        if let worktree, !isCommand {
             prompt += "\n\nLOCAL CHECKOUT: you are in a git worktree made for this PR (\(worktree.path)), "
                 + "detached at the PR's head commit. My own clone is elsewhere and untouched. Read files here "
                 + "for context. If I ask you to push fixes to my PR, commit here and "

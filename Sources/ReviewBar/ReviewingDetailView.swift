@@ -23,7 +23,7 @@ struct ReviewingDetailBox: View {
             if let d = load.detail {
                 commits(d.commits)
                 activity(d)
-                threads(d.myThreads)
+                threads(d)
                 reviewers(d.reviewers(reviewing.verdicts))
             } else if load.loading {
                 Text("Loading activity, threads and commits…").font(.caption).foregroundStyle(.secondary)
@@ -78,10 +78,19 @@ struct ReviewingDetailBox: View {
         }
     }
 
-    @ViewBuilder private func threads(_ threads: [ReviewingDetail.MyThread]) -> some View {
+    @ViewBuilder private func threads(_ d: ReviewingDetail) -> some View {
+        let threads = d.myThreads
         if !threads.isEmpty {
             let resolved = threads.filter { $0.state == .resolved }.count
-            Text("Your threads · \(resolved)/\(threads.count) resolved").font(.caption.bold()).padding(.top, 2)
+            HStack(spacing: 0) {
+                Text(verbatim: (["Your threads", "\(resolved)/\(threads.count) resolved"] + [d.openBySeverity].compactMap { $0 })
+                    .joined(separator: " · "))
+                if d.blockingOpen > 0 {
+                    Text(verbatim: " · \(d.blockingOpen) blocking").foregroundStyle(.red)
+                        .help("Open 🚨/🔴 threads: your pr-review skill says these block a merge")
+                }
+            }
+            .font(.caption.bold()).padding(.top, 2)
             ForEach(Array(threads.enumerated()), id: \.offset) { _, t in
                 Button { if let s = t.url, let u = URL(string: s) { NSWorkspace.shared.open(u) } } label: {
                     VStack(alignment: .leading, spacing: 1) {

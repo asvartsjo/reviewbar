@@ -628,11 +628,15 @@ enum Backend {
                               url: first.url, state: state, isOutdated: t.isOutdated))
         }
 
-        func rank(_ s: ReviewingDetail.MyThread.State) -> Int {
-            switch s { case .replied: 0; case .open: 1; case .resolved: 2 }
+        func rank(_ t: ReviewingDetail.MyThread) -> (Int, Int) {
+            let state = switch t.state { case .replied: 0; case .open: 1; case .resolved: 2 }
+            return (state, t.severity?.rawValue ?? ReviewingDetail.MyThread.Severity.allCases.count)
         }
         let sorted = mine.enumerated()
-            .sorted { (rank($0.element.state), $0.offset) < (rank($1.element.state), $1.offset) }
+            .sorted {
+                let (a, b) = (rank($0.element), rank($1.element))
+                return (a.0, a.1, $0.offset) < (b.0, b.1, $1.offset)
+            }
             .map(\.element)
         var detail = ReviewingDetail(myThreads: sorted, openThreadsBy: openBy)
         if let since { (detail.activity, detail.activityCapped) = activity(pr, me: me, since: since) }

@@ -228,6 +228,38 @@ struct ReviewingDetail: Equatable {
             case open, resolved
         }
 
+        /// Icons from the pr-review skill's Severity section, most severe first.
+        /// ReviewDoc.Severity is the app's own review format, not this one.
+        enum Severity: Int, CaseIterable, Comparable {
+            case severe, high, medium, low, question
+
+            var icon: String {
+                switch self {
+                case .severe: "🚨"
+                case .high: "🔴"
+                case .medium: "🟠"
+                case .low: "🟡"
+                case .question: "❓"
+                }
+            }
+
+            /// The skill's rule: only these block a merge.
+            var isBlocking: Bool { self == .severe || self == .high }
+
+            /// From a title's leading icon. Compares the first Unicode scalar, so "❓" matches
+            /// with or without its U+FE0F variation selector.
+            init?(title: String) {
+                guard let first = title.unicodeScalars.first,
+                      let s = Self.allCases.first(where: { $0.icon.unicodeScalars.first == first }) else { return nil }
+                self = s
+            }
+
+            static func < (a: Severity, b: Severity) -> Bool { a.rawValue < b.rawValue }
+        }
+
+        /// Nil for comments that don't start with one of the skill's icons.
+        var severity: Severity? { Severity(title: snippet) }
+
         var location: String { line.map { "\(path):\($0)" } ?? path }
 
         var stateText: String {
@@ -283,6 +315,19 @@ struct ReviewingDetail: Equatable {
             return Reviewer(login: login, text: [verdict, open].compactMap { $0 }.joined(separator: " · "))
         }
     }
+
+    private var myOpenSeverities: [MyThread.Severity] {
+        myThreads.filter { $0.state != .resolved }.compactMap(\.severity)
+    }
+
+    /// "open: 1 🟡, 1 ❓": your unresolved threads per severity, most severe first. Nil when none has an icon.
+    var openBySeverity: String? {
+        let counts = Dictionary(grouping: myOpenSeverities, by: { $0 }).sorted { $0.key < $1.key }
+        return counts.isEmpty ? nil : "open: " + counts.map { "\($0.value.count) \($0.key.icon)" }.joined(separator: ", ")
+    }
+
+    /// Your unresolved 🚨/🔴 threads.
+    var blockingOpen: Int { myOpenSeverities.filter(\.isBlocking).count }
 }
 
 /// One of your own open PRs with reviewer feedback you have not answered yet.

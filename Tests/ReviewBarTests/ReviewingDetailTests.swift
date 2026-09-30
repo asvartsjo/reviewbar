@@ -67,6 +67,46 @@ struct ReviewingDetailTests {
                 == "🟡 LOW — Logic in the controller\n\nDescription: Move it.\n\nSuggested fix: An Action.")
     }
 
+    @Test func severityFromTheLeadingIcon() {
+        typealias S = ReviewingDetail.MyThread.Severity
+        #expect(S(title: "🚨 SEVERE — x") == .severe)
+        #expect(S(title: "🔴 HIGH — x") == .high)
+        #expect(S(title: "🟠 MEDIUM — x") == .medium)
+        #expect(S(title: "🟡 LOW — x") == .low)
+        #expect(S(title: "❓ Open question — x") == .question)
+        #expect(S(title: "❓\u{FE0F} Open question — x") == .question)
+        #expect(S(title: "Fix this 🔴") == nil)
+        #expect(S(title: "") == nil)
+        #expect(S.allCases.filter(\.isBlocking) == [.severe, .high])
+    }
+
+    @Test func threadsSortBySeverityWithinEachState() throws {
+        let d = try parse([
+            thread("me", path: "plain.ts", body: "Fix this"),
+            thread("me", path: "low.ts", body: "🟡 **LOW** — x"),
+            thread("me", resolved: true, path: "resolved-high.ts", body: "🔴 **HIGH** — x"),
+            thread("me", path: "high.ts", body: "🔴 **HIGH** — x"),
+            thread("me", last: "author", path: "replied-low.ts", body: "🟡 **LOW** — x"),
+        ])
+        #expect(d.myThreads.map(\.path) == ["replied-low.ts", "high.ts", "low.ts", "plain.ts", "resolved-high.ts"])
+    }
+
+    @Test func headerCountsOnlyOpenThreadsAndBlockingOnes() throws {
+        let d = try parse([
+            thread("me", body: "🟡 **LOW** — x"),
+            thread("me", last: "author", body: "❓ **Open question** — x"),
+            thread("me", body: "🔴 **HIGH** — x"),
+            thread("me", resolved: true, body: "🚨 **SEVERE** — x"),
+            thread("me", body: "Fix this"),
+        ])
+        #expect(d.openBySeverity == "open: 1 🔴, 1 🟡, 1 ❓")
+        #expect(d.blockingOpen == 1)
+
+        let plain = try parse([thread("me"), thread("me", resolved: true, body: "🔴 **HIGH** — x")])
+        #expect(plain.openBySeverity == nil)
+        #expect(plain.blockingOpen == 0)
+    }
+
     @Test func titleSkipsQuotesAndBlankLines() {
         #expect(Backend.threadTitle("\n> quoted\n\nReal title\nmore") == "Real title")
         #expect(Backend.threadTitle(String(repeating: "a", count: 300)).count == 140)

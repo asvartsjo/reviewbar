@@ -31,7 +31,7 @@ struct ReviewingTests {
         """
     }
 
-    private func node(_ number: Int, reviews: [String] = [], threads: [String] = [],
+    private func node(_ number: Int, reviews: [String] = [], viewerLatest: String = "null", threads: [String] = [],
                       checks: String? = "SUCCESS", createdAt: String = "2026-08-20T00:00:00Z") -> String {
         let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
         return """
@@ -39,7 +39,7 @@ struct ReviewingTests {
          "isDraft": false, "updatedAt": "2026-09-01T00:00:00Z", "createdAt": "\(createdAt)",
          "headRefOid": "\(head)", "repository": {"nameWithOwner": "o/r"}, "author": {"login": "author"},
          "commits": {"nodes": [{"commit": {"statusCheckRollup": \(rollup)}}]},
-         "reviews": {"nodes": [\(reviews.joined(separator: ","))]},
+         "reviews": {"nodes": [\(reviews.joined(separator: ","))]}, "viewerLatestReview": \(viewerLatest),
          "reviewThreads": {"nodes": [\(threads.joined(separator: ","))]}}
         """
     }
@@ -253,6 +253,21 @@ struct ReviewingTests {
         ]))
         #expect(r.myLastReview?.state == "APPROVED")
         #expect(r.myLastReview?.commit == head)
+    }
+
+    @Test func myLatestReviewCountsWhenTheReviewsWindowMissesIt() throws {
+        let busy = (0..<30).map { review("author", "COMMENTED", at: "2026-09-12T10:00:\(10 + $0)Z") }
+        let r = try one(node(1, reviews: busy,
+                             viewerLatest: review("me", "CHANGES_REQUESTED", at: "2026-09-10T10:00:00Z", commit: "old1234")))
+        #expect(r.myLastReview == .init(state: "CHANGES_REQUESTED", commit: "old1234", at: "2026-09-10T10:00:00Z"))
+        #expect(r.turn == .yours(.newCommits))
+
+        // A pending or dismissed latest review leaves it to the window.
+        for state in ["PENDING", "DISMISSED"] {
+            let r = try one(node(1, reviews: [review("me", "APPROVED")],
+                                 viewerLatest: review("me", state, commit: "old1234")))
+            #expect(r.myLastReview?.state == "APPROVED", "\(state)")
+        }
     }
 
     @Test func verdictsLeaveOutMeTheAuthorBotsAndPlainComments() throws {

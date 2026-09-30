@@ -427,6 +427,7 @@ enum Backend {
           repository { nameWithOwner } author { login }
           commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
           reviews(last: 30) { nodes { author { login __typename } state submittedAt commit { oid } } }
+          viewerLatestReview { state submittedAt commit { oid } }
           reviewThreads(last: 50) { nodes {
             isResolved isOutdated
             opener: comments(first: 1) { nodes { author { login __typename } createdAt } }
@@ -460,14 +461,17 @@ enum Backend {
             let author = n.author?.login ?? "ghost"
             func isOther(_ u: GitHubUser?) -> Bool { u.map { $0.login != me && !$0.isBot } ?? false }
 
+            func submitted(_ r: ReviewingData.Review?) -> ReviewingPR.MyReview? {
+                guard let r, let at = r.submittedAt, r.state != "PENDING", r.state != "DISMISSED" else { return nil }
+                return ReviewingPR.MyReview(state: r.state, commit: r.commit?.oid, at: at)
+            }
+
             var latestAt = ""
             var mine: ReviewingPR.MyReview?
             var verdicts: [String: String] = [:]
             for r in n.reviews.items {
                 if r.author?.login == me {
-                    if let at = r.submittedAt, r.state != "PENDING", r.state != "DISMISSED" {
-                        mine = ReviewingPR.MyReview(state: r.state, commit: r.commit?.oid, at: at)
-                    }
+                    mine = submitted(r) ?? mine
                     continue
                 }
                 guard isOther(r.author), let who = r.author?.login, who != author else { continue }
@@ -478,6 +482,8 @@ enum Backend {
                 default: break
                 }
             }
+
+            mine = submitted(n.viewerLatestReview) ?? mine
 
             // `waiting` is the Replies rule (`parseReplies`), with bots left out.
             var waiting = 0, opened = 0, resolved = 0, outdated = 0
@@ -540,6 +546,9 @@ enum Backend {
             let author: Login?
             let commits: Nodes<CommitNode>
             let reviews: Nodes<Review>
+            /// Your latest review, which a busy PR's `reviews` window (thread replies and bots
+            /// count) can leave out. It may be pending or dismissed; then the window decides.
+            let viewerLatestReview: Review?
             let reviewThreads: Nodes<ReviewThread>
         }
         struct CommitNode: Decodable {

@@ -67,54 +67,51 @@ private final class RunningProcess: @unchecked Sendable {
 /// Only the command's own output is returned, not what `.zshrc` and friends print.
 /// Cancelling the calling task stops the command and throws CancellationError.
 func sh(_ command: String, input: String? = nil) async throws -> String {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    p.arguments = ["-lic", "print -r -- \(outputMarker); " + command]
+    let outP = Pipe(), errP = Pipe(), inP = Pipe()
+    p.standardOutput = outP
+    p.standardError = errP
+    p.standardInput = inP
+    let (exit, exited) = AsyncStream.makeStream(of: Int32.self)
+    p.terminationHandler = { exited.yield($0.terminationStatus); exited.finish() }
+
     let running = RunningProcess()
     return try await withTaskCancellationHandler {
-        try await withCheckedThrowingContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                p.arguments = ["-lic", "print -r -- \(outputMarker); " + command]
-                let outP = Pipe(), errP = Pipe(), inP = Pipe()
-                p.standardOutput = outP
-                p.standardError = errP
-                p.standardInput = inP
+        guard running.attach(p) else { throw CancellationError() }
+        try p.run()
 
-                guard running.attach(p) else { cont.resume(throwing: CancellationError()); return }
-                do { try p.run() } catch { cont.resume(throwing: error); return }
-
-                // Written on another queue; group.wait() below orders that write before the read.
-                nonisolated(unsafe) var errData = Data()
-                let group = DispatchGroup()
-                group.enter()
-                DispatchQueue.global().async {
-                    errData = errP.fileHandleForReading.readDataToEndOfFile()
-                    group.leave()
-                }
-                DispatchQueue.global().async {
-                    if let input { try? inP.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
-                    try? inP.fileHandleForWriting.close()
-                }
-
-                let outData = outP.fileHandleForReading.readDataToEndOfFile()
-                p.waitUntilExit()
-                group.wait()
-
-                var out = String(decoding: outData, as: UTF8.self)
-                if let r = out.range(of: outputMarker + "\n") { out = String(out[r.upperBound...]) }
-                if running.isCancelled {
-                    cont.resume(throwing: CancellationError())
-                } else if p.terminationStatus == 0 {
-                    cont.resume(returning: out)
-                } else {
-                    // Some tools (claude among them) report errors on stdout; keep both.
-                    let err = String(decoding: errData, as: UTF8.self)
-                    let detail = err.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? String(out.suffix(2000)) : err
-                    cont.resume(throwing: ShellError(code: p.terminationStatus, stderr: detail))
-                }
-            }
+        async let outData = blocking { outP.fileHandleForReading.readDataToEndOfFile() }
+        async let errData = blocking { errP.fileHandleForReading.readDataToEndOfFile() }
+        async let wroteInput: Void = blocking {
+            if let input { try? inP.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
+            try? inP.fileHandleForWriting.close()
         }
+        var status: Int32 = -1
+        for await s in exit { status = s }
+        let (outBytes, errBytes, _) = await (outData, errData, wroteInput)
+
+        var out = String(decoding: outBytes, as: UTF8.self)
+        if let r = out.range(of: outputMarker + "\n") { out = String(out[r.upperBound...]) }
+        if running.isCancelled { throw CancellationError() }
+        guard status == 0 else {
+            // Some tools (claude among them) report errors on stdout; keep both.
+            let err = String(decoding: errBytes, as: UTF8.self)
+            let detail = err.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? String(out.suffix(2000)) : err
+            throw ShellError(code: status, stderr: detail)
+        }
+        return out
     } onCancel: {
         running.cancel()
+    }
+}
+
+/// Runs a blocking pipe read or write on a GCD thread, so it never ties up one of Swift
+/// concurrency's few threads for as long as a command runs.
+private func blocking<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+    await withCheckedContinuation { c in
+        DispatchQueue.global(qos: .userInitiated).async { c.resume(returning: work()) }
     }
 }

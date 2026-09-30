@@ -54,6 +54,7 @@ struct ReviewingDetailBox: View {
     private static let isoParser = ISO8601DateFormatter()
 
     @ViewBuilder private func activity(_ d: ReviewingDetail) -> some View {
+        let before = vm.previouslySeen(reviewing.pr)
         if d.activity.isEmpty {
             Text("No activity since your review").font(.caption).foregroundStyle(.secondary)
         } else {
@@ -62,6 +63,7 @@ struct ReviewingDetailBox: View {
                 let when = Self.isoParser.date(from: a.at)?.formatted(.relative(presentation: .named)) ?? ""
                 Button { if let u = URL(string: a.url ?? reviewing.pr.url) { NSWorkspace.shared.open(u) } } label: {
                     HStack(spacing: 6) {
+                        if let before, a.at > before { NewDot() }
                         Text(verbatim: a.text).lineLimit(1)
                         Spacer(minLength: 4)
                         Text(when).foregroundStyle(.secondary)
@@ -140,5 +142,12 @@ struct ReviewingDetailBox: View {
         case .open: .primary
         case .resolved: .green
         }
+    }
+}
+
+/// Marks something that changed since you last opened the PR, like unread mail.
+struct NewDot: View {
+    var body: some View {
+        Circle().fill(.blue).frame(width: 7, height: 7).help("New since you last opened this PR")
     }
 }

@@ -83,6 +83,33 @@ struct ReviewingTests {
         #expect(try one(node(1, reviews: [review("me", "COMMENTED")], threads: [replied])).verifyIsDue)
     }
 
+    // MARK: New since you last looked
+
+    @Test func lastOtherAtIgnoresYouAndIsNilWithoutOthers() throws {
+        let quiet = try one(node(1, reviews: [review("me", "COMMENTED", at: "2026-09-10T10:00:00Z")]))
+        #expect(quiet.lastOtherAt == nil)
+        let busy = try one(node(1, reviews: [review("me", "COMMENTED", at: "2026-09-12T10:00:00Z"),
+                                             review("anna", "APPROVED", at: "2026-09-11T10:00:00Z")]))
+        #expect(busy.lastOtherAt == "2026-09-11T10:00:00Z")
+    }
+
+    @Test func changedSinceASnapshot() throws {
+        let r = try one(node(1, reviews: [review("anna", "APPROVED", at: "2026-09-11T10:00:00Z")]))
+        #expect(!r.changed(since: PRSnapshot(at: "2026-09-11T12:00:00Z", head: head)))
+        #expect(r.changed(since: PRSnapshot(at: "2026-09-11T09:00:00Z", head: head)))      // anna after the look
+        #expect(r.changed(since: PRSnapshot(at: "2026-09-11T12:00:00Z", head: "old1234")))  // pushed since
+        let quiet = try one(node(2, reviews: [review("me", "COMMENTED", at: "2026-09-12T10:00:00Z")]))
+        #expect(!quiet.changed(since: PRSnapshot(at: "2026-09-11T12:00:00Z", head: head)))  // your own review
+    }
+
+    @Test func snapshotsOfUnlistedPRsArePrunedAfterTheCutoff() {
+        let all = ["a": PRSnapshot(at: "2026-08-01T00:00:00Z", head: nil),
+                   "b": PRSnapshot(at: "2026-08-01T00:00:00Z", head: nil),
+                   "c": PRSnapshot(at: "2026-09-20T00:00:00Z", head: nil)]
+        let kept = PRSnapshot.pruned(all, listed: ["a"], cutoff: "2026-09-01T00:00:00Z")
+        #expect(Set(kept.keys) == ["a", "c"])
+    }
+
     @Test func approvedWithNothingNewIsDone() throws {
         #expect(try one(node(1, reviews: [review("me", "APPROVED")])).turn == .done)
     }

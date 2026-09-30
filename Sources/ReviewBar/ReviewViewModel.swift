@@ -118,6 +118,7 @@ final class ReviewViewModel: ObservableObject {
             reviewing = Backend.merge(reviewed, requested: prs)
             alerts += AlertDiff.reviewing(reviewing, before: seenReviewing)
             seenReviewing = Dictionary(reviewing.map { ($0.pr.url, $0) }, uniquingKeysWith: { a, _ in a })
+            updateSeen()
         } catch { errors.append("Reviewing: \(error.localizedDescription)") }
         // After Reviewing, so a request on a PR you reviewed reads as a re-request.
         let reviewedURLs = Set(reviewing.filter { $0.myLastReview != nil }.map(\.pr.url))
@@ -174,6 +175,49 @@ final class ReviewViewModel: ObservableObject {
     var yourTurnCount: Int { reviewing.filter { $0.group == .yours }.count }
 
     func reviewingPR(for pr: PR) -> ReviewingPR? { reviewing.first { $0.pr.url == pr.url } }
+
+    // MARK: New since you last looked
+
+    private static let seenKey = "reviewingSeen", seenSeededKey = "reviewingSeenSeeded"
+    /// PR url -> when you last opened it, and its head then. Survives restarts.
+    @Published private var seen: [String: PRSnapshot] = {
+        guard let data = UserDefaults.standard.data(forKey: seenKey) else { return [:] }
+        return (try? JSONDecoder().decode([String: PRSnapshot].self, from: data)) ?? [:]
+    }()
+    /// The snapshot each PR had before this session's latest opening, for the open detail.
+    private var seenBefore: [String: PRSnapshot] = [:]
+
+    /// Changed since you last opened it; a PR you never opened is new.
+    func isNew(_ r: ReviewingPR) -> Bool { seen[r.pr.url].map { r.changed(since: $0) } ?? true }
+
+    /// When you looked before opening this PR now; nil the first time.
+    func previouslySeen(_ pr: PR) -> String? { seenBefore[pr.url]?.at }
+
+    func markSeen(_ r: ReviewingPR) {
+        let url = r.pr.url
+        seenBefore[url] = seen[url]
+        seen[url] = PRSnapshot(at: Self.isoNow(), head: r.pr.headRefOid)
+        saveSeen()
+    }
+
+    /// After a successful Reviewing fetch: the first time ever, record every listed PR so they
+    /// don't all start as new; after that, forget PRs gone from the list for a month.
+    private func updateSeen() {
+        if !UserDefaults.standard.bool(forKey: Self.seenSeededKey) {
+            let now = Self.isoNow()
+            for r in reviewing where seen[r.pr.url] == nil { seen[r.pr.url] = PRSnapshot(at: now, head: r.pr.headRefOid) }
+            UserDefaults.standard.set(true, forKey: Self.seenSeededKey)
+        }
+        let month = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30 * 86_400))
+        seen = PRSnapshot.pruned(seen, listed: Set(reviewing.map(\.pr.url)), cutoff: month)
+        saveSeen()
+    }
+
+    private func saveSeen() {
+        if let data = try? JSONEncoder().encode(seen) { UserDefaults.standard.set(data, forKey: Self.seenKey) }
+    }
+
+    private static func isoNow() -> String { ISO8601DateFormatter().string(from: Date()) }
 
     struct DetailLoad {
         var detail: ReviewingDetail?

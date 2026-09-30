@@ -179,6 +179,7 @@ struct ContentView: View {
     private func reviewingRow(_ r: ReviewingPR) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
+                if vm.isNew(r) { NewDot() }
                 Text(verbatim: "\(r.pr.repository.nameWithOwner) #\(r.pr.number)")
                     .font(.caption).foregroundStyle(.secondary)
                 if r.pr.isDraft {
@@ -467,6 +468,7 @@ struct DetailView: View {
             }
         }
         .padding(10)
+        .onAppear { if let r = vm.reviewingPR(for: pr) { vm.markSeen(r) } }
     }
 
     /// Quick-model summary of the comments, or the button to make one.

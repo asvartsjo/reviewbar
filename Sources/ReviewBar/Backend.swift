@@ -482,7 +482,8 @@ enum Backend {
                                myThreads: opened, resolved: resolved, outdated: outdated,
                                verdicts: verdicts.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) },
                                checks: n.commits.items.first?.commit.statusCheckRollup?.state,
-                               latestAt: latestAt.isEmpty ? n.updatedAt : latestAt)
+                               latestAt: latestAt.isEmpty ? n.updatedAt : latestAt,
+                               lastOtherAt: latestAt.isEmpty ? nil : latestAt)
         }
         .sorted { $0.latestAt > $1.latestAt }
     }

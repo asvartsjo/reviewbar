@@ -69,7 +69,15 @@ struct ReviewingPR: Identifiable, Hashable {
     /// Combined CI state of the head commit: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED or nil.
     let checks: String?
     let latestAt: String   // ISO 8601, newest review or comment by someone else
+    /// Like `latestAt`, but nil when nobody else has reviewed or commented (`latestAt` then
+    /// falls back to the PR's `updatedAt`, which your own comments move).
+    var lastOtherAt: String? = nil
     var id: String { pr.url }
+
+    /// Someone else reviewed or commented after the snapshot, or the head moved. Pure, for tests.
+    func changed(since s: PRSnapshot) -> Bool {
+        (lastOtherAt ?? "") > s.at || (pr.headRefOid != nil && pr.headRefOid != s.head)
+    }
 
     struct MyReview: Hashable {
         let state: String      // APPROVED, CHANGES_REQUESTED or COMMENTED
@@ -157,6 +165,18 @@ struct ReviewingPR: Identifiable, Hashable {
         let threads = myThreads == 0 ? nil : "\(resolved)/\(myThreads) of your threads resolved"
         let others = verdicts.map { "\($0.login) \($0.state == "APPROVED" ? "approved" : "requested changes")" }
         return ([reason, replies, threads].compactMap { $0 } + others).joined(separator: " · ")
+    }
+}
+
+/// A PR you review at one moment: a time (ISO 8601) and its head commit. Stored per PR url for
+/// "new since you last looked"; compared with `ReviewingPR.changed(since:)`.
+struct PRSnapshot: Codable, Equatable {
+    let at: String
+    let head: String?
+
+    /// Drops snapshots of PRs no longer listed, once they're older than `cutoff`. Pure, for tests.
+    static func pruned(_ all: [String: PRSnapshot], listed: Set<String>, cutoff: String) -> [String: PRSnapshot] {
+        all.filter { listed.contains($0.key) || $0.value.at > cutoff }
     }
 }
 

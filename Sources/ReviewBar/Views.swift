@@ -131,27 +131,38 @@ struct ContentView: View {
                         .background(.quaternary, in: Capsule())
                 }
                 Spacer()
-                if case .done = vm.state(for: pr) {
-                    Image(systemName: "sparkles").foregroundStyle(.orange)
-                } else if vm.hasOlderReview(pr) {
-                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
-                }
+                savedReviewIcon(pr)
             }
             Text(pr.title).font(.body).lineLimit(2)
             HStack(spacing: 4) {
                 Text("\(pr.author.login) · updated \(age(pr.updatedAt))")
                     .foregroundStyle(.secondary)
-                if let opened = pr.createdAt {
-                    let days = daysSince(opened)
-                    Text(days < 1 ? "· opened today" : "· open \(days)d")
-                        .foregroundStyle(days >= Self.oldAfterDays ? .orange : .secondary)
-                        .help(days >= Self.oldAfterDays ? "Open for \(days) days" : "")
-                }
+                openAge(pr)
             }
             .font(.caption)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+
+    /// ✨ when a review made here is saved for this version, 🕘 when only an older one is.
+    @ViewBuilder private func savedReviewIcon(_ pr: PR) -> some View {
+        if case .done = vm.state(for: pr) {
+            Image(systemName: "sparkles").foregroundStyle(.orange).help("Review saved in ReviewBar")
+        } else if vm.hasOlderReview(pr) {
+            Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
+                .help("A review of an older version is saved in ReviewBar")
+        }
+    }
+
+    /// "· open 4d", orange from `oldAfterDays`.
+    @ViewBuilder private func openAge(_ pr: PR) -> some View {
+        if let opened = pr.createdAt {
+            let days = daysSince(opened)
+            Text(days < 1 ? "· opened today" : "· open \(days)d")
+                .foregroundStyle(days >= Self.oldAfterDays ? .orange : .secondary)
+                .help(days >= Self.oldAfterDays ? "Open for \(days) days" : "")
+        }
     }
 
     // MARK: reviewing
@@ -161,6 +172,7 @@ struct ContentView: View {
             if vm.reviewing.isEmpty && !vm.loading {
                 empty("eyeglasses", "No open PRs you review.")
             } else {
+                reviewAllBar
                 List {
                     ForEach(vm.reviewingSections, id: \.group) { s in
                         Section(s.group.title) {
@@ -197,11 +209,16 @@ struct ContentView: View {
                         .background(.quaternary, in: Capsule())
                 }
                 Spacer()
+                savedReviewIcon(r.pr)
                 ChecksIcon(state: r.checks)
             }
             Text(r.pr.title).font(.body).lineLimit(2)
-            Text("\(r.pr.author.login) · \(r.status)")
-                .font(.caption).foregroundStyle(r.group == .yours ? .blue : .secondary).lineLimit(2)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(r.pr.author.login) · \(r.status)")
+                    .foregroundStyle(r.group == .yours ? .blue : .secondary).lineLimit(2)
+                if r.isRequested { openAge(r.pr) }
+            }
+            .font(.caption)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

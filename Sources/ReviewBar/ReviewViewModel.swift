@@ -201,6 +201,15 @@ final class ReviewViewModel: ObservableObject {
 
     func reviewingPR(for pr: PR) -> ReviewingPR? { reviewing.first { $0.pr.url == pr.url } }
 
+    /// Verify fixes is the next step: you have threads here, something changed since your review,
+    /// and a Verify command is set. Then it's the one prominent button in the PR detail.
+    func verifyIsDue(_ pr: PR) -> Bool {
+        guard Agent.current == .claude, ClaudeSettings.verifyCommand(for: pr.url) != nil,
+              let r = reviewingPR(for: pr), r.verifyIsDue,
+              let d = detailLoad(for: pr).detail else { return false }
+        return !d.myThreads.isEmpty
+    }
+
     // MARK: New since you last looked
 
     private static let seenKey = "reviewingSeen", seenSeededKey = "reviewingSeenSeeded"

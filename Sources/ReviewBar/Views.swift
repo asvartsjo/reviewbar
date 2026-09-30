@@ -100,7 +100,7 @@ struct ContentView: View {
                 .modifier(HoverHighlight(inset: 4))
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 10).padding(.vertical, 4)
     }
 
     /// ✨ when a review made here is saved for this version, 🕘 when only an older one is.
@@ -131,22 +131,24 @@ struct ContentView: View {
                 reviewAllBar
                 List {
                     ForEach(vm.reviewingSections, id: \.group) { s in
-                        Section(s.group.title) {
-                            ForEach(s.prs) { r in
-                                Button { selected = r.pr } label: { reviewingRow(r) }
-                                    .buttonStyle(.hoverRow)
-                                    .opacity(s.group == .muted ? 0.55 : 1)
-                                    .contextMenu {
-                                        if vm.isMuted(r) {
-                                            Button("Unmute", systemImage: "bell") { vm.unmute(r) }
-                                        } else if !r.isRequested {
-                                            Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(r) }
-                                            Button("Mute for good", systemImage: "bell.slash.fill") { vm.muteForGood(r) }
-                                        } else if r.myLastReview == nil {   // a re-request always shows
-                                            Button("Mute for good", systemImage: "bell.slash.fill") { vm.muteForGood(r) }
-                                        }
+                        sectionHeader(s.group.title)
+                            .padding(.top, s.group == vm.reviewingSections.first?.group ? 0 : 10)
+                            .listRowSeparator(.hidden)
+                        ForEach(s.prs) { r in
+                            Button { selected = r.pr } label: { reviewingRow(r) }
+                                .listRowSeparator(.hidden)
+                                .buttonStyle(.hoverRow)
+                                .opacity(s.group == .muted ? 0.55 : 1)
+                                .contextMenu {
+                                    if vm.isMuted(r) {
+                                        Button("Unmute", systemImage: "bell") { vm.unmute(r) }
+                                    } else if !r.isRequested {
+                                        Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(r) }
+                                        Button("Mute for good", systemImage: "bell.slash.fill") { vm.muteForGood(r) }
+                                    } else if r.myLastReview == nil {   // a re-request always shows
+                                        Button("Mute for good", systemImage: "bell.slash.fill") { vm.muteForGood(r) }
                                     }
-                            }
+                                }
                         }
                     }
                 }
@@ -156,17 +158,27 @@ struct ContentView: View {
         }
     }
 
+    /// "YOUR TURN", "DONE": capitals in the primary colour over a line, so the groups stand out
+    /// from the rows, which have no separators. A plain row, not a Section header: a pinned
+    /// header gets a second line from macOS.
+    private func sectionHeader(_ title: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).textCase(.uppercase).font(.callout.bold()).tracking(0.6).foregroundStyle(.primary)
+            Divider()
+        }
+    }
+
     /// The dot sits in its own column, so titles line up whether or not a row is new.
     private func reviewingRow(_ r: ReviewingPR) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Group {
                 if vm.isNew(r) { NewDot() } else { Color.clear.frame(width: 7, height: 7) }
             }
-            .padding(.top, 21)
+            .padding(.top, 5)
             VStack(alignment: .leading, spacing: 2) {
-                repoCaption(r.pr.repository.nameWithOwner, draft: r.pr.isDraft)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     numberedTitle(r.pr.number, r.pr.title)
+                    if r.pr.isDraft { draftBadge }
                     Spacer(minLength: 4)
                     HStack(spacing: 5) {
                         if r.isRequested { openAge(r.pr) }
@@ -175,12 +187,10 @@ struct ContentView: View {
                     }
                     .font(.caption)
                 }
-                (Text(r.pr.author.login).foregroundStyle(.primary)
-                    + Text(verbatim: " · \(r.status)").foregroundStyle(.secondary))
-                    .font(.caption).lineLimit(2)
+                metaLine(r.pr.repository.nameWithOwner, r.pr.author.login, " · \(r.status)")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
     }
 
@@ -193,6 +203,7 @@ struct ContentView: View {
             } else {
                 List(vm.visibleMentions) { m in
                     Button { if let u = URL(string: m.url) { NSWorkspace.shared.open(u) } } label: { mentionRow(m) }
+                        .listRowSeparator(.hidden)
                         .buttonStyle(.hoverRow)
                         .contextMenu { Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) } }
                 }
@@ -204,20 +215,17 @@ struct ContentView: View {
 
     private func mentionRow(_ m: Mention) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            repoCaption(m.repo, draft: false)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 numberedTitle(m.number, m.title)
                 Spacer(minLength: 4)
                 Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) }.buttonStyle(.hoverBorderless).font(.caption)
             }
-            (Text(m.author).foregroundStyle(.primary)
-                + Text(" mentioned you \(age(m.updatedAt))").foregroundStyle(.secondary))
-                .font(.caption)
+            metaLine(m.repo, m.author, " mentioned you \(age(m.updatedAt))")
             if !m.snippet.isEmpty {
                 Text(m.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
     }
 
     // MARK: my PRs
@@ -229,6 +237,7 @@ struct ContentView: View {
             } else {
                 List(vm.visibleFeedback) { f in
                     Button { selected = f.pr } label: { feedbackRow(f) }
+                        .listRowSeparator(.hidden)
                         .buttonStyle(.hoverRow)
                         .contextMenu {
                             Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
@@ -242,18 +251,16 @@ struct ContentView: View {
 
     private func feedbackRow(_ f: FeedbackPR) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            repoCaption(f.pr.repository.nameWithOwner, draft: f.pr.isDraft)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 numberedTitle(f.pr.number, f.pr.title)
+                if f.pr.isDraft { draftBadge }
                 Spacer(minLength: 4)
                 StatusBadge(feedback: f)
                 DecisionBadge(decision: f.decision)
             }
-            (Text(verbatim: f.latestBy).foregroundStyle(.primary)
-                + Text(verbatim: " \(age(f.latestAt)) · \(f.summary)").foregroundStyle(.secondary))
-                .font(.caption)
+            metaLine(f.pr.repository.nameWithOwner, f.latestBy, " \(age(f.latestAt)) · \(f.summary)")
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
     }
 
@@ -266,6 +273,7 @@ struct ContentView: View {
             } else {
                 List(vm.saved) { s in
                     Button { selected = s.pr } label: { savedRow(s) }
+                        .listRowSeparator(.hidden)
                         .buttonStyle(.hoverRow)
                         .contextMenu {
                             Button("Delete", systemImage: "trash", role: .destructive) { vm.delete(s) }
@@ -289,27 +297,30 @@ struct ContentView: View {
 
     private func savedRow(_ s: SavedReview) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            repoCaption(s.pr.repository.nameWithOwner, draft: false)
             numberedTitle(s.pr.number, s.pr.title)
-            (Text(verbatim: s.pr.author.login).foregroundStyle(.primary)
-                + Text(" · reviewed \(s.date.formatted(.relative(presentation: .named)))"
-                       + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
-                       + (s.producedBy.map { " · \($0)" } ?? "")).foregroundStyle(.secondary))
-                .font(.caption)
+            metaLine(s.pr.repository.nameWithOwner, s.pr.author.login,
+                     " · reviewed \(s.date.formatted(.relative(presentation: .named)))"
+                        + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
+                        + (s.producedBy.map { " · \($0)" } ?? ""))
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
     }
 
     // MARK: helpers
 
-    /// The small grey "owner/repo" line above a row's title.
-    private func repoCaption(_ repo: String, draft: Bool) -> some View {
-        HStack(spacing: 4) {
-            Text(verbatim: repo)
-            if draft { Text("DRAFT").padding(.horizontal, 4).background(.quaternary, in: Capsule()) }
-        }
-        .font(.caption2).foregroundStyle(.secondary)
+    /// The line under a row's title: "acme/api · lina · New commits since your review", with the
+    /// person in normal text and the rest in grey. The repo lives here, not on a line of its own.
+    private func metaLine(_ repo: String, _ person: String, _ rest: String) -> some View {
+        (Text(verbatim: "\(repo) · ").foregroundStyle(.secondary)
+            + Text(verbatim: person).foregroundStyle(.primary)
+            + Text(verbatim: rest).foregroundStyle(.secondary))
+            .font(.caption).lineLimit(2)
+    }
+
+    private var draftBadge: some View {
+        Text("DRAFT").font(.caption2).foregroundStyle(.secondary)
+            .padding(.horizontal, 4).background(.quaternary, in: Capsule())
     }
 
     /// "#482 Add CSV export", with the number in grey.
@@ -382,7 +393,7 @@ struct DetailView: View {
                     Text(f.threads + f.reviews + f.comments == 0
                          ? "\(f.summary)."
                          : "New feedback: \(f.summary). Latest from \(f.latestBy).")
-                        .font(.caption).foregroundStyle(.blue)
+                        .font(.caption).foregroundStyle(.orange)
                     Spacer()
                     Button("Dismiss", systemImage: "xmark") { vm.dismissFeedback(f) }
                         .buttonStyle(.hoverBorderless).font(.caption)
@@ -393,7 +404,7 @@ struct DetailView: View {
                 HStack {
                     Text("\(r.waiting) of your review threads \(r.waiting == 1 ? "has a reply" : "have replies") waiting. "
                         + "Latest from \(r.latestBy).")
-                        .font(.caption).foregroundStyle(.blue)
+                        .font(.caption).foregroundStyle(.orange)
                     Spacer()
                     if let rv = vm.reviewingPR(for: pr) {
                         Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(rv) }
@@ -538,7 +549,7 @@ struct DetailView: View {
                 Button("Cancel", systemImage: "stop.circle") { vm.cancelReview(pr) }.font(.caption)
             case .done(let text):
                 Button(terminalLabel("Follow up"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
-                    .buttonStyle(.borderedProminent)
+                    .prominent(!vm.verifyIsDue(pr))
                 Button("Open in browser", systemImage: "arrow.up.right.square") {
                     let s = vm.savedReview(for: pr)
                     ReviewPage.open(pr: pr, text: text, label: s.map(ReviewPage.label), date: s?.date)
@@ -552,16 +563,16 @@ struct DetailView: View {
             default:
                 if let earlier = vm.earlierReview(for: pr) {
                     Button("Review changes since \(earlier.pr.versionLabel)", systemImage: "sparkles") { vm.reviewChanges(pr, since: earlier) }
-                        .buttonStyle(.borderedProminent)
+                        .prominent(!vm.verifyIsDue(pr))
                     Button("Full review", systemImage: "sparkles") { vm.review(pr) }
                     terminalButton
                 } else if runsReviewCommand {
-                    terminalButton.buttonStyle(.borderedProminent)
+                    terminalButton.prominent(!vm.verifyIsDue(pr))
                     Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
                         .help("Quick read-only review with the built-in prompt; notes are saved here")
                 } else {
                     Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
-                        .buttonStyle(.borderedProminent)
+                        .prominent(!vm.verifyIsDue(pr))
                     terminalButton
                 }
             }
@@ -1102,3 +1113,9 @@ struct StatusBadge: View {
     }
 }
 
+extension View {
+    /// The filled accent style when `on`, the regular bordered one otherwise.
+    @ViewBuilder func prominent(_ on: Bool) -> some View {
+        if on { buttonStyle(.borderedProminent) } else { self }
+    }
+}

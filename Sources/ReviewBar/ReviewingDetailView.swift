@@ -27,7 +27,7 @@ struct ReviewingDetailBox: View {
                 activity(d)
                 threads(d)
                 reviewers(d.reviewers(reviewing.verdicts))
-                if !d.myThreads.isEmpty, reviewing.verifyIsDue { verifyButton.padding(.top, 4) }
+                if vm.verifyIsDue(reviewing.pr) { verifyButton.padding(.top, 4) }
             } else if load.loading {
                 Text("Loading activity, threads and commits…").foregroundStyle(.secondary)
             }

@@ -56,7 +56,7 @@ struct ReplyPR: Identifiable, Hashable {
 /// A PR you review: requested from you now, or reviewed by you before.
 struct ReviewingPR: Identifiable, Hashable {
     let pr: PR
-    /// In Awaiting me right now. With an earlier review of yours, that's a re-request.
+    /// Your review is requested right now. With an earlier review of yours, that's a re-request.
     var isRequested = false
     /// Your latest review, skipping your pending draft and dismissed reviews.
     let myLastReview: MyReview?
@@ -150,13 +150,18 @@ struct ReviewingPR: Identifiable, Hashable {
         }
     }
 
-    /// Non-empty sections in display order, newest activity first inside each; muted PRs last,
-    /// in their own section. Pure, for tests.
+    /// Non-empty sections in display order; muted PRs last, in their own section. Your turn puts
+    /// the longest-open PRs first, so old requests stay on top (the blue dot marks what's new);
+    /// the other sections put the newest activity first. Pure, for tests.
     static func sections(_ prs: [ReviewingPR], muted: (ReviewingPR) -> Bool = { _ in false })
         -> [(group: Group, prs: [ReviewingPR])] {
         Dictionary(grouping: prs, by: { muted($0) ? .muted : $0.group })
             .sorted { $0.key < $1.key }
-            .map { ($0.key, $0.value.sorted { $0.latestAt > $1.latestAt }) }
+            .map { group, prs in
+                (group, group == .yours
+                    ? prs.sorted { ($0.pr.createdAt ?? "") < ($1.pr.createdAt ?? "") }
+                    : prs.sorted { $0.latestAt > $1.latestAt })
+            }
     }
 
     /// One line for the list: why it's your turn (or what you last said), replies, your threads,
@@ -186,6 +191,20 @@ struct ReviewingPR: Identifiable, Hashable {
 struct PRSnapshot: Codable, Equatable {
     let at: String
     let head: String?
+
+    /// The old Replies tab's dismissals that still hide a reply, as "mute until something
+    /// happens" from now on: the later of the dismissal and the PR's last activity by others,
+    /// since a thread reply is also a review whose time can be a little later. Pure, for tests.
+    static func mutes(fromDismissed dismissed: [String: String], replies: [ReplyPR],
+                      reviewing: [ReviewingPR]) -> [String: PRSnapshot] {
+        var out: [String: PRSnapshot] = [:]
+        for reply in replies {
+            guard let at = dismissed[reply.pr.url], at >= reply.latestAt,
+                  let r = reviewing.first(where: { $0.pr.url == reply.pr.url }) else { continue }
+            out[reply.pr.url] = PRSnapshot(at: max(at, r.lastOtherAt ?? ""), head: r.pr.headRefOid)
+        }
+        return out
+    }
 
     /// Drops snapshots of PRs no longer listed, once they're older than `cutoff`. Pure, for tests.
     static func pruned(_ all: [String: PRSnapshot], listed: Set<String>, cutoff: String) -> [String: PRSnapshot] {

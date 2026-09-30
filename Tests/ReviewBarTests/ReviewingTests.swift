@@ -32,11 +32,11 @@ struct ReviewingTests {
     }
 
     private func node(_ number: Int, reviews: [String] = [], threads: [String] = [],
-                      checks: String? = "SUCCESS") -> String {
+                      checks: String? = "SUCCESS", createdAt: String = "2026-08-20T00:00:00Z") -> String {
         let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
         return """
         {"number": \(number), "title": "PR \(number)", "url": "https://github.com/o/r/pull/\(number)",
-         "isDraft": false, "updatedAt": "2026-09-01T00:00:00Z", "createdAt": "2026-08-20T00:00:00Z",
+         "isDraft": false, "updatedAt": "2026-09-01T00:00:00Z", "createdAt": "\(createdAt)",
          "headRefOid": "\(head)", "repository": {"nameWithOwner": "o/r"}, "author": {"login": "author"},
          "commits": {"nodes": [{"commit": {"statusCheckRollup": \(rollup)}}]},
          "reviews": {"nodes": [\(reviews.joined(separator: ","))]},
@@ -139,6 +139,25 @@ struct ReviewingTests {
         #expect(sections.map { $0.prs.map(\.pr.number) } == [[1], [3], [2]])
     }
 
+    @Test func stillEffectiveReplyDismissalsBecomeMutes() throws {
+        let reviewing = try parse([node(1), node(2), node(3),
+                                   node(4, reviews: [review("anna", "COMMENTED", at: "2026-09-10T00:00:02Z")])])
+        func listed(_ n: Int) -> ReviewingPR { reviewing.first { $0.pr.number == n }! }
+        func url(_ n: Int) -> String { "https://github.com/o/r/pull/\(n)" }
+        func reply(_ n: Int, at: String) -> ReplyPR { ReplyPR(pr: listed(n).pr, waiting: 1, latestAt: at, latestBy: "author") }
+        let dismissed = [url(1): "2026-09-10T00:00:00Z",   // hides PR 1's reply
+                         url(2): "2026-09-10T00:00:00Z",   // PR 2 has a newer reply
+                         url(4): "2026-09-10T00:00:00Z",   // anna's reply-review is 2 s later
+                         url(9): "2026-09-10T00:00:00Z"]   // not listed
+        let mutes = PRSnapshot.mutes(fromDismissed: dismissed,
+                                     replies: [reply(1, at: "2026-09-10T00:00:00Z"), reply(2, at: "2026-09-11T00:00:00Z"),
+                                               reply(3, at: "2026-09-10T00:00:00Z"), reply(4, at: "2026-09-10T00:00:00Z")],
+                                     reviewing: reviewing)
+        #expect(mutes == [url(1): PRSnapshot(at: "2026-09-10T00:00:00Z", head: head),
+                          url(4): PRSnapshot(at: "2026-09-10T00:00:02Z", head: head)])
+        #expect(listed(4).isMuted(forever: false, until: mutes[url(4)]))
+    }
+
     @Test func approvedWithNothingNewIsDone() throws {
         #expect(try one(node(1, reviews: [review("me", "APPROVED")])).turn == .done)
     }
@@ -180,6 +199,17 @@ struct ReviewingTests {
         #expect(sections.map(\.group) == [.yours, .authors, .done])
         #expect(sections.map { $0.prs.map(\.pr.number) } == [[3], [4, 2], [1]])
         #expect(ReviewingPR.sections([]).isEmpty)
+    }
+
+    @Test func yourTurnPutsTheLongestOpenFirst() throws {
+        let stale = [review("me", "APPROVED", commit: "old1234")]
+        let prs = try parse([
+            node(1, reviews: stale + [review("anna", "COMMENTED", at: "2026-09-20T10:00:00Z")],
+                 createdAt: "2026-09-15T00:00:00Z"),                                   // newest activity
+            node(2, reviews: stale, createdAt: "2026-09-01T00:00:00Z"),               // open longest
+            node(3, reviews: stale, createdAt: "2026-09-10T00:00:00Z"),
+        ])
+        #expect(ReviewingPR.sections(prs).map { $0.prs.map(\.pr.number) } == [[2, 3, 1]])
     }
 
     @Test func statusSaysWhyThenRepliesThreadsAndVerdicts() throws {

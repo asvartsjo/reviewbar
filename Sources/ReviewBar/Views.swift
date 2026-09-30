@@ -4,9 +4,7 @@ import ServiceManagement
 import UserNotifications
 
 private enum Tab: String, CaseIterable {
-    case pending = "Awaiting me"
     case reviewing = "Reviewing"
-    case replies = "Replies"
     case mine = "My PRs"
     case mentions = "Mentions"
     case saved = "Saved"
@@ -18,7 +16,7 @@ struct ContentView: View {
     @EnvironmentObject var vm: ReviewViewModel
     @ViewState private var showSettings = false
     @ViewState private var selected: PR?
-    @ViewState private var tab: Tab = .pending
+    @ViewState private var tab: Tab = .reviewing
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,9 +42,7 @@ struct ContentView: View {
                     Text(e).font(.caption).foregroundStyle(.red).padding(.horizontal, 10)
                 }
                 switch tab {
-                case .pending: pendingList
                 case .reviewing: reviewingList
-                case .replies: repliesList
                 case .mine: mineList
                 case .mentions: mentionsList
                 case .saved: savedList
@@ -84,22 +80,7 @@ struct ContentView: View {
         .padding(10)
     }
 
-    // MARK: pending
-
-    private var pendingList: some View {
-        Group {
-            if vm.prs.isEmpty && !vm.loading {
-                empty("checkmark.circle", "Nothing waiting. Check settings if that looks wrong.")
-            } else {
-                reviewAllBar
-                List(vm.prs) { pr in
-                    Button { selected = pr } label: { row(pr) }.buttonStyle(.plain)
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-            }
-        }
-    }
+    // MARK: reviewing
 
     @ViewBuilder private var reviewAllBar: some View {
         HStack {
@@ -121,30 +102,6 @@ struct ContentView: View {
         .padding(.horizontal, 10)
     }
 
-    private func row(_ pr: PR) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(verbatim: "\(pr.repository.nameWithOwner) #\(pr.number)")
-                    .font(.caption).foregroundStyle(.secondary)
-                if pr.isDraft {
-                    Text("DRAFT").font(.caption2).padding(.horizontal, 4)
-                        .background(.quaternary, in: Capsule())
-                }
-                Spacer()
-                savedReviewIcon(pr)
-            }
-            Text(pr.title).font(.body).lineLimit(2)
-            HStack(spacing: 4) {
-                Text("\(pr.author.login) · updated \(age(pr.updatedAt))")
-                    .foregroundStyle(.secondary)
-                openAge(pr)
-            }
-            .font(.caption)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-
     /// ✨ when a review made here is saved for this version, 🕘 when only an older one is.
     @ViewBuilder private func savedReviewIcon(_ pr: PR) -> some View {
         if case .done = vm.state(for: pr) {
@@ -164,8 +121,6 @@ struct ContentView: View {
                 .help(days >= Self.oldAfterDays ? "Open for \(days) days" : "")
         }
     }
-
-    // MARK: reviewing
 
     private var reviewingList: some View {
         Group {
@@ -224,26 +179,6 @@ struct ContentView: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: replies
-
-    private var repliesList: some View {
-        Group {
-            if vm.visibleReplies.isEmpty && !vm.loading {
-                empty("bubble.left.and.bubble.right", "No one is waiting on you in your review threads.")
-            } else {
-                List(vm.visibleReplies) { r in
-                    Button { selected = r.pr } label: { replyRow(r) }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("Dismiss until the next reply") { vm.dismissReplies(r) }
-                        }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-            }
-        }
-    }
-
     // MARK: mentions
 
     private var mentionsList: some View {
@@ -276,23 +211,6 @@ struct ContentView: View {
             }
         }
         .padding(.vertical, 2)
-    }
-
-    private func replyRow(_ r: ReplyPR) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(verbatim: "\(r.pr.repository.nameWithOwner) #\(r.pr.number)")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Label("\(r.waiting)", systemImage: "bubble.left.fill")
-                    .font(.caption).foregroundStyle(.blue)
-            }
-            Text(r.pr.title).font(.body).lineLimit(2)
-            Text("\(r.latestBy) replied \(age(r.latestAt))")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
     }
 
     // MARK: my PRs
@@ -384,9 +302,7 @@ struct ContentView: View {
 
     private func title(_ t: Tab) -> String {
         switch t {
-        case .pending where !vm.prs.isEmpty: return "\(t.rawValue) (\(vm.prs.count))"
         case .reviewing where vm.yourTurnCount > 0: return "\(t.rawValue) (\(vm.yourTurnCount))"
-        case .replies where !vm.visibleReplies.isEmpty: return "\(t.rawValue) (\(vm.visibleReplies.count))"
         case .mine where !vm.visibleFeedback.isEmpty: return "\(t.rawValue) (\(vm.visibleFeedback.count))"
         case .mentions where !vm.visibleMentions.isEmpty: return "\(t.rawValue) (\(vm.visibleMentions.count))"
         default: return t.rawValue
@@ -461,8 +377,13 @@ struct DetailView: View {
                         + "Latest from \(r.latestBy).")
                         .font(.caption).foregroundStyle(.blue)
                     Spacer()
-                    Button("Dismiss") { vm.dismissReplies(r) }
-                        .buttonStyle(.borderless).font(.caption)
+                    if let rv = vm.reviewingPR(for: pr) {
+                        Button("Mute until something happens") { vm.muteUntilSomethingHappens(rv) }
+                            .buttonStyle(.borderless).font(.caption)
+                    } else {
+                        Button("Dismiss") { vm.dismissReplies(r) }
+                            .buttonStyle(.borderless).font(.caption)
+                    }
                 }
             }
 
@@ -921,7 +842,7 @@ struct SettingsView: View {
             Divider()
             Text("Pull requests").font(.headline)
             Toggle("Include draft PRs", isOn: $includeDrafts)
-            Text("Applies to Awaiting me, Reviewing and Replies. Your own drafts always show in My PRs.")
+            Text("Applies to Reviewing. Your own drafts always show in My PRs.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Review new requests automatically", isOn: $autoReview)
             Text("Runs a full review in the background when a PR first asks for your review, one at a time, "

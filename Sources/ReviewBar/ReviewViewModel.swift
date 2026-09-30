@@ -99,6 +99,7 @@ final class ReviewViewModel: ObservableObject {
         var errors: [String] = []
         var alerts: [ReviewAlert] = []
         var freshRequests: [PR] = []
+        var repliesLoaded = false
 
         // Each list only updates (and only notifies) when its own fetch succeeded.
         do {
@@ -112,6 +113,7 @@ final class ReviewViewModel: ObservableObject {
             alerts += AlertDiff.newer(visibleReplies, seen: seenReplies, url: \.pr.url, latestAt: \.latestAt)
                 .map(ReviewAlert.reply)
             seenReplies = AlertDiff.latestByURL(replies, url: \.pr.url, latestAt: \.latestAt)
+            repliesLoaded = true
         } catch { errors.append("Replies: \(error.localizedDescription)") }
         do {
             let reviewed = PRFilter.others(try await fetchedReviewing, includeDrafts: PRFilter.includeDrafts)
@@ -119,6 +121,7 @@ final class ReviewViewModel: ObservableObject {
             alerts += AlertDiff.reviewing(reviewing.filter { !mutedForever.contains($0.pr.url) }, before: seenReviewing)
             seenReviewing = Dictionary(reviewing.map { ($0.pr.url, $0) }, uniquingKeysWith: { a, _ in a })
             updateSeen()
+            if repliesLoaded { migrateReplyDismissals() }
         } catch { errors.append("Reviewing: \(error.localizedDescription)") }
         // After Reviewing, so a request on a PR you reviewed reads as a re-request.
         let reviewedURLs = Set(reviewing.filter { $0.myLastReview != nil }.map(\.pr.url))
@@ -161,12 +164,17 @@ final class ReviewViewModel: ObservableObject {
         }
     }
 
-    /// Replies you have not dismissed (or that are newer than what you dismissed).
+    /// Replies for notifications and the PR detail: not dismissed (or newer than what you
+    /// dismissed) and not on a PR muted for good.
     var visibleReplies: [ReplyPR] {
-        replies.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
+        replies.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") && !mutedForever.contains($0.pr.url) }
     }
 
-    func reply(for pr: PR) -> ReplyPR? { visibleReplies.first { $0.pr.url == pr.url } }
+    /// Nil while the PR is muted.
+    func reply(for pr: PR) -> ReplyPR? {
+        if let r = reviewingPR(for: pr), isMuted(r) { return nil }
+        return visibleReplies.first { $0.pr.url == pr.url }
+    }
 
     func dismissReplies(_ r: ReplyPR) { dismiss(r.pr.url, until: r.latestAt) }
 
@@ -250,6 +258,18 @@ final class ReviewViewModel: ObservableObject {
         UserDefaults.standard.set(Array(mutedForever), forKey: Self.mutedForeverKey)
     }
 
+    private static let migratedDismissalsKey = "reviewingMigratedReplyDismissals"
+
+    /// Once: Replies dismissals that still hide a reply become mutes, now that Reviewing
+    /// replaces the Replies tab.
+    private func migrateReplyDismissals() {
+        guard !UserDefaults.standard.bool(forKey: Self.migratedDismissalsKey) else { return }
+        let mutes = PRSnapshot.mutes(fromDismissed: dismissed, replies: replies, reviewing: reviewing)
+        mutedUntil.merge(mutes) { current, _ in current }
+        Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+        UserDefaults.standard.set(true, forKey: Self.migratedDismissalsKey)
+    }
+
     func unmute(_ r: ReviewingPR) {
         mutedUntil[r.pr.url] = nil
         mutedForever.remove(r.pr.url)
@@ -310,13 +330,10 @@ final class ReviewViewModel: ObservableObject {
         UserDefaults.standard.set(dismissed, forKey: "dismissedReplies")
     }
 
-    /// Distinct PRs needing you: review requests, replies, new commits since your review and
-    /// feedback on your PRs. Only the new-commits part of Reviewing counts: its requests and
-    /// replies are already here, and replies must honour Replies dismissals.
+    /// Distinct PRs needing you: Reviewing's Your turn (requests, new commits since your review,
+    /// replies in your threads; not muted), feedback on your PRs, and mentions.
     var badgeCount: Int {
-        Set(prs.map(\.url))
-            .union(visibleReplies.map(\.pr.url))
-            .union(reviewing.filter { $0.turn == .yours(.newCommits) && !isMuted($0) }.map(\.pr.url))
+        Set(reviewing.filter { $0.group == .yours && !isMuted($0) }.map(\.pr.url))
             .union(visibleFeedback.map(\.pr.url))
             .union(visibleMentions.map(\.url))
             .count

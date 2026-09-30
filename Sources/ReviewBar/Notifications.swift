@@ -104,7 +104,7 @@ enum Notifier {
     static let urlKey = "url"
     /// "New commits since your review" carries a Verify fixes button (`verifyAction`).
     static let verifyCategory = "verify", verifyAction = "verify"
-    /// More than this many at once become one summary notification.
+    /// More than this many PRs at once become one summary notification.
     static let maxIndividual = 3
 
     static func requestAuthorization() {
@@ -142,15 +142,47 @@ enum Notifier {
     static func post(_ alerts: [ReviewAlert]) {
         let wanted = alerts.filter(NotifySettings.wants)
         guard isAvailable, !wanted.isEmpty else { return }
-        if wanted.count > maxIndividual {
+        let groups = grouped(wanted)
+        if groups.count > maxIndividual {
             send(id: "summary-\(UUID().uuidString)", title: "ReviewBar", body: summary(wanted), url: nil)
             return
         }
         let verify = canVerify
-        for a in wanted {
-            let c = content(a)
-            send(id: c.id, title: c.title, body: c.body, url: c.url, category: category(for: a, verifyAvailable: verify))
+        for g in groups {
+            let c = content(g)
+            send(id: c.id, title: c.title, body: c.body, url: c.url, category: category(for: g, verifyAvailable: verify))
         }
+    }
+
+    /// Alerts per PR, in the order each PR first appears, most important first within a PR:
+    /// a request, then new commits, a reply, verdicts, all resolved. Pure, for tests.
+    static func grouped(_ alerts: [ReviewAlert]) -> [[ReviewAlert]] {
+        func rank(_ a: ReviewAlert) -> Int {
+            switch a {
+            case .request, .reRequest: return 0
+            case .pushed: return 1
+            case .reply: return 2
+            case .verdict: return 3
+            case .allResolved: return 4
+            case .feedback: return 5
+            }
+        }
+        var order: [String] = [], byURL: [String: [ReviewAlert]] = [:]
+        for a in alerts {
+            let url = content(a).url
+            if byURL[url] == nil { order.append(url) }
+            byURL[url, default: []].append(a)
+        }
+        // enumerated() keeps equal ranks (two verdicts) in their original order.
+        return order.map { byURL[$0]!.enumerated().sorted { (rank($0.1), $0.0) < (rank($1.1), $1.0) }.map(\.1) }
+    }
+
+    /// One notification for a PR's alerts: the top alert's id, title and URL, with the other
+    /// alerts' titles as extra body lines. Pure, for tests.
+    static func content(_ group: [ReviewAlert]) -> (id: String, title: String, body: String, url: String) {
+        let top = content(group[0])
+        let more = group.dropFirst().map { content($0).title }
+        return (top.id, top.title, ([top.body] + more).joined(separator: "\n"), top.url)
     }
 
     /// Verify fixes would open a session: Claude, a Verify command, and a terminal the app can
@@ -163,6 +195,11 @@ enum Notifier {
     static func category(for a: ReviewAlert, verifyAvailable: Bool) -> String? {
         if case .pushed = a, verifyAvailable { return verifyCategory }
         return nil
+    }
+
+    /// A grouped notification keeps the Verify fixes button if any of its alerts has it.
+    static func category(for group: [ReviewAlert], verifyAvailable: Bool) -> String? {
+        group.lazy.compactMap { category(for: $0, verifyAvailable: verifyAvailable) }.first
     }
 
     /// Title, body and click-through URL for one alert. Pure, for tests.

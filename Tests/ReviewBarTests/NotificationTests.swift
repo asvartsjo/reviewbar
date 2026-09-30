@@ -150,6 +150,37 @@ struct NotificationTests {
                                   .verdict(r, .init(login: "anna", state: "APPROVED"))])
         #expect(s == "1 review request, 3 updates on PRs you review")
     }
+
+    // MARK: One notification per PR
+
+    @Test func alertsOnOnePRBecomeOneGroupRequestFirst() {
+        let r = reviewing(head: "c2")
+        let anna = ReviewAlert.verdict(r, .init(login: "anna", state: "APPROVED"))
+        let bob = ReviewAlert.verdict(r, .init(login: "bob", state: "CHANGES_REQUESTED"))
+        let other = ReviewAlert.request(pr(6))
+        let groups = Notifier.grouped([.allResolved(r), anna, other, .pushed(r), bob, .reRequest(pr(5))])
+        #expect(groups == [[.reRequest(pr(5)), .pushed(r), anna, bob, .allResolved(r)], [other]])
+    }
+
+    @Test func groupContentUsesTheTopAlertAndListsTheRest() {
+        let r = reviewing(head: "c2", threads: 2, resolved: 2)
+        let group: [ReviewAlert] = [.reRequest(pr(5, author: "priya-s")), .pushed(r),
+                                    .verdict(r, .init(login: "anna", state: "APPROVED"))]
+        let c = Notifier.content(group)
+        let top = Notifier.content(group[0])
+        #expect(c.title == "Review re-requested by priya-s")
+        #expect(c.body == "o/r #5: PR 5\nNew commits since your review\nanna approved")
+        #expect(c.id == top.id)
+        #expect(c.url == top.url)
+        #expect(Notifier.content([.pushed(r)]) == Notifier.content(.pushed(r)))
+    }
+
+    @Test func groupKeepsVerifyButtonWhenItHasNewCommits() {
+        let r = reviewing(head: "c2")
+        #expect(Notifier.category(for: [.reRequest(pr(5)), .pushed(r)], verifyAvailable: true) == Notifier.verifyCategory)
+        #expect(Notifier.category(for: [.reRequest(pr(5)), .pushed(r)], verifyAvailable: false) == nil)
+        #expect(Notifier.category(for: [.reRequest(pr(5)), .allResolved(r)], verifyAvailable: true) == nil)
+    }
 }
 
 struct PRFilterTests {

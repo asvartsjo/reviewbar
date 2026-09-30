@@ -976,14 +976,21 @@ enum Backend {
             let l = a?.login ?? "ghost"
             return "@\(l)\(l == me ? " (me)" : "")"
         }
-        func new(_ at: String?) -> String {
-            guard let since, let at, at > since else { return "" }
-            return " NEW"
+        func isNew(_ at: String?) -> Bool {
+            guard let since, let at else { return false }
+            return at > since
         }
-        func capped(_ text: String) -> String {
+        func new(_ at: String?) -> String { isNew(at) ? " NEW" : "" }
+        /// Given `since`, an oldest-first section keeps its end, where the NEW entries are.
+        func capped(_ text: String, oldestFirst: Bool = false) -> String {
             guard text.utf8.count > maxFeedbackSectionBytes else { return text }
+            let kb = maxFeedbackSectionBytes / 1000
+            if oldestFirst, since != nil {
+                return "(NOTE: section truncated to its last \(kb) KB.)\n"
+                    + String(decoding: Data(text.utf8.suffix(maxFeedbackSectionBytes)), as: UTF8.self)
+            }
             return String(decoding: Data(text.utf8.prefix(maxFeedbackSectionBytes)), as: UTF8.self)
-                + "\n(NOTE: section truncated at \(maxFeedbackSectionBytes / 1000) KB.)\n"
+                + "\n(NOTE: section truncated at \(kb) KB.)\n"
         }
 
         var reviews = ""
@@ -994,7 +1001,10 @@ enum Backend {
         }
 
         var threads = ""
-        let sorted = p.reviewThreads.items.sorted { !$0.isResolved && $1.isResolved }
+        func rank(_ t: FeedbackData.ReviewThread) -> Int {
+            (t.comments.items.contains { isNew($0.createdAt) } ? 2 : 0) + (t.isResolved ? 0 : 1)
+        }
+        let sorted = p.reviewThreads.items.sorted { rank($0) > rank($1) }
         for (i, t) in sorted.enumerated() {
             let line = (t.line ?? t.originalLine).map { ":\($0)" } ?? ""
             threads += "--- Thread \(i + 1) · \(t.isResolved ? "resolved" : "UNRESOLVED") · "
@@ -1011,11 +1021,11 @@ enum Backend {
 
         return """
         REVIEWS (verdicts and summaries, oldest first):
-        \(reviews.isEmpty ? "(none)\n" : capped(reviews))
-        REVIEW THREADS (unresolved first):
+        \(reviews.isEmpty ? "(none)\n" : capped(reviews, oldestFirst: true))
+        REVIEW THREADS (\(since == nil ? "" : "those with NEW comments first, then ")unresolved first):
         \(threads.isEmpty ? "(none)\n" : capped(threads))
         CONVERSATION (latest 30 comments):
-        \(conversation.isEmpty ? "(none)\n" : capped(conversation))
+        \(conversation.isEmpty ? "(none)\n" : capped(conversation, oldestFirst: true))
         """
     }
 

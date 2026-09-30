@@ -33,9 +33,7 @@ struct ReviewingDetailBox: View {
             }
         }
         .font(.callout)
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
+        .card()
         .onAppear { vm.loadDetail(reviewing) }
     }
 
@@ -114,8 +112,14 @@ struct ReviewingDetailBox: View {
         if !threads.isEmpty {
             let resolved = threads.filter { $0.state == .resolved }.count
             HStack(spacing: 0) {
-                heading((["Your threads", "\(resolved)/\(threads.count) resolved"] + [d.openBySeverity].compactMap { $0 })
-                    .joined(separator: " · "))
+                heading("Your threads · \(resolved)/\(threads.count) resolved")
+                if !d.openBySeverity.isEmpty {
+                    heading(" · open:")
+                    ForEach(d.openBySeverity, id: \.severity) { o in
+                        Text(verbatim: " \(o.count) ").font(.callout.bold())
+                        SeverityIcon(severity: o.severity)
+                    }
+                }
                 if d.blockingOpen > 0 {
                     Text(verbatim: " · \(d.blockingOpen) blocking").font(.callout.bold()).foregroundStyle(.red)
                         .help("Open 🚨/🔴 threads: your pr-review skill says these block a merge")
@@ -125,7 +129,8 @@ struct ReviewingDetailBox: View {
             ForEach(Array(threads.enumerated()), id: \.offset) { _, t in
                 Button { if let s = t.url, let u = URL(string: s) { NSWorkspace.shared.open(u) } } label: {
                     line {
-                        (Text(verbatim: t.snippet)
+                        if let sev = t.severity { SeverityIcon(severity: sev) }
+                        (Text(verbatim: t.title)
                             + Text(verbatim: "  \(t.location)").font(.caption.monospaced()).foregroundStyle(.secondary))
                             .foregroundStyle(t.state == .resolved ? .secondary : .primary)
                             .lineLimit(2)
@@ -133,6 +138,7 @@ struct ReviewingDetailBox: View {
                         Text(t.stateText).font(.caption).foregroundStyle(color(t.state))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(color(t.state).opacity(0.5)))
+                            .help(stateHelp(t))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -141,6 +147,16 @@ struct ReviewingDetailBox: View {
                 .help(t.fullText.isEmpty ? "Open this thread on GitHub" : t.fullText + "\n\nClick to open on GitHub")
             }
         }
+    }
+
+    /// What a thread's tag means: who spoke last, and whether GitHub marks it outdated.
+    private func stateHelp(_ t: ReviewingDetail.MyThread) -> String {
+        let state = switch t.state {
+        case .replied(let who): "Unresolved, and \(who) answered last."
+        case .open: "Unresolved, with no reply from anyone else yet."
+        case .resolved: "Resolved on GitHub."
+        }
+        return t.isOutdated ? state + " The lines you commented on have changed since." : state
     }
 
     /// Sends your Verify command (Settings › Terminal). Shown only once there's something to verify.
@@ -172,6 +188,51 @@ struct ReviewingDetailBox: View {
         case .open: .secondary
         case .resolved: .green
         }
+    }
+}
+
+/// A review thread's severity from your pr-review skill, drawn as a symbol instead of its emoji.
+struct SeverityIcon: View {
+    let severity: ReviewingDetail.MyThread.Severity
+
+    var body: some View {
+        Image(systemName: symbol).font(.caption).foregroundStyle(color).help(name)
+    }
+
+    private var symbol: String {
+        switch severity {
+        case .severe: "exclamationmark.octagon.fill"
+        case .question: "questionmark.circle"
+        default: "circle.fill"
+        }
+    }
+
+    private var color: Color {
+        switch severity {
+        case .severe, .high: .red
+        case .medium: .orange
+        case .low: .yellow
+        case .question: .secondary
+        }
+    }
+
+    private var name: String {
+        switch severity {
+        case .severe: "Severe"
+        case .high: "High"
+        case .medium: "Medium"
+        case .low: "Low"
+        case .question: "Question"
+        }
+    }
+}
+
+extension View {
+    /// The PR detail's boxes ("Since your review", "Feedback summary"): one look for both.
+    func card() -> some View {
+        padding(12)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
     }
 }
 

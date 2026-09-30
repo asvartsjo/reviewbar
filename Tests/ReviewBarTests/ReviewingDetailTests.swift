@@ -80,6 +80,19 @@ struct ReviewingDetailTests {
         #expect(S.allCases.filter(\.isBlocking) == [.severe, .high])
     }
 
+    @Test func titleDropsTheSeverityIcon() throws {
+        let d = try parse([
+            thread("me", path: "a.ts", body: "🔴 **HIGH** — Totals"),
+            thread("me", path: "b.ts", body: "❓\u{FE0F} Open question — x"),
+            thread("me", path: "c.ts", body: "Fix this 🔴"),
+            thread("me", path: "d.ts", body: "🔴1 thing"),
+        ])
+        #expect(d.myThreads.first { $0.path == "a.ts" }?.title == "HIGH — Totals")
+        #expect(d.myThreads.first { $0.path == "b.ts" }?.title == "Open question — x")
+        #expect(d.myThreads.first { $0.path == "c.ts" }?.title == "Fix this 🔴")
+        #expect(d.myThreads.first { $0.path == "d.ts" }?.title == "1 thing")
+    }
+
     @Test func threadsSortBySeverityWithinEachState() throws {
         let d = try parse([
             thread("me", path: "plain.ts", body: "Fix this"),
@@ -99,11 +112,12 @@ struct ReviewingDetailTests {
             thread("me", resolved: true, body: "🚨 **SEVERE** — x"),
             thread("me", body: "Fix this"),
         ])
-        #expect(d.openBySeverity == "open: 1 🔴, 1 🟡, 1 ❓")
+        #expect(d.openBySeverity.map(\.severity) == [.high, .low, .question])
+        #expect(d.openBySeverity.map(\.count) == [1, 1, 1])
         #expect(d.blockingOpen == 1)
 
         let plain = try parse([thread("me"), thread("me", resolved: true, body: "🔴 **HIGH** — x")])
-        #expect(plain.openBySeverity == nil)
+        #expect(plain.openBySeverity.isEmpty)
         #expect(plain.blockingOpen == 0)
     }
 

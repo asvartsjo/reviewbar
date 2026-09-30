@@ -316,6 +316,14 @@ struct ReviewingDetail: Equatable {
         /// Nil for comments that don't start with one of the skill's icons.
         var severity: Severity? { Severity(title: snippet) }
 
+        /// The snippet without its leading severity icon, which the app draws as a symbol instead.
+        var title: String {
+            guard severity != nil else { return snippet }
+            var rest = snippet.unicodeScalars.dropFirst()
+            if rest.first == "\u{FE0F}" { rest = rest.dropFirst() }
+            return String(String.UnicodeScalarView(rest)).trimmingCharacters(in: .whitespaces)
+        }
+
         var location: String { line.map { "\(path):\($0)" } ?? path }
 
         var stateText: String {
@@ -376,10 +384,11 @@ struct ReviewingDetail: Equatable {
         myThreads.filter { $0.state != .resolved }.compactMap(\.severity)
     }
 
-    /// "open: 1 🟡, 1 ❓": your unresolved threads per severity, most severe first. Nil when none has an icon.
-    var openBySeverity: String? {
-        let counts = Dictionary(grouping: myOpenSeverities, by: { $0 }).sorted { $0.key < $1.key }
-        return counts.isEmpty ? nil : "open: " + counts.map { "\($0.value.count) \($0.key.icon)" }.joined(separator: ", ")
+    /// Your unresolved threads per severity, most severe first ("open: 1 🔴, 1 ❓").
+    /// Empty when none has an icon.
+    var openBySeverity: [(severity: MyThread.Severity, count: Int)] {
+        Dictionary(grouping: myOpenSeverities, by: { $0 }).sorted { $0.key < $1.key }
+            .map { (severity: $0.key, count: $0.value.count) }
     }
 
     /// Your unresolved 🚨/🔴 threads.

@@ -6,6 +6,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var menuBar: MenuBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Tooltips after 2 seconds of hovering (milliseconds). A default only: a value set with
+        // `defaults write` still wins. Before the panel is built, so its tooltips pick it up.
+        UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 2000])
         MainActor.assumeIsolated { menuBar = MenuBarController(vm: ReviewViewModel.shared) }
         // Menu bar only: no Dock icon or app switcher entry, also when started with `swift run`
         // (the .app bundle from scripts/make-app.sh sets LSUIElement as well).

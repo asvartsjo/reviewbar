@@ -53,7 +53,8 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(width: 480, height: 580)
+        .frame(minWidth: AsWindow.minimumSize.width, maxWidth: .infinity,
+               minHeight: AsWindow.minimumSize.height, maxHeight: .infinity)
         // Solid, and follows the system Light/Dark setting rather than the menu bar's look.
         .background(systemDark ? Color(white: 0.11) : Color(white: 0.985))
         .environment(\.colorScheme, systemDark ? .dark : .light)
@@ -622,6 +623,7 @@ struct SettingsView: View {
     @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
     @AppStorage(AutoReview.key) private var autoReview = false
     @AppStorage(StayOpen.key) private var stayOpen = false
+    @AppStorage(AsWindow.key) private var asWindow = false
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
@@ -862,7 +864,11 @@ struct SettingsView: View {
 
             Divider()
             Text("Panel").font(.headline)
+            Toggle("Open as a window", isOn: $asWindow)
+            Text("A normal window you can move and resize, open until you close it. Takes effect the next time you click the menu bar icon.")
+                .font(.caption2).foregroundStyle(.secondary)
             Toggle("Stay open when clicking elsewhere", isOn: $stayOpen)
+                .disabled(asWindow)
             Text("Close it with the menu bar icon or Esc.")
                 .font(.caption2).foregroundStyle(.secondary)
 

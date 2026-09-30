@@ -15,6 +15,7 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 - If one watched repo can't be read by `gh` (typo, lost access, SSO), it is named and left out so the rest keep working; it is tried again when you change Settings.
 - **Notifications** for new review requests, replies on your review threads and feedback on your PRs (each can be turned off in Settings). Clicking one opens the PR; several at once are grouped. The first refresh after launch only sets a baseline, so starting the app doesn't flood you.
 - **Stay open when clicking elsewhere** (Settings › Panel, off by default) keeps the popover up while you work in other apps; close it with the menu bar icon or Esc.
+- **Open as a window** (Settings › Panel, off by default) opens a normal window instead of the popup: move and resize it (at least 480×580), and it stays open until you close it. It remembers its position and size. Clicking the menu bar icon brings it to the front. It isn't in the Dock or ⌘-Tab.
 - **Open at login** (Settings › Startup). Refreshes every 5 minutes and whenever you open the popover if the data is over a minute old.
 - Reviews are saved locally and reload on launch, labelled with the model and effort that wrote them.
 - **Settings › AI tool** switches between Claude Code and Codex. For Codex, type a model name (e.g. `gpt-5.5`) or leave it empty for your Codex config, and pick a reasoning effort; `OPENAI_API_KEY` is unset so it uses your ChatGPT login, and headless reviews run with `codex exec --sandbox read-only`.

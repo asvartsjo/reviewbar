@@ -113,12 +113,22 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             """
         }
 
-        /// Worktrees live under Application Support, not inside your clone.
-        static func forPR(_ pr: PR, repoFolder: String) -> Worktree {
-            let base = Store.dir.appendingPathComponent("worktrees", isDirectory: true)
-            let name = pr.repository.nameWithOwner.replacingOccurrences(of: "/", with: "-")
-            return Worktree(repoFolder: repoFolder,
-                            path: base.appendingPathComponent("\(name)/pr-\(pr.number)").path, number: pr.number)
+        static let nextToCloneKey = "worktreesNextToClone"
+
+        /// Worktrees live under Application Support, never inside your clone. With `nextToClone`
+        /// (Settings › Terminal) they go beside it instead: ~/code/gauss → ~/code/gauss-worktrees/pr-7.
+        static func forPR(_ pr: PR, repoFolder: String,
+                          nextToClone: Bool = UserDefaults.standard.bool(forKey: nextToCloneKey)) -> Worktree {
+            let path: URL
+            if nextToClone {
+                let clone = URL(fileURLWithPath: repoFolder, isDirectory: true).standardized
+                path = clone.deletingLastPathComponent()
+                    .appendingPathComponent("\(clone.lastPathComponent)-worktrees/pr-\(pr.number)")
+            } else {
+                let name = pr.repository.nameWithOwner.replacingOccurrences(of: "/", with: "-")
+                path = Store.dir.appendingPathComponent("worktrees/\(name)/pr-\(pr.number)")
+            }
+            return Worktree(repoFolder: repoFolder, path: path.path, number: pr.number)
         }
     }
 

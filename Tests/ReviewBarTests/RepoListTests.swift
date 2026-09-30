@@ -43,6 +43,17 @@ struct RepoFolderTests {
         #expect(!s.contains("checkout -b"))
     }
 
+    @Test func worktreePaths() {
+        let pr = PR(number: 7, title: "t", url: "https://github.com/Teachiq/gauss/pull/7", isDraft: false,
+                    updatedAt: "2026-09-01T00:00:00Z", repository: .init(nameWithOwner: "Teachiq/gauss"),
+                    author: .init(login: "a"))
+        let beside = TerminalApp.Worktree.forPR(pr, repoFolder: "/Users/me/TEACHIQ/gauss/", nextToClone: true)
+        #expect(beside.path == "/Users/me/TEACHIQ/gauss-worktrees/pr-7")
+        #expect(beside.repoFolder == "/Users/me/TEACHIQ/gauss/")
+        let support = TerminalApp.Worktree.forPR(pr, repoFolder: "/Users/me/TEACHIQ/gauss", nextToClone: false)
+        #expect(support.path.hasSuffix("/ReviewBar/worktrees/Teachiq-gauss/pr-7"))
+    }
+
     @Test func launcherRunsWorktreeBeforeAgent() throws {
         let wt = TerminalApp.Worktree(repoFolder: "/r", path: "/wt", number: 1)
         let s = TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "", checkout: wt)

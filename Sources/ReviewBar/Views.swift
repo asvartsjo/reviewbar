@@ -640,6 +640,7 @@ struct SettingsView: View {
     @AppStorage(AsWindow.key) private var asWindow = false
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
+    @AppStorage(TerminalApp.Worktree.nextToCloneKey) private var worktreesNextToClone = false
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
@@ -867,6 +868,11 @@ struct SettingsView: View {
                  ? "Claude Code only. Codex reviews use the built-in prompt."
                  : "The first message of a new review in the terminal, with {url} as the PR's link. "
                    + "Leave it empty for the built-in review prompt.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
+            Text(worktreesNextToClone
+                 ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. gauss-worktrees/pr-42."
+                 : "Each PR is checked out in ReviewBar's Application Support folder.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             Divider()

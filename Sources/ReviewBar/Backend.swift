@@ -299,22 +299,37 @@ enum Backend {
         let fields = prs.indices.compactMap { i -> String? in
             guard let data = try? enc.encode(prs[i].url), let url = String(data: data, encoding: .utf8)
             else { return nil }
-            return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid } }"
+            return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid "
+                + "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }"
         }
         let query = "query { \(fields.joined(separator: " ")) }"
-        guard let out = try? await sh("gh api graphql -f query=\(q(query))"),
-              let resp = try? JSONDecoder().decode(HeadCommits.self, from: Data(out.utf8))
-        else { return prs }
+        guard let out = try? await sh("gh api graphql -f query=\(q(query))") else { return prs }
+        return applyHeadCommits(prs, Data(out.utf8))
+    }
+
+    /// The `withHeadCommits` response (aliases p0, p1, … by index) → head commit and CI per PR.
+    /// Unchanged PRs when it doesn't decode. Pure, for tests.
+    static func applyHeadCommits(_ prs: [PR], _ json: Data) -> [PR] {
+        guard let resp = try? JSONDecoder().decode(HeadCommits.self, from: json) else { return prs }
         return prs.enumerated().map { i, pr in
             var pr = pr
-            pr.headRefOid = resp.data["p\(i)"]??.headRefOid
+            let node = resp.data["p\(i)"] ?? nil
+            pr.headRefOid = node?.headRefOid
+            pr.checks = node?.commits?.nodes.first?.commit.statusCheckRollup?.state
             return pr
         }
     }
 
     private struct HeadCommits: Decodable {
         let data: [String: Node?]
-        struct Node: Decodable { let headRefOid: String? }
+        struct Node: Decodable {
+            let headRefOid: String?
+            let commits: Commits?
+        }
+        struct Commits: Decodable { let nodes: [CommitNode] }
+        struct CommitNode: Decodable { let commit: Commit }
+        struct Commit: Decodable { let statusCheckRollup: Rollup? }
+        struct Rollup: Decodable { let state: String }
     }
 
     // MARK: Replies on your review threads
@@ -500,7 +515,7 @@ enum Backend {
         }
         let added = requested.filter { !reviewedURLs.contains($0.url) }.map {
             ReviewingPR(pr: $0, isRequested: true, myLastReview: nil, waiting: 0, myThreads: 0,
-                        resolved: 0, outdated: 0, verdicts: [], checks: nil, latestAt: $0.updatedAt)
+                        resolved: 0, outdated: 0, verdicts: [], checks: $0.checks, latestAt: $0.updatedAt)
         }
         return marked + added
     }

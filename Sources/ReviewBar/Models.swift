@@ -12,6 +12,8 @@ struct PR: Identifiable, Codable, Hashable {
     var headRefOid: String?
     /// When the PR was opened; used to put the longest-waiting review requests first.
     var createdAt: String? = nil
+    /// CI state of the head commit, filled in with `headRefOid` for review requests.
+    var checks: String? = nil
 
     struct Repo: Codable, Hashable { let nameWithOwner: String }
     struct Author: Codable, Hashable { let login: String }

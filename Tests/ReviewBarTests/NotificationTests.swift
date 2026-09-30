@@ -158,6 +158,16 @@ struct PRFilterTests {
            repository: .init(nameWithOwner: "o/r"), author: .init(login: "a"))
     }
 
+    @Test func requestsGetHeadCommitAndCI() {
+        let json = #"{"data": {"p0": {"headRefOid": "abc", "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE"}}}]}},"#
+            + #" "p1": {"headRefOid": "def", "commits": {"nodes": [{"commit": {"statusCheckRollup": null}}]}}, "p2": null}}"#
+        let prs = Backend.applyHeadCommits([pr(1, draft: false), pr(2, draft: false), pr(3, draft: false)], Data(json.utf8))
+        #expect(prs.map(\.headRefOid) == ["abc", "def", nil])
+        #expect(prs.map(\.checks) == ["FAILURE", nil, nil])
+        #expect(Backend.merge([], requested: prs).map(\.checks) == ["FAILURE", nil, nil])
+        #expect(Backend.applyHeadCommits([pr(1, draft: false)], Data("oops".utf8)) == [pr(1, draft: false)])
+    }
+
     @Test func draftsKeptByDefaultAndDroppedWhenOff() {
         let prs = [pr(1, draft: false), pr(2, draft: true)]
         #expect(PRFilter.others(prs, includeDrafts: true).map(\.number) == [1, 2])

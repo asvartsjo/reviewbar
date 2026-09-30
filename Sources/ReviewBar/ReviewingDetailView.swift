@@ -32,8 +32,9 @@ struct ReviewingDetailBox: View {
                 Text("Loading activity, threads and commits…").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(8)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
         .onAppear { vm.loadDetail(reviewing) }
     }
 
@@ -42,8 +43,9 @@ struct ReviewingDetailBox: View {
         Text(c.summary).font(.caption).foregroundStyle(isNews ? .orange : .secondary)
         if case .new(let count, let list) = c {
             ForEach(list.prefix(Self.maxCommits), id: \.sha) { commit in
-                Text(verbatim: "\(commit.sha) \(commit.message)")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                (Text(verbatim: commit.sha).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    + Text(verbatim: " \(commit.message)").font(.caption))
+                    .lineLimit(1)
             }
             if count > min(list.count, Self.maxCommits) {
                 Text("+ \(count - min(list.count, Self.maxCommits)) more").font(.caption).foregroundStyle(.secondary)
@@ -98,13 +100,17 @@ struct ReviewingDetailBox: View {
             .font(.caption.bold()).padding(.top, 2)
             ForEach(Array(threads.enumerated()), id: \.offset) { _, t in
                 Button { if let s = t.url, let u = URL(string: s) { NSWorkspace.shared.open(u) } } label: {
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 6) {
-                            Text(t.stateText).foregroundStyle(color(t.state))
-                            Text(verbatim: t.location).foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(verbatim: t.snippet).lineLimit(1)
+                                .foregroundStyle(t.state == .resolved ? .secondary : .primary)
+                            Text(verbatim: t.location).font(.caption2.monospaced()).foregroundStyle(.secondary)
                                 .lineLimit(1).truncationMode(.head)
                         }
-                        Text(verbatim: t.snippet).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(t.stateText).font(.caption2).foregroundStyle(color(t.state))
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(color(t.state).opacity(0.5)))
                     }
                     .font(.caption)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -131,7 +137,12 @@ struct ReviewingDetailBox: View {
         if !people.isEmpty {
             Text("Other reviewers").font(.caption.bold()).padding(.top, 2)
             ForEach(people, id: \.login) { p in
-                Text(verbatim: "\(p.login) · \(p.text)").font(.caption)
+                HStack {
+                    Text(verbatim: p.login)
+                    Spacer(minLength: 4)
+                    Text(verbatim: p.text).foregroundStyle(.secondary)
+                }
+                .font(.caption)
             }
         }
     }
@@ -139,7 +150,7 @@ struct ReviewingDetailBox: View {
     private func color(_ s: ReviewingDetail.MyThread.State) -> Color {
         switch s {
         case .replied: .blue
-        case .open: .primary
+        case .open: .secondary
         case .resolved: .green
         }
     }

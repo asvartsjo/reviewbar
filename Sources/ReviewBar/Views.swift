@@ -112,11 +112,11 @@ struct ContentView: View {
         }
     }
 
-    /// "· open 4d", orange from `oldAfterDays`.
+    /// "open 4d", orange from `oldAfterDays`.
     @ViewBuilder private func openAge(_ pr: PR) -> some View {
         if let opened = pr.createdAt {
             let days = daysSince(opened)
-            Text(days < 1 ? "· opened today" : "· open \(days)d")
+            Text(days < 1 ? "opened today" : "open \(days)d")
                 .foregroundStyle(days >= Self.oldAfterDays ? .orange : .secondary)
                 .help(days >= Self.oldAfterDays ? "Open for \(days) days" : "")
         }
@@ -155,27 +155,29 @@ struct ContentView: View {
         }
     }
 
+    /// The dot sits in its own column, so titles line up whether or not a row is new.
     private func reviewingRow(_ r: ReviewingPR) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                if vm.isNew(r) { NewDot() }
-                Text(verbatim: "\(r.pr.repository.nameWithOwner) #\(r.pr.number)")
-                    .font(.caption).foregroundStyle(.secondary)
-                if r.pr.isDraft {
-                    Text("DRAFT").font(.caption2).padding(.horizontal, 4)
-                        .background(.quaternary, in: Capsule())
+        HStack(alignment: .top, spacing: 6) {
+            Group {
+                if vm.isNew(r) { NewDot() } else { Color.clear.frame(width: 7, height: 7) }
+            }
+            .padding(.top, 21)
+            VStack(alignment: .leading, spacing: 2) {
+                repoCaption(r.pr.repository.nameWithOwner, draft: r.pr.isDraft)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    numberedTitle(r.pr.number, r.pr.title)
+                    Spacer(minLength: 4)
+                    HStack(spacing: 5) {
+                        if r.isRequested { openAge(r.pr) }
+                        savedReviewIcon(r.pr)
+                        ChecksIcon(state: r.checks)
+                    }
+                    .font(.caption)
                 }
-                Spacer()
-                savedReviewIcon(r.pr)
-                ChecksIcon(state: r.checks)
+                (Text(r.pr.author.login).foregroundStyle(.primary)
+                    + Text(verbatim: " · \(r.status)").foregroundStyle(.secondary))
+                    .font(.caption).lineLimit(2)
             }
-            Text(r.pr.title).font(.body).lineLimit(2)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("\(r.pr.author.login) · \(r.status)")
-                    .foregroundStyle(r.group == .yours ? .blue : .secondary).lineLimit(2)
-                if r.isRequested { openAge(r.pr) }
-            }
-            .font(.caption)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -301,6 +303,21 @@ struct ContentView: View {
     }
 
     // MARK: helpers
+
+    /// The small grey "owner/repo" line above a row's title.
+    private func repoCaption(_ repo: String, draft: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(verbatim: repo)
+            if draft { Text("DRAFT").padding(.horizontal, 4).background(.quaternary, in: Capsule()) }
+        }
+        .font(.caption2).foregroundStyle(.secondary)
+    }
+
+    /// "#482 Add CSV export", with the number in grey.
+    private func numberedTitle(_ number: Int, _ title: String) -> some View {
+        (Text(verbatim: "#\(number) ").foregroundStyle(.secondary) + Text(verbatim: title))
+            .font(.body.weight(.medium)).lineLimit(2)
+    }
 
     private func title(_ t: Tab) -> String {
         switch t {
@@ -1053,7 +1070,7 @@ struct ChecksIcon: View {
         case "FAILURE", "ERROR":
             Image(systemName: "xmark.octagon.fill").foregroundStyle(.red).help("Checks failing")
         case "PENDING", "EXPECTED":
-            Image(systemName: "clock").foregroundStyle(.secondary).help("Checks running")
+            Image(systemName: "clock").foregroundStyle(.orange).help("Checks running")
         default:
             EmptyView()
         }

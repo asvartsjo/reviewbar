@@ -42,8 +42,10 @@ struct ReviewBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     // The menu bar icon and panel live in MenuBarController; an App needs at least one scene.
+    // A hidden MenuBarExtra has no window; an empty Settings scene opens as a blank window at
+    // launch on newer macOS.
     var body: some Scene {
-        Settings { EmptyView() }
+        MenuBarExtra("ReviewBar", systemImage: "eye", isInserted: .constant(false)) { EmptyView() }
     }
 }
 

@@ -13,43 +13,66 @@ struct ReviewingDetailBox: View {
 
     var body: some View {
         let load = vm.detailLoad(for: reviewing.pr)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("Since your review").font(.caption.bold())
+                heading("Since your review")
                 Spacer()
                 if load.loading { ProgressView().controlSize(.small) }
             }
             if let e = load.error {
-                Text(e).font(.caption).foregroundStyle(.red)
+                Text(e).foregroundStyle(.red)
             }
             if let d = load.detail {
                 commits(d.commits)
                 activity(d)
                 threads(d)
-                if !d.myThreads.isEmpty, reviewing.verifyIsDue { verifyButton }
                 reviewers(d.reviewers(reviewing.verdicts))
+                if !d.myThreads.isEmpty, reviewing.verifyIsDue { verifyButton.padding(.top, 4) }
             } else if load.loading {
-                Text("Loading activity, threads and commits…").font(.caption).foregroundStyle(.secondary)
+                Text("Loading activity, threads and commits…").foregroundStyle(.secondary)
             }
         }
-        .padding(10)
+        .font(.callout)
+        .padding(12)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
         .onAppear { vm.loadDetail(reviewing) }
     }
 
+    private func heading(_ text: String) -> some View {
+        Text(text).font(.callout.bold())
+    }
+
+    /// Every line in the box sits after this column, so they line up whether or not it holds a dot.
+    @ViewBuilder private func gutter(new: Bool = false) -> some View {
+        if new { NewDot() } else { Color.clear.frame(width: 7, height: 7) }
+    }
+
+    private func line<Content: View>(new: Bool = false, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            gutter(new: new).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+            content()
+        }
+    }
+
+    /// The summary line only when it isn't just the count above a list of the commits.
     @ViewBuilder private func commits(_ c: ReviewingDetail.Commits) -> some View {
-        let isNews: Bool = if case .same = c { false } else { true }
-        Text(c.summary).font(.caption).foregroundStyle(isNews ? .orange : .secondary)
-        if case .new(let count, let list) = c {
+        switch c {
+        case .new(let count, let list):
             ForEach(list.prefix(Self.maxCommits), id: \.sha) { commit in
-                (Text(verbatim: commit.sha).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    + Text(verbatim: " \(commit.message)").font(.caption))
-                    .lineLimit(1)
+                line {
+                    (Text(verbatim: commit.sha).font(.callout.monospaced()).foregroundStyle(.secondary)
+                        + Text(verbatim: " \(commit.message)"))
+                        .lineLimit(1)
+                }
             }
             if count > min(list.count, Self.maxCommits) {
-                Text("+ \(count - min(list.count, Self.maxCommits)) more").font(.caption).foregroundStyle(.secondary)
+                line { Text("+ \(count - min(list.count, Self.maxCommits)) more").foregroundStyle(.secondary) }
             }
+        case .same:
+            Text(c.summary).foregroundStyle(.secondary)
+        default:
+            Text(c.summary).foregroundStyle(.orange)
         }
     }
 
@@ -58,29 +81,29 @@ struct ReviewingDetailBox: View {
     @ViewBuilder private func activity(_ d: ReviewingDetail) -> some View {
         let before = vm.previouslySeen(reviewing.pr)
         if d.activity.isEmpty {
-            Text("No activity since your review").font(.caption).foregroundStyle(.secondary)
+            Text("No activity since your review").foregroundStyle(.secondary)
         } else {
-            Text("Activity").font(.caption.bold()).padding(.top, 2)
+            heading("Activity").padding(.top, 4)
             ForEach(Array(d.activity.enumerated()), id: \.offset) { _, a in
                 let when = Self.isoParser.date(from: a.at)?.formatted(.relative(presentation: .named)) ?? ""
                 Button { if let u = URL(string: a.url ?? reviewing.pr.url) { NSWorkspace.shared.open(u) } } label: {
-                    HStack(spacing: 6) {
-                        if let before, a.at > before { NewDot() }
+                    line(new: before.map { a.at > $0 } ?? false) {
                         Text(verbatim: a.text).lineLimit(1)
                         Spacer(minLength: 4)
-                        Text(when).foregroundStyle(.secondary)
+                        Text(when).font(.caption).foregroundStyle(.secondary)
                     }
-                    .font(.caption)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Open on GitHub")
             }
             if d.activityCapped {
-                Button("Older activity is on GitHub") {
-                    if let u = URL(string: reviewing.pr.url) { NSWorkspace.shared.open(u) }
+                line {
+                    Button("Older activity is on GitHub") {
+                        if let u = URL(string: reviewing.pr.url) { NSWorkspace.shared.open(u) }
+                    }
+                    .buttonStyle(.link)
                 }
-                .buttonStyle(.link).font(.caption)
             }
         }
     }
@@ -90,29 +113,26 @@ struct ReviewingDetailBox: View {
         if !threads.isEmpty {
             let resolved = threads.filter { $0.state == .resolved }.count
             HStack(spacing: 0) {
-                Text(verbatim: (["Your threads", "\(resolved)/\(threads.count) resolved"] + [d.openBySeverity].compactMap { $0 })
+                heading((["Your threads", "\(resolved)/\(threads.count) resolved"] + [d.openBySeverity].compactMap { $0 })
                     .joined(separator: " · "))
                 if d.blockingOpen > 0 {
-                    Text(verbatim: " · \(d.blockingOpen) blocking").foregroundStyle(.red)
+                    Text(verbatim: " · \(d.blockingOpen) blocking").font(.callout.bold()).foregroundStyle(.red)
                         .help("Open 🚨/🔴 threads: your pr-review skill says these block a merge")
                 }
             }
-            .font(.caption.bold()).padding(.top, 2)
+            .padding(.top, 4)
             ForEach(Array(threads.enumerated()), id: \.offset) { _, t in
                 Button { if let s = t.url, let u = URL(string: s) { NSWorkspace.shared.open(u) } } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(verbatim: t.snippet).lineLimit(1)
-                                .foregroundStyle(t.state == .resolved ? .secondary : .primary)
-                            Text(verbatim: t.location).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.head)
-                        }
+                    line {
+                        (Text(verbatim: t.snippet)
+                            + Text(verbatim: "  \(t.location)").font(.caption.monospaced()).foregroundStyle(.secondary))
+                            .foregroundStyle(t.state == .resolved ? .secondary : .primary)
+                            .lineLimit(2)
                         Spacer(minLength: 4)
-                        Text(t.stateText).font(.caption2).foregroundStyle(color(t.state))
-                            .padding(.horizontal, 4).padding(.vertical, 1)
+                        Text(t.stateText).font(.caption).foregroundStyle(color(t.state))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
                             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(color(t.state).opacity(0.5)))
                     }
-                    .font(.caption)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
@@ -127,7 +147,6 @@ struct ReviewingDetailBox: View {
         if Agent.current == .claude, ClaudeSettings.command(verifyCommand, url: reviewing.pr.url) != nil {
             let terminal = TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed)
             Button(terminal.label("Verify fixes")) { vm.verifyInTerminal(reviewing.pr) }
-                .controlSize(.small)
                 .buttonStyle(.borderedProminent)
                 .help("Checks each of your threads against the commits since your review")
         }
@@ -135,14 +154,13 @@ struct ReviewingDetailBox: View {
 
     @ViewBuilder private func reviewers(_ people: [ReviewingDetail.Reviewer]) -> some View {
         if !people.isEmpty {
-            Text("Other reviewers").font(.caption.bold()).padding(.top, 2)
+            heading("Other reviewers").padding(.top, 4)
             ForEach(people, id: \.login) { p in
-                HStack {
+                line {
                     Text(verbatim: p.login)
                     Spacer(minLength: 4)
-                    Text(verbatim: p.text).foregroundStyle(.secondary)
+                    Text(verbatim: p.text).font(.caption).foregroundStyle(.secondary)
                 }
-                .font(.caption)
             }
         }
     }

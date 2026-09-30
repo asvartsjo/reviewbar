@@ -25,7 +25,7 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 
 ## Requirements
 
-- macOS 13+ to run it; Xcode 16+ or the Command Line Tools with Swift 6+ to build it
+- macOS 14+ to run it; Xcode 16+ or the Command Line Tools with Swift 6+ to build it
 - [`gh`](https://cli.github.com) logged in (`gh auth login`, authorise SSO if your org needs it)
 - [Claude Code](https://claude.com/claude-code) logged in with your Max account (`claude`), or [Codex CLI](https://github.com/openai/codex) logged in with ChatGPT (`codex login`)
 

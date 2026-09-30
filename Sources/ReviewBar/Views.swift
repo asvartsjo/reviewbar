@@ -815,7 +815,7 @@ struct SettingsView: View {
             Text("Startup").font(.headline)
             Toggle("Open at login", isOn: $openAtLogin)
                 .disabled(!LoginItem.isAvailable)
-                .onChange(of: openAtLogin) { on in setOpenAtLogin(on) }
+                .onChange(of: openAtLogin) { _, on in setOpenAtLogin(on) }
             if !LoginItem.isAvailable {
                 Text("Needs the app bundle: build it with scripts/make-app.sh and run it from /Applications.")
                     .font(.caption2).foregroundStyle(.secondary)

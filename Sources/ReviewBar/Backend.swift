@@ -1269,6 +1269,7 @@ enum Backend {
     /// Reviews only the commits since `earlier`, or everything with the earlier notes when the
     /// branch was rebased or force-pushed. Returns the text and whether it had to fall back.
     static func reviewChanges(_ pr: PR, since earlier: SavedReview) async throws -> (text: String, fellBack: Bool) {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         guard let base = earlier.pr.headRefOid, let head = pr.headRefOid,
               isCommitSHA(base), isCommitSHA(head) else {
             throw ShellError(code: 1, stderr: "Can't tell which commits are new: the earlier review has no commit recorded.")
@@ -1396,6 +1397,7 @@ enum Backend {
 
     /// Headless review with the review model (uses your logged-in Max session).
     static func review(_ pr: PR) async throws -> String {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         async let prompt = buildPrompt(for: pr)
         let codebase = await prepareCodebase(pr)
         return try await runAgent(try await prompt + codebaseNote(codebase), codebase: codebase)
@@ -1404,6 +1406,7 @@ enum Backend {
     /// Creates a pending review from `text` (nits left out). Returns how many comments were placed
     /// on lines and how many went into the review body, plus the PR's files page to finish it on.
     static func createDraftReview(_ pr: PR, text: String) async throws -> (inline: Int, loose: Int) {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         let comments = DraftReview.comments(from: text)
         guard !comments.isEmpty else {
             throw ShellError(code: 1, stderr: "No findings to post: only nits, or no suggested comments with a file and line.")
@@ -1459,6 +1462,7 @@ enum Backend {
     /// so it reports what people said and what is waiting on me, not whether the code is right.
     /// With `since` (my last review), it covers what others said after it, marked NEW in the feedback.
     static func summariseFeedback(_ pr: PR, mine: Bool, since: String? = nil) async throws -> String {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         let feedback = await feedback(for: pr, since: mine ? nil : since)
         let task = if mine {
             """
@@ -1496,6 +1500,7 @@ enum Backend {
     /// A new Claude review sends only the Review command from Settings, and Verify only the Verify
     /// command, since anything after a slash command becomes its arguments.
     static func openInTerminal(_ pr: PR, mode: TerminalMode) async throws -> String? {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         var prompt: String
         var isCommand = false
         switch mode {

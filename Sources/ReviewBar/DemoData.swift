@@ -9,6 +9,11 @@ enum DemoData {
     static let isOn = CommandLine.arguments.contains("--demo")
     static let lastStep = 2
 
+    /// Thrown by actions that would reach GitHub, an agent or a terminal: the PRs are made up.
+    struct Unavailable: LocalizedError {
+        var errorDescription: String? { "Not in demo mode: these PRs are made up." }
+    }
+
     /// 0 before the first refresh.
     @MainActor private(set) static var step = 0
     /// When each step began, so its events keep one time across refreshes.

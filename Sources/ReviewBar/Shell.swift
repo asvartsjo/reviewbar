@@ -66,13 +66,15 @@ private final class RunningProcess: @unchecked Sendable {
 /// Runs a command in an interactive login zsh so PATH (gh, claude) matches your Terminal.
 /// Only the command's own output is returned, not what `.zshrc` and friends print.
 /// Cancelling the calling task stops the command and throws CancellationError.
+/// `+m` turns off job control: an interactive zsh started from a terminal (`swift test`,
+/// `swift run`) otherwise takes its own process group and stops itself on the terminal.
 func sh(_ command: String, input: String? = nil) async throws -> String {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-    p.arguments = ["-lic", "print -r -- \(outputMarker); " + command]
+    p.arguments = ["+m", "-lic", "print -r -- \(outputMarker); " + command]
     let outP = Pipe(), errP = Pipe(), inP = Pipe()
     // A cancelled command can exit before reading its input: fail the write, don't SIGPIPE the app.
-    fcntl(inP.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+    _ = fcntl(inP.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
     p.standardOutput = outP
     p.standardError = errP
     p.standardInput = inP

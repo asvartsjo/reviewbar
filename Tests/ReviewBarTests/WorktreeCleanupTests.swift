@@ -88,7 +88,8 @@ struct WorktreeCleanupTests {
     }
 
     @Test func keepsUntrackedAndEditedFiles() async throws {
-        for setup in ["print x > notes.md", "print more >> .gitignore"] {
+        for setup in ["print x > notes.md", "print more >> .gitignore",
+                      "git config status.showUntrackedFiles no && print x > notes.md"] {
             let t = try await makeWorktree(setup)
             defer { try? FileManager.default.removeItem(at: t.root) }
             #expect(await !remove(t.worktree, finalHead: nil), "\(setup)")
@@ -103,5 +104,12 @@ struct WorktreeCleanupTests {
 
         // The PR's last head on GitHub is this commit: it was pushed.
         #expect(await remove(unpushed.worktree, finalHead: unpushed.head))
+    }
+
+    @Test func keepsACommitARelaunchMovedAwayFrom() async throws {
+        let commit = "print y > fix.txt && git add fix.txt && git -c user.name=t -c user.email=t@t commit -qm fix"
+        let t = try await makeWorktree(commit + " && git checkout -q --detach HEAD~1")
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        #expect(await !remove(t.worktree, finalHead: t.head))
     }
 }

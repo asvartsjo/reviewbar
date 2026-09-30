@@ -174,17 +174,22 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         }
 
         /// Shell lines that remove this worktree and its ref only if nothing would be lost: the
-        /// ref exists, `git status` is empty (ignored files such as a copied `vendor/` don't count),
-        /// and HEAD is the PR's last head on GitHub or already in the ref, so no unpushed commit
-        /// goes. `git worktree remove` runs without `--force`, so git refuses a dirty worktree too.
+        /// ref exists, `git status` is empty (ignored files such as a copied `vendor/` don't count;
+        /// untracked ones do, whatever `status.showUntrackedFiles` says), and HEAD and every commit
+        /// made in the worktree are the PR's last head on GitHub or already in the ref, so no
+        /// unpushed commit goes, even one a relaunch moved HEAD away from (it's only in the reflog,
+        /// which the removal deletes). `git worktree remove` runs without `--force`.
         /// Exits non-zero when it keeps the worktree. Pure, for tests.
         func removeScript(finalHead: String?) -> String {
-            let repo = q(repoFolder), wt = q(path)
+            let repo = q(repoFolder), wt = q(path), final = q(finalHead ?? "")
             return """
             cd \(wt) || exit 1
             git -C \(repo) rev-parse --verify --quiet \(ref) >/dev/null || exit 1
-            [[ -z "$(git status --porcelain)" ]] || exit 1
-            [[ "$(git rev-parse HEAD)" == \(q(finalHead ?? "")) ]] || git merge-base --is-ancestor HEAD \(ref) || exit 1
+            [[ -z "$(git status --porcelain --untracked-files=all)" ]] || exit 1
+            [[ "$(git rev-parse HEAD)" == \(final) ]] || git merge-base --is-ancestor HEAD \(ref) || exit 1
+            for c in $(git log -g --format='%H %gs' HEAD | awk '$2 ~ /^(commit|cherry-pick|revert|merge|rebase|am)/ { print $1 }'); do
+              git merge-base --is-ancestor $c \(ref) 2>/dev/null || git merge-base --is-ancestor $c \(final) 2>/dev/null || exit 1
+            done
             cd /
             git -C \(repo) worktree remove \(wt) && git -C \(repo) update-ref -d \(ref)
             """

@@ -1555,6 +1555,7 @@ extension Backend {
     }
 
     /// State and last head commit of these PRs in one read-only GraphQL query; nil if it fails.
+    /// `gh` exits 1 when any of them doesn't resolve but still prints the others, so that's let through.
     private static func prStates(repo: String, numbers: [Int]) async -> [Int: PRState]? {
         let parts = repo.split(separator: "/").map(String.init)
         let enc = JSONEncoder()
@@ -1563,7 +1564,7 @@ extension Backend {
         let prs = numbers.map { "p\($0): pullRequest(number: \($0)) { state headRefOid }" }.joined(separator: " ")
         let query = "query { repository(owner: \(String(decoding: owner, as: UTF8.self)), "
             + "name: \(String(decoding: name, as: UTF8.self))) { \(prs) } }"
-        guard let out = try? await sh("gh api graphql -f query=\(q(query))") else { return nil }
+        guard let out = try? await sh("gh api graphql -f query=\(q(query)) || true") else { return nil }
         return parsePRStates(Data(out.utf8))
     }
 

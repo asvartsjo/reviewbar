@@ -2,6 +2,12 @@ import SwiftUI
 import AppKit
 import Combine
 
+/// Keeps the panel open when you click elsewhere; it then closes with the icon or Esc.
+enum StayOpen {
+    static let key = "stayOpen"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+}
+
 /// The menu bar icon and its panel, in AppKit rather than SwiftUI's MenuBarExtra, which always
 /// opens at the icon's left edge and draws the panel as translucent glass.
 @MainActor
@@ -29,10 +35,10 @@ final class MenuBarController: NSObject {
             .receive(on: RunLoop.main)
             .sink { [weak self, weak vm] _ in if let vm { self?.updateIcon(vm.badgeCount) } }
 
-        // Clicking anywhere else closes it, like a menu.
+        // Clicking anywhere else closes it, like a menu, unless Settings keep it open.
         resignObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+            MainActor.assumeIsolated { if !StayOpen.isOn { self?.close() } }
         }
     }
 
@@ -82,6 +88,8 @@ final class MenuBarController: NSObject {
             level = .popUpMenu
             collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             isReleasedWhenClosed = false
+            // Panels hide when the app loses focus by default; closing is up to MenuBarController.
+            hidesOnDeactivate = false
         }
         override var canBecomeKey: Bool { true }
         var onEscape: (() -> Void)?

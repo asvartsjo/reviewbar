@@ -621,6 +621,7 @@ struct SettingsView: View {
     @AppStorage(CodexSettings.quickEffortKey) private var codexQuickEffort = CodexSettings.quickEffortDefault
     @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
     @AppStorage(AutoReview.key) private var autoReview = false
+    @AppStorage(StayOpen.key) private var stayOpen = false
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
@@ -858,6 +859,12 @@ struct SettingsView: View {
             Toggle("Feedback on your PRs", isOn: $notifyFeedback)
             Toggle("@mentions of you or your teams", isOn: $notifyMentions)
             notificationHint
+
+            Divider()
+            Text("Panel").font(.headline)
+            Toggle("Stay open when clicking elsewhere", isOn: $stayOpen)
+            Text("Close it with the menu bar icon or Esc.")
+                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             Text("Startup").font(.headline)

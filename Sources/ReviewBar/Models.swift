@@ -105,6 +105,56 @@ struct ReviewingPR: Identifiable, Hashable {
         if waiting > 0 { return .yours(.reply) }
         return myLastReview?.state == "APPROVED" ? .done : .authors
     }
+
+    /// The Reviewing tab's sections, in display order.
+    enum Group: Int, CaseIterable, Comparable {
+        case yours, authors, done
+        static func < (a: Group, b: Group) -> Bool { a.rawValue < b.rawValue }
+
+        var title: String {
+            switch self {
+            case .yours: "Your turn"
+            case .authors: "Author's turn"
+            case .done: "Done"
+            }
+        }
+    }
+
+    var group: Group {
+        switch turn {
+        case .yours: .yours
+        case .authors: .authors
+        case .done: .done
+        }
+    }
+
+    /// Non-empty sections in display order, newest activity first inside each. Pure, for tests.
+    static func sections(_ prs: [ReviewingPR]) -> [(group: Group, prs: [ReviewingPR])] {
+        Dictionary(grouping: prs, by: \.group)
+            .sorted { $0.key < $1.key }
+            .map { ($0.key, $0.value.sorted { $0.latestAt > $1.latestAt }) }
+    }
+
+    /// One line for the list: why it's your turn (or what you last said), replies, your threads,
+    /// then other people's verdicts.
+    var status: String {
+        let reason: String? = switch turn {
+        case .yours(.requested): "Review requested"
+        case .yours(.reRequested): "Review re-requested"
+        case .yours(.newCommits): "New commits since your review"
+        case .yours(.reply): nil   // the reply count below says it
+        case .authors, .done:
+            switch myLastReview?.state {
+            case "APPROVED": "You approved"
+            case "CHANGES_REQUESTED": "You requested changes"
+            default: "You commented"
+            }
+        }
+        let replies = waiting == 0 ? nil : "\(waiting) \(waiting == 1 ? "reply" : "replies") waiting"
+        let threads = myThreads == 0 ? nil : "\(resolved)/\(myThreads) of your threads resolved"
+        let others = verdicts.map { "\($0.login) \($0.state == "APPROVED" ? "approved" : "requested changes")" }
+        return ([reason, replies, threads].compactMap { $0 } + others).joined(separator: " · ")
+    }
 }
 
 /// One of your own open PRs with reviewer feedback you have not answered yet.

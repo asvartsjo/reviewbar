@@ -12,6 +12,8 @@ final class ReviewViewModel: ObservableObject {
     @Published var error: String?
     @Published var reviews: [String: ReviewState] = [:]   // keyed by PR.reviewKey
     @Published var replies: [ReplyPR] = []
+    /// PRs you review: reviewed before, or requested now (merged in from `prs`).
+    @Published var reviewing: [ReviewingPR] = []
     @Published var myPRs: [FeedbackPR] = []
     /// Shown under the terminal button, e.g. after copying a command.
     @Published var terminalNotice: String?
@@ -88,6 +90,7 @@ final class ReviewViewModel: ObservableObject {
         let skip = skippedRepos
         async let fetchedPRs = Backend.fetchPRs(skipping: skip)
         async let fetchedReplies = Backend.fetchReplies(skipping: skip)
+        async let fetchedReviewing = Backend.fetchReviewing(skipping: skip)
         async let fetchedMine = Backend.fetchMyPRs(skipping: skip)
         let week = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 86_400))
         async let fetchedMentions = Backend.fetchMentions(since: week, repos: RepoList.load())
@@ -108,6 +111,10 @@ final class ReviewViewModel: ObservableObject {
                 .map(ReviewAlert.reply)
             seenReplies = AlertDiff.latestByURL(replies, url: \.pr.url, latestAt: \.latestAt)
         } catch { errors.append("Replies: \(error.localizedDescription)") }
+        do {
+            let reviewed = PRFilter.others(try await fetchedReviewing, includeDrafts: PRFilter.includeDrafts)
+            reviewing = Backend.merge(reviewed, requested: prs)
+        } catch { errors.append("Reviewing: \(error.localizedDescription)") }
         do {
             myPRs = try await fetchedMine
             alerts += AlertDiff.newer(visibleFeedback, seen: seenFeedback, url: \.pr.url, latestAt: \.latestAt)
@@ -155,6 +162,10 @@ final class ReviewViewModel: ObservableObject {
 
     func dismissReplies(_ r: ReplyPR) { dismiss(r.pr.url, until: r.latestAt) }
 
+    var reviewingSections: [(group: ReviewingPR.Group, prs: [ReviewingPR])] { ReviewingPR.sections(reviewing) }
+
+    var yourTurnCount: Int { reviewing.filter { $0.group == .yours }.count }
+
     @Published var mentions: [Mention] = []
     private var seenMentions: [String: String]?
 
@@ -182,10 +193,13 @@ final class ReviewViewModel: ObservableObject {
         UserDefaults.standard.set(dismissed, forKey: "dismissedReplies")
     }
 
-    /// Distinct PRs needing you: review requests, replies and feedback on your PRs.
+    /// Distinct PRs needing you: review requests, replies, new commits since your review and
+    /// feedback on your PRs. Only the new-commits part of Reviewing counts: its requests and
+    /// replies are already here, and replies must honour Replies dismissals.
     var badgeCount: Int {
         Set(prs.map(\.url))
             .union(visibleReplies.map(\.pr.url))
+            .union(reviewing.filter { $0.turn == .yours(.newCommits) }.map(\.pr.url))
             .union(visibleFeedback.map(\.pr.url))
             .union(visibleMentions.map(\.url))
             .count

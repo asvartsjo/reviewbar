@@ -103,6 +103,36 @@ struct ReviewingTests {
         #expect(Backend.merge(reviewed, requested: [])[0].turn == .done)
     }
 
+    // MARK: List
+
+    @Test func sectionsAreYourTurnThenAuthorsThenDoneNewestFirst() throws {
+        let prs = try parse([
+            node(1, reviews: [review("me", "APPROVED")]),                                          // done
+            node(2, reviews: [review("me", "COMMENTED"), review("anna", "APPROVED", at: "2026-09-05T10:00:00Z")]),
+            node(3, reviews: [review("me", "APPROVED", commit: "old1234")]),                       // new commits
+            node(4, reviews: [review("me", "COMMENTED"), review("anna", "APPROVED", at: "2026-09-07T10:00:00Z")]),
+        ])
+        let sections = ReviewingPR.sections(prs)
+        #expect(sections.map(\.group) == [.yours, .authors, .done])
+        #expect(sections.map { $0.prs.map(\.pr.number) } == [[3], [4, 2], [1]])
+        #expect(ReviewingPR.sections([]).isEmpty)
+    }
+
+    @Test func statusSaysWhyThenRepliesThreadsAndVerdicts() throws {
+        let replied = thread(opener: "me", recent: [comment("me", "2026-09-10T10:00:00Z"),
+                                                    comment("author", "2026-09-11T10:00:00Z")])
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234"),
+                                          review("anna", "APPROVED")],
+                             threads: [replied, thread(resolved: true, opener: "me", recent: [])]))
+        #expect(r.status == "New commits since your review · 1 reply waiting · 1/2 of your threads resolved · anna approved")
+
+        let reply = try one(node(2, reviews: [review("me", "COMMENTED")], threads: [replied]))
+        #expect(reply.status == "1 reply waiting · 0/1 of your threads resolved")
+
+        #expect(try one(node(3, reviews: [review("me", "CHANGES_REQUESTED")])).status == "You requested changes")
+        #expect(try one(node(4, reviews: [review("me", "APPROVED")])).status == "You approved")
+    }
+
     // MARK: Reviews
 
     @Test func pendingAndDismissedReviewsOfMineAreSkipped() throws {

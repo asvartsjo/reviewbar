@@ -91,6 +91,9 @@ struct PRFilterTests {
 
         let replies = prs.map { ReplyPR(pr: $0, waiting: 1, latestAt: "x", latestBy: "b") }
         #expect(PRFilter.others(replies, includeDrafts: false).map(\.pr.number) == [1])
+
+        let reviewing = Backend.merge([], requested: prs)
+        #expect(PRFilter.others(reviewing, includeDrafts: false).map(\.pr.number) == [1])
     }
 
     @Test func includeDraftsDefaultsToOn() {

@@ -5,6 +5,7 @@ import UserNotifications
 
 private enum Tab: String, CaseIterable {
     case pending = "Awaiting me"
+    case reviewing = "Reviewing"
     case replies = "Replies"
     case mine = "My PRs"
     case mentions = "Mentions"
@@ -44,6 +45,7 @@ struct ContentView: View {
                 }
                 switch tab {
                 case .pending: pendingList
+                case .reviewing: reviewingList
                 case .replies: repliesList
                 case .mine: mineList
                 case .mentions: mentionsList
@@ -146,6 +148,48 @@ struct ContentView: View {
                 }
             }
             .font(.caption)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: reviewing
+
+    private var reviewingList: some View {
+        Group {
+            if vm.reviewing.isEmpty && !vm.loading {
+                empty("eyeglasses", "No open PRs you review.")
+            } else {
+                List {
+                    ForEach(vm.reviewingSections, id: \.group) { s in
+                        Section(s.group.title) {
+                            ForEach(s.prs) { r in
+                                Button { selected = r.pr } label: { reviewingRow(r) }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+
+    private func reviewingRow(_ r: ReviewingPR) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(verbatim: "\(r.pr.repository.nameWithOwner) #\(r.pr.number)")
+                    .font(.caption).foregroundStyle(.secondary)
+                if r.pr.isDraft {
+                    Text("DRAFT").font(.caption2).padding(.horizontal, 4)
+                        .background(.quaternary, in: Capsule())
+                }
+                Spacer()
+                ChecksIcon(state: r.checks)
+            }
+            Text(r.pr.title).font(.body).lineLimit(2)
+            Text("\(r.pr.author.login) · \(r.status)")
+                .font(.caption).foregroundStyle(r.group == .yours ? .blue : .secondary).lineLimit(2)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -312,6 +356,7 @@ struct ContentView: View {
     private func title(_ t: Tab) -> String {
         switch t {
         case .pending where !vm.prs.isEmpty: return "\(t.rawValue) (\(vm.prs.count))"
+        case .reviewing where vm.yourTurnCount > 0: return "\(t.rawValue) (\(vm.yourTurnCount))"
         case .replies where !vm.visibleReplies.isEmpty: return "\(t.rawValue) (\(vm.visibleReplies.count))"
         case .mine where !vm.visibleFeedback.isEmpty: return "\(t.rawValue) (\(vm.visibleFeedback.count))"
         case .mentions where !vm.visibleMentions.isEmpty: return "\(t.rawValue) (\(vm.visibleMentions.count))"
@@ -795,7 +840,7 @@ struct SettingsView: View {
             Divider()
             Text("Pull requests").font(.headline)
             Toggle("Include draft PRs", isOn: $includeDrafts)
-            Text("Applies to Awaiting me and Replies. Your own drafts always show in My PRs.")
+            Text("Applies to Awaiting me, Reviewing and Replies. Your own drafts always show in My PRs.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Review new requests automatically", isOn: $autoReview)
             Text("Runs a full review in the background when a PR first asks for your review, one at a time, "
@@ -970,6 +1015,24 @@ struct DecisionBadge: View {
         case "CHANGES_REQUESTED":
             Label("Changes requested", systemImage: "exclamationmark.circle.fill")
                 .font(.caption).foregroundStyle(.orange)
+        default:
+            EmptyView()
+        }
+    }
+}
+
+/// CI state of a PR's head commit as a small icon; nothing when it has no checks.
+struct ChecksIcon: View {
+    let state: String?
+
+    var body: some View {
+        switch state ?? "" {
+        case "SUCCESS":
+            Image(systemName: "checkmark.circle").foregroundStyle(.green).help("Checks passed")
+        case "FAILURE", "ERROR":
+            Image(systemName: "xmark.octagon.fill").foregroundStyle(.red).help("Checks failing")
+        case "PENDING", "EXPECTED":
+            Image(systemName: "clock").foregroundStyle(.secondary).help("Checks running")
         default:
             EmptyView()
         }

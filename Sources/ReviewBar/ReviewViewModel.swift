@@ -158,11 +158,25 @@ final class ReviewViewModel: ObservableObject {
         self.error = errors.isEmpty ? nil : errors.joined(separator: "\n")
         Notifier.post(alerts)
         lastRefresh = Date()
+        removeClosedWorktreesDaily()
         loading = false
         if refreshAgain {
             refreshAgain = false
             await refresh()
         }
+    }
+
+    private static let worktreeCleanupKey = "worktreeCleanupAt"
+
+    /// At most once a day, in the background: remove worktrees of merged or closed PRs. The day
+    /// starts before the run, so a failure waits until tomorrow. Never in demo mode.
+    private func removeClosedWorktreesDaily() {
+        guard !DemoData.isOn else { return }
+        let last = UserDefaults.standard.object(forKey: Self.worktreeCleanupKey) as? Date ?? .distantPast
+        guard Date().timeIntervalSince(last) > 86_400 else { return }
+        UserDefaults.standard.set(Date(), forKey: Self.worktreeCleanupKey)
+        let repos = RepoList.load()
+        Task.detached(priority: .background) { await Backend.removeClosedWorktrees(repos: repos) }
     }
 
     /// Replies for notifications and the PR detail: not dismissed (or newer than what you

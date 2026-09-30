@@ -122,16 +122,69 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         /// (Settings › Terminal) they go beside it instead: ~/code/gauss → ~/code/gauss-worktrees/pr-7.
         static func forPR(_ pr: PR, repoFolder: String,
                           nextToClone: Bool = UserDefaults.standard.bool(forKey: nextToCloneKey)) -> Worktree {
+            forPR(pr.number, repo: pr.repository.nameWithOwner, repoFolder: repoFolder, nextToClone: nextToClone)
+        }
+
+        static func forPR(_ number: Int, repo: String, repoFolder: String, nextToClone: Bool) -> Worktree {
             let path: URL
             if nextToClone {
                 let clone = URL(fileURLWithPath: repoFolder, isDirectory: true).standardized
                 path = clone.deletingLastPathComponent()
-                    .appendingPathComponent("\(clone.lastPathComponent)-worktrees/pr-\(pr.number)")
+                    .appendingPathComponent("\(clone.lastPathComponent)-worktrees/pr-\(number)")
             } else {
-                let name = pr.repository.nameWithOwner.replacingOccurrences(of: "/", with: "-")
-                path = Store.dir.appendingPathComponent("worktrees/\(name)/pr-\(pr.number)")
+                let name = repo.replacingOccurrences(of: "/", with: "-")
+                path = Store.dir.appendingPathComponent("worktrees/\(name)/pr-\(number)")
             }
-            return Worktree(repoFolder: repoFolder, path: path.path, number: pr.number)
+            return Worktree(repoFolder: repoFolder, path: path.path, number: number)
+        }
+
+        /// One entry of `git worktree list --porcelain`.
+        struct Listed: Equatable {
+            let path: String
+            let detached: Bool
+        }
+
+        /// Parses `git worktree list --porcelain`: blocks of `worktree <path>`, `HEAD <sha>`, then
+        /// `detached` or `branch <ref>`, separated by blank lines. Pure, for tests.
+        static func parseList(_ porcelain: String) -> [Listed] {
+            porcelain.components(separatedBy: "\n\n").compactMap { block in
+                var path: String?, detached = false
+                for line in block.split(separator: "\n").map(String.init) {
+                    if line.hasPrefix("worktree ") { path = String(line.dropFirst("worktree ".count)) }
+                    else if line == "detached" { detached = true }
+                }
+                return path.map { Listed(path: $0, detached: detached) }
+            }
+        }
+
+        /// The worktrees ReviewBar made for `repo`: named `pr-<N>`, exactly where `forPR` puts
+        /// PR N under either location setting, and detached. Your own worktrees (a branch checked
+        /// out, or any other folder) never match. Pure, for tests.
+        static func ours(_ listed: [Listed], repo: String, repoFolder: String) -> [Worktree] {
+            func real(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+            return listed.compactMap { w in
+                let name = (w.path as NSString).lastPathComponent
+                guard w.detached, name.hasPrefix("pr-"), let n = Int(name.dropFirst(3)), n > 0 else { return nil }
+                let candidates = [true, false].map { forPR(n, repo: repo, repoFolder: repoFolder, nextToClone: $0) }
+                return candidates.first { real($0.path) == real(w.path) }
+            }
+        }
+
+        /// Shell lines that remove this worktree and its ref only if nothing would be lost: the
+        /// ref exists, `git status` is empty (ignored files such as a copied `vendor/` don't count),
+        /// and HEAD is the PR's last head on GitHub or already in the ref, so no unpushed commit
+        /// goes. `git worktree remove` runs without `--force`, so git refuses a dirty worktree too.
+        /// Exits non-zero when it keeps the worktree. Pure, for tests.
+        func removeScript(finalHead: String?) -> String {
+            let repo = q(repoFolder), wt = q(path)
+            return """
+            cd \(wt) || exit 1
+            git -C \(repo) rev-parse --verify --quiet \(ref) >/dev/null || exit 1
+            [[ -z "$(git status --porcelain)" ]] || exit 1
+            [[ "$(git rev-parse HEAD)" == \(q(finalHead ?? "")) ]] || git merge-base --is-ancestor HEAD \(ref) || exit 1
+            cd /
+            git -C \(repo) worktree remove \(wt) && git -C \(repo) update-ref -d \(ref)
+            """
         }
     }
 

@@ -1517,3 +1517,57 @@ enum Backend {
         }
     }
 }
+
+// MARK: Removing worktrees of closed PRs
+
+extension Backend {
+    /// Removes the worktrees ReviewBar made (`Worktree.ours`) for PRs that are merged or closed,
+    /// in every repo with a local clone, when `Worktree.removeScript` finds nothing to lose. Best effort:
+    /// anything that fails is left for the next run.
+    static func removeClosedWorktrees(repos: [String]) async {
+        for repo in repos {
+            guard let folder = RepoList.folder(for: repo),
+                  let list = try? await sh("git -C \(q(folder)) worktree list --porcelain") else { continue }
+            let ours = TerminalApp.Worktree.ours(TerminalApp.Worktree.parseList(list), repo: repo, repoFolder: folder)
+            guard !ours.isEmpty, let states = await prStates(repo: repo, numbers: ours.map(\.number))
+            else { continue }
+            for worktree in ours {
+                guard let pr = states[worktree.number], pr.state != "OPEN" else { continue }
+                _ = try? await sh(worktree.removeScript(finalHead: pr.headRefOid))
+            }
+        }
+    }
+
+    struct PRState: Decodable, Equatable {
+        let state: String
+        let headRefOid: String?
+    }
+
+    /// State and last head commit of these PRs in one read-only GraphQL query; nil if it fails.
+    private static func prStates(repo: String, numbers: [Int]) async -> [Int: PRState]? {
+        let parts = repo.split(separator: "/").map(String.init)
+        let enc = JSONEncoder()
+        guard parts.count == 2, let owner = try? enc.encode(parts[0]), let name = try? enc.encode(parts[1])
+        else { return nil }
+        let prs = numbers.map { "p\($0): pullRequest(number: \($0)) { state headRefOid }" }.joined(separator: " ")
+        let query = "query { repository(owner: \(String(decoding: owner, as: UTF8.self)), "
+            + "name: \(String(decoding: name, as: UTF8.self))) { \(prs) } }"
+        guard let out = try? await sh("gh api graphql -f query=\(q(query))") else { return nil }
+        return parsePRStates(Data(out.utf8))
+    }
+
+    /// The `prStates` response (aliases p<number>) → state per PR number. PRs GitHub returns as
+    /// null (deleted, or an error) are left out; nil when it doesn't decode. Pure, for tests.
+    static func parsePRStates(_ json: Data) -> [Int: PRState]? {
+        struct Response: Decodable {
+            struct Repo: Decodable { let repository: [String: PRState?]? }
+            let data: Repo?
+        }
+        guard let repo = (try? JSONDecoder().decode(Response.self, from: json))?.data?.repository else { return nil }
+        var states: [Int: PRState] = [:]
+        for (alias, state) in repo {
+            if let state, alias.hasPrefix("p"), let n = Int(alias.dropFirst()) { states[n] = state }
+        }
+        return states
+    }
+}

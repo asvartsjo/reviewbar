@@ -38,12 +38,28 @@ private final class RunningProcess: @unchecked Sendable {
         lock.unlock()
         guard let p, p.isRunning else { return }
         // The interactive zsh ignores SIGTERM, so stop its children (gh, claude) first.
-        let kill = Process()
-        kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        kill.arguments = ["-TERM", "-P", String(p.processIdentifier)]
-        try? kill.run()
-        kill.waitUntilExit()
+        Self.pkill("TERM", parent: p.processIdentifier)
         p.terminate()
+        // While zsh is still reading its startup files it has no children yet and ignores
+        // SIGTERM itself, so it would go on to run the command. Kill it if it's still there.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { self.killIfStillRunning() }
+    }
+
+    private func killIfStillRunning() {
+        lock.lock()
+        let p = process
+        lock.unlock()
+        guard let p, p.isRunning else { return }
+        Self.pkill("KILL", parent: p.processIdentifier)
+        kill(p.processIdentifier, SIGKILL)
+    }
+
+    private static func pkill(_ signal: String, parent: pid_t) {
+        let k = Process()
+        k.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        k.arguments = ["-\(signal)", "-P", String(parent)]
+        try? k.run()
+        k.waitUntilExit()
     }
 }
 

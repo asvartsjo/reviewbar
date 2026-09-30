@@ -461,9 +461,10 @@ enum Backend {
             let author = n.author?.login ?? "ghost"
             func isOther(_ u: GitHubUser?) -> Bool { u.map { $0.login != me && !$0.isBot } ?? false }
 
-            func submitted(_ r: ReviewingData.Review?) -> ReviewingPR.MyReview? {
+            func submitted(_ r: ReviewingData.Review?, after prev: ReviewingPR.MyReview?) -> ReviewingPR.MyReview? {
                 guard let r, let at = r.submittedAt, r.state != "PENDING", r.state != "DISMISSED" else { return nil }
-                return ReviewingPR.MyReview(state: r.state, commit: r.commit?.oid, at: at)
+                let state = r.state == "COMMENTED" ? prev?.state ?? r.state : r.state
+                return ReviewingPR.MyReview(state: state, commit: r.commit?.oid, at: at)
             }
 
             var latestAt = ""
@@ -471,7 +472,7 @@ enum Backend {
             var verdicts: [String: String] = [:]
             for r in n.reviews.items {
                 if r.author?.login == me {
-                    mine = submitted(r) ?? mine
+                    mine = submitted(r, after: mine) ?? mine
                     continue
                 }
                 guard isOther(r.author), let who = r.author?.login, who != author else { continue }
@@ -483,7 +484,7 @@ enum Backend {
                 }
             }
 
-            mine = submitted(n.viewerLatestReview) ?? mine
+            mine = submitted(n.viewerLatestReview, after: mine) ?? mine
 
             // `waiting` is the Replies rule (`parseReplies`), with bots left out.
             var waiting = 0, opened = 0, resolved = 0, outdated = 0

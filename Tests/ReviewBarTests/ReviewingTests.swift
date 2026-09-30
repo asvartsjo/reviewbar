@@ -255,6 +255,16 @@ struct ReviewingTests {
         #expect(r.myLastReview?.commit == head)
     }
 
+    @Test func aReplyAfterApprovingKeepsTheApproval() throws {
+        let approved = review("me", "APPROVED", at: "2026-09-10T10:00:00Z")
+        let reply = review("me", "COMMENTED", at: "2026-09-11T10:00:00Z")
+        for r in [try one(node(1, reviews: [approved, reply])),
+                  try one(node(1, reviews: [approved, reply], viewerLatest: reply))] {
+            #expect(r.myLastReview == .init(state: "APPROVED", commit: head, at: "2026-09-11T10:00:00Z"))
+            #expect(r.turn == .done)
+        }
+    }
+
     @Test func myLatestReviewCountsWhenTheReviewsWindowMissesIt() throws {
         let busy = (0..<30).map { review("author", "COMMENTED", at: "2026-09-12T10:00:\(10 + $0)Z") }
         let r = try one(node(1, reviews: busy,

@@ -58,7 +58,8 @@ struct ReviewingPR: Identifiable, Hashable {
     let pr: PR
     /// Your review is requested right now. With an earlier review of yours, that's a re-request.
     var isRequested = false
-    /// Your latest review, skipping your pending draft and dismissed reviews.
+    /// Your latest review, skipping your pending draft and dismissed reviews. A later Comment
+    /// (a thread reply is one) keeps your earlier verdict, as it does on GitHub.
     let myLastReview: MyReview?
     /// Unresolved threads you took part in whose last comment is someone else's (not a bot).
     let waiting: Int

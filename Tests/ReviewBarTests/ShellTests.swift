@@ -51,9 +51,16 @@ struct ShellTests {
         await expectCancelStops(after: .seconds(4))
     }
 
-    private func expectCancelStops(after delay: Duration) async {
+    /// Nothing has read the large input when the shell is killed, as with a slow `.zshrc`.
+    @Test func cancellingBeforeTheInputIsReadDoesntCrash() async {
+        await expectCancelStops(after: .milliseconds(300), command: "sleep 30; cat > /dev/null",
+                                input: String(repeating: "a", count: 1_000_000))
+    }
+
+    private func expectCancelStops(after delay: Duration, command: String = "print started; sleep 30",
+                                   input: String? = nil) async {
         let start = ContinuousClock.now
-        let task = Task { try await sh("print started; sleep 30") }
+        let task = Task { try await sh(command, input: input) }
         try? await Task.sleep(for: delay)
         task.cancel()
         let result = await task.result

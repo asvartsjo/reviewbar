@@ -4,6 +4,8 @@ import AppKit
 /// "Since your review" on a PR you reviewed: commits and activity since, your threads, other reviewers.
 struct ReviewingDetailBox: View {
     @EnvironmentObject var vm: ReviewViewModel
+    @AppStorage(TerminalApp.key) private var terminalRaw = ""
+    @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
     let reviewing: ReviewingPR
 
     /// Commits listed before "+ N more".
@@ -24,6 +26,7 @@ struct ReviewingDetailBox: View {
                 commits(d.commits)
                 activity(d)
                 threads(d)
+                if !d.myThreads.isEmpty { verifyButton }
                 reviewers(d.reviewers(reviewing.verdicts))
             } else if load.loading {
                 Text("Loading activity, threads and commits…").font(.caption).foregroundStyle(.secondary)
@@ -108,6 +111,17 @@ struct ReviewingDetailBox: View {
                 .buttonStyle(.plain)
                 .help(t.fullText.isEmpty ? "Open this thread on GitHub" : t.fullText + "\n\nClick to open on GitHub")
             }
+        }
+    }
+
+    /// Sends your Verify command (Settings › Terminal); the main button once there's something to verify.
+    @ViewBuilder private var verifyButton: some View {
+        if Agent.current == .claude, ClaudeSettings.command(verifyCommand, url: reviewing.pr.url) != nil {
+            let terminal = TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed)
+            let button = Button(terminal.label("Verify fixes")) { vm.verifyInTerminal(reviewing.pr) }
+                .controlSize(.small)
+                .help("Checks each of your threads against the commits since your review")
+            if reviewing.verifyIsDue { button.buttonStyle(.borderedProminent) } else { button }
         }
     }
 

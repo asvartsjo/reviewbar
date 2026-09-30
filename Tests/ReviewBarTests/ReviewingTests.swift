@@ -75,6 +75,14 @@ struct ReviewingTests {
         #expect(r.turn == .authors)
     }
 
+    @Test func verifyIsDueAfterNewCommitsOrAReply() throws {
+        let mine = thread(opener: "me", recent: [comment("me", "2026-09-10T10:00:00Z")])
+        let replied = thread(opener: "me", recent: [comment("author", "2026-09-11T10:00:00Z")])
+        #expect(try !one(node(1, reviews: [review("me", "COMMENTED")], threads: [mine])).verifyIsDue)
+        #expect(try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")], threads: [mine])).verifyIsDue)
+        #expect(try one(node(1, reviews: [review("me", "COMMENTED")], threads: [replied])).verifyIsDue)
+    }
+
     @Test func approvedWithNothingNewIsDone() throws {
         #expect(try one(node(1, reviews: [review("me", "APPROVED")])).turn == .done)
     }

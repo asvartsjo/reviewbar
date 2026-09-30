@@ -99,6 +99,9 @@ struct ReviewingPR: Identifiable, Hashable {
         return mine.commit != head
     }
 
+    /// New commits or a reply in your threads since your review: something to verify.
+    var verifyIsDue: Bool { hasNewCommits || waiting > 0 }
+
     var turn: Turn {
         if isRequested { return .yours(myLastReview == nil ? .requested : .reRequested) }
         if hasNewCommits { return .yours(.newCommits) }

@@ -396,10 +396,7 @@ struct DetailView: View {
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     private var terminal: TerminalApp { TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed) }
 
-    /// "Follow up in Ghostty", or "Follow up (copy command)" when no terminal can be driven.
-    private func terminalLabel(_ verb: String) -> String {
-        terminal == .copy ? "\(verb) (copy command)" : "\(verb) in \(terminal.name)"
-    }
+    private func terminalLabel(_ verb: String) -> String { terminal.label(verb) }
     let pr: PR
     let back: () -> Void
 
@@ -640,6 +637,7 @@ struct SettingsView: View {
     @AppStorage(AsWindow.key) private var asWindow = false
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
+    @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
     @AppStorage(TerminalApp.Worktree.nextToCloneKey) private var worktreesNextToClone = false
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
@@ -868,6 +866,19 @@ struct SettingsView: View {
                  ? "Claude Code only. Codex reviews use the built-in prompt."
                  : "The first message of a new review in the terminal, with {url} as the PR's link. "
                    + "Leave it empty for the built-in review prompt.")
+                .font(.caption2).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Verify command")
+                TextField("Verify command", text: $verifyCommand, prompt: Text("No Verify fixes button"),
+                          axis: .vertical)
+                    .lineLimit(1...4)
+                    .labelsHidden()
+                    .disabled(agentRaw == Agent.codex.rawValue)
+            }
+            Text(agentRaw == Agent.codex.rawValue
+                 ? "Claude Code only."
+                 : "Sent by Verify fixes (PRs where you have review threads), with {url} as the PR's link. "
+                   + "Leave it empty to hide the button.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
             Text(worktreesNextToClone

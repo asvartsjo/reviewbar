@@ -1163,6 +1163,8 @@ enum Backend {
         case followUp(notes: String?, summary: String?)
         /// Work through feedback on my own PR, with the quick summary if any.
         case author(summary: String?)
+        /// Check someone else's PR against my review threads: the Verify command, sent as is.
+        case verify(command: String)
     }
 
     /// Hands a quick-model summary to the review model as a map, never as the source of truth.
@@ -1433,8 +1435,8 @@ enum Backend {
 
     /// Opens a new Terminal window with an interactive Claude Code session seeded for `mode`.
     /// Returns a command to copy instead when the chosen terminal is "Copy command".
-    /// A new Claude review sends only the Review command from Settings, since anything after
-    /// a slash command becomes its arguments.
+    /// A new Claude review sends only the Review command from Settings, and Verify only the Verify
+    /// command, since anything after a slash command becomes its arguments.
     static func openInTerminal(_ pr: PR, mode: TerminalMode) async throws -> String? {
         var prompt: String
         var isCommand = false
@@ -1450,6 +1452,9 @@ enum Backend {
             prompt = try await buildFollowUpPrompt(for: pr, review: notes, summary: summary)
         case .author(let summary):
             prompt = try await buildAuthorPrompt(for: pr, summary: summary)
+        case .verify(let command):
+            prompt = command
+            isCommand = true
         }
         let worktree = RepoList.folder(for: pr.repository.nameWithOwner)
             .map { TerminalApp.Worktree.forPR(pr, repoFolder: $0) }

@@ -502,6 +502,16 @@ final class ReviewViewModel: ObservableObject {
         } else {
             mode = .review
         }
+        launchTerminal(pr, mode: mode)
+    }
+
+    /// Your Verify command (Settings › Terminal) in the PR's worktree.
+    func verifyInTerminal(_ pr: PR) {
+        guard let command = ClaudeSettings.verifyCommand(for: pr.url) else { return }
+        launchTerminal(pr, mode: .verify(command: command))
+    }
+
+    private func launchTerminal(_ pr: PR, mode: Backend.TerminalMode) {
         terminalNotice = nil
         Task {
             do {

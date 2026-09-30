@@ -7,7 +7,7 @@ import Testing
 final class ClaudeSettingsTests {
     private let keys = [ClaudeSettings.reviewModelKey, ClaudeSettings.reviewEffortKey,
                         ClaudeSettings.quickModelKey, ClaudeSettings.quickEffortKey,
-                        ClaudeSettings.reviewCommandKey]
+                        ClaudeSettings.reviewCommandKey, ClaudeSettings.verifyCommandKey]
     private var saved: [String: Any] = [:]
 
     init() {
@@ -66,5 +66,14 @@ final class ClaudeSettingsTests {
         #expect(ClaudeSettings.command(" \n ", url: url) == nil)
         UserDefaults.standard.set("", forKey: ClaudeSettings.reviewCommandKey)
         #expect(ClaudeSettings.reviewCommand(for: url) == nil)
+    }
+
+    @Test func verifyCommand() throws {
+        let url = "https://github.com/o/r/pull/7"
+        let command = try #require(ClaudeSettings.verifyCommand(for: url))
+        #expect(command.hasPrefix("Verify fixes on \(url). My earlier review comments on GitHub are the baseline."))
+        #expect(!command.contains("{url}"))
+        UserDefaults.standard.set("  ", forKey: ClaudeSettings.verifyCommandKey)
+        #expect(ClaudeSettings.verifyCommand(for: url) == nil)
     }
 }

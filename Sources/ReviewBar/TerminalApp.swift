@@ -29,6 +29,9 @@ enum TerminalApp: String, CaseIterable, Identifiable {
     /// For button labels: "Follow up in Ghostty", or "Copy follow-up command".
     var buttonTarget: String { self == .copy ? "any terminal (copies a command)" : name }
 
+    /// "Follow up in Ghostty", or "Follow up (copy command)" when no terminal can be driven.
+    func label(_ verb: String) -> String { self == .copy ? "\(verb) (copy command)" : "\(verb) in \(name)" }
+
     var bundleID: String? {
         switch self {
         case .terminal: return "com.apple.Terminal"

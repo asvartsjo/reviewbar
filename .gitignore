@@ -5,3 +5,4 @@ build/
 *.xcuserstate
 .swiftpm/
 .build/
+temp/

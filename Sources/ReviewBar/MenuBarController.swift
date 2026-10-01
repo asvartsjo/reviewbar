@@ -43,7 +43,9 @@ final class MenuBarController: NSObject {
         item.button?.action = #selector(toggle)
         updateIcon(vm.badgeCount)
         // badgeCount is derived from several published lists: re-read it after any change.
+        // Settings › Menu bar number changes it too, without touching the lists.
         watch = vm.objectWillChange
+            .merge(with: NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).map { _ in })
             .receive(on: RunLoop.main)
             .sink { [weak self, weak vm] _ in if let vm { self?.updateIcon(vm.badgeCount) } }
 

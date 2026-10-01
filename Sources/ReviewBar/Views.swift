@@ -682,7 +682,10 @@ struct SettingsView: View {
     @AppStorage(AutoReview.key) private var autoReview = false
     @AppStorage(StayOpen.key) private var stayOpen = false
     @AppStorage(AsWindow.key) private var asWindow = false
-    @AppStorage(ReviewViewModel.badgeCountsMyPRsKey) private var badgeCountsMyPRs = true
+    @AppStorage(MenuBarCount.requestsKey) private var countRequests = true
+    @AppStorage(MenuBarCount.reviewedKey) private var countReviewed = true
+    @AppStorage(MenuBarCount.myPRsKey) private var countMyPRs = true
+    @AppStorage(MenuBarCount.mentionsKey) private var countMentions = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
@@ -991,8 +994,17 @@ struct SettingsView: View {
 
             Divider()
             Text("Panel").font(.headline)
-            Toggle("Count feedback on your PRs in the menu bar", isOn: $badgeCountsMyPRs)
-            Text("The menu bar number is PRs in Your turn and mentions, plus your PRs with new feedback when this is on.")
+            Text("Menu bar number counts")
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Review requests (awaiting your review)", isOn: $countRequests)
+                Toggle("New commits or replies on PRs you reviewed", isOn: $countReviewed)
+                Toggle("Feedback on your PRs", isOn: $countMyPRs)
+                Toggle("Mentions", isOn: $countMentions)
+            }
+            .padding(.leading, 12)
+            Text(countRequests || countReviewed || countMyPRs || countMentions
+                 ? "Each PR counts once, even when it's in more than one of these. Muted PRs never count."
+                 : "Nothing is counted, so the menu bar shows only the icon.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Open as a window", isOn: $asWindow)
             Text("A normal window you can move and resize, open until you close it. Takes effect the next time you click the menu bar icon.")

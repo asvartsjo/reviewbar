@@ -373,7 +373,7 @@ enum Backend {
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
         guard !terms.isEmpty else { return [] }
-        let search = "is:pr is:open reviewed-by:@me -author:@me " + terms.joined(separator: " ")
+        let search = "is:pr is:open reviewed-by:@me -author:@me sort:updated-desc " + terms.joined(separator: " ")
 
         let out = try await sh("gh api graphql -f query=\(q(repliesQuery)) -f q=\(q(search))")
         return try parseReplies(Data(out.utf8))
@@ -458,7 +458,7 @@ enum Backend {
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
         guard !terms.isEmpty else { return [] }
-        let search = "is:pr is:open reviewed-by:@me -author:@me " + terms.joined(separator: " ")
+        let search = "is:pr is:open reviewed-by:@me -author:@me sort:updated-desc " + terms.joined(separator: " ")
 
         let out = try await sh("gh api graphql -f query=\(q(reviewingQuery)) -f q=\(q(search))")
         return try parseReviewing(Data(out.utf8))
@@ -480,11 +480,12 @@ enum Backend {
             }
 
             var latestAt = ""
-            var mine: ReviewingPR.MyReview?
+            var mine: ReviewingPR.MyReview?, dismissed = n.viewerLatestReview?.state == "DISMISSED"
             var verdicts: [String: String] = [:]
             for r in n.reviews.items {
                 if r.author?.login == me {
                     mine = submitted(r, after: mine) ?? mine
+                    if r.state == "DISMISSED" { dismissed = true }
                     continue
                 }
                 guard isOther(r.author), let who = r.author?.login, who != author else { continue }
@@ -518,8 +519,8 @@ enum Backend {
                         updatedAt: n.updatedAt, repository: n.repository,
                         author: PR.Author(login: author), headRefOid: n.headRefOid)
             pr.createdAt = n.createdAt
-            return ReviewingPR(pr: pr, myLastReview: mine, waiting: waiting,
-                               myThreads: opened, resolved: resolved, outdated: outdated,
+            return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: mine == nil && dismissed,
+                               waiting: waiting, myThreads: opened, resolved: resolved, outdated: outdated,
                                verdicts: verdicts.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) },
                                checks: n.commits.items.first?.commit.statusCheckRollup?.state,
                                latestAt: latestAt.isEmpty ? n.updatedAt : latestAt,
@@ -615,7 +616,7 @@ enum Backend {
           ... on IssueComment { author { login __typename } createdAt url }
           ... on HeadRefForcePushedEvent { actor { login __typename } createdAt }
           ... on ReviewRequestedEvent { actor { login __typename } createdAt
-            requestedReviewer { ... on User { login } ... on Team { name } } }
+            requestedReviewer { ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { name } } }
           ... on ReviewDismissedEvent { actor { login __typename } createdAt review { author { login } } }
           ... on ReadyForReviewEvent { actor { login __typename } createdAt }
           ... on ConvertToDraftEvent { actor { login __typename } createdAt }
@@ -835,7 +836,7 @@ enum Backend {
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
         guard !terms.isEmpty else { return [] }
-        let search = "is:pr is:open author:@me " + terms.joined(separator: " ")
+        let search = "is:pr is:open author:@me sort:updated-desc " + terms.joined(separator: " ")
 
         let out = try await sh("gh api graphql -f query=\(q(myPRsQuery)) -f q=\(q(search))")
         return try parseMyPRs(Data(out.utf8))

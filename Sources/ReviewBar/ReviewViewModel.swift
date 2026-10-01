@@ -269,7 +269,9 @@ final class ReviewViewModel: ObservableObject {
         return (try? JSONDecoder().decode([String: PRSnapshot].self, from: data)) ?? [:]
     }
 
+    /// Not in demo mode: its made-up PRs would stay in your settings for good.
     private static func saveSnapshots(_ s: [String: PRSnapshot], _ key: String) {
+        guard !DemoData.isOn else { return }
         if let data = try? JSONEncoder().encode(s) { UserDefaults.standard.set(data, forKey: key) }
     }
 
@@ -294,7 +296,7 @@ final class ReviewViewModel: ObservableObject {
 
     func muteForGood(_ r: ReviewingPR) {
         mutedForever.insert(r.pr.url)
-        UserDefaults.standard.set(Array(mutedForever), forKey: Self.mutedForeverKey)
+        saveMutedForever()
     }
 
     private static let migratedDismissalsKey = "reviewingMigratedReplyDismissals"
@@ -310,11 +312,16 @@ final class ReviewViewModel: ObservableObject {
         UserDefaults.standard.set(true, forKey: Self.migratedDismissalsKey)
     }
 
+    private func saveMutedForever() {
+        guard !DemoData.isOn else { return }
+        UserDefaults.standard.set(Array(mutedForever), forKey: Self.mutedForeverKey)
+    }
+
     func unmute(_ r: ReviewingPR) {
         mutedUntil[r.pr.url] = nil
         mutedForever.remove(r.pr.url)
         Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
-        UserDefaults.standard.set(Array(mutedForever), forKey: Self.mutedForeverKey)
+        saveMutedForever()
     }
 
     struct DetailLoad {
@@ -367,6 +374,7 @@ final class ReviewViewModel: ObservableObject {
 
     private func dismiss(_ url: String, until latestAt: String) {
         dismissed[url] = latestAt
+        guard !DemoData.isOn else { return }
         UserDefaults.standard.set(dismissed, forKey: "dismissedReplies")
     }
 

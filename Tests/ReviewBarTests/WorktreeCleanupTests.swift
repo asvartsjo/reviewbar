@@ -117,6 +117,25 @@ struct WorktreeCleanupTests {
         #expect(await !remove(t.worktree, finalHead: t.head))
     }
 
+    /// `git pull origin main` to fix conflicts, then a relaunch back to the PR head: the merge
+    /// commit's reflog entry starts with `pull`.
+    @Test func keepsACommitAPullMade() async throws {
+        let git = "git -c user.name=t -c user.email=t@t"
+        let t = try await makeWorktree("""
+            a=$(\(git) commit-tree -m a -p HEAD 'HEAD^{tree}') && b=$(\(git) commit-tree -m b -p HEAD 'HEAD^{tree}')
+            git update-ref refs/heads/main-ish $b && git checkout -q --detach $a
+            \(git) pull -q --no-rebase --no-edit . main-ish && git checkout -q --detach refs/reviewbar/pr-7
+            """)
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        #expect(await !remove(t.worktree, finalHead: t.head))
+    }
+
+    @Test func keepsAWorktreeWithoutAReflog() async throws {
+        let t = try await makeWorktree(#"rm "$(git rev-parse --git-dir)/logs/HEAD""#)
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        #expect(await !remove(t.worktree, finalHead: t.head))
+    }
+
     /// Both locations can hold PR 7 (the setting changed in between); they share one ref.
     @Test func theWorktreeInTheOtherLocationGoesToo() async throws {
         let t = try await makeWorktree()
@@ -145,6 +164,16 @@ struct WorktreeCleanupTests {
         try await publish(t, head: next)
         _ = try await sh(t.worktree.script)
         #expect(try await head(t.worktree.path) == next)
+    }
+
+    @Test func aRelaunchKeepsEditedFiles() async throws {
+        let t = try await makeWorktree("print more >> .gitignore")
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        _ = try await sh("git -C \(q(t.worktree.repoFolder)) -c user.name=t -c user.email=t@t commit -q --allow-empty -m next")
+        try await publish(t, head: try await head(t.worktree.repoFolder))
+        let out = try await sh(t.worktree.script)
+        #expect(try await head(t.worktree.path) == t.head)
+        #expect(out.contains("it has local changes"))
     }
 
     @Test func aRelaunchKeepsLocalCommits() async throws {

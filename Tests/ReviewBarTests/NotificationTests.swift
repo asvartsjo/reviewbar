@@ -120,6 +120,13 @@ struct NotificationTests {
                                       .verdict(now, .init(login: "cara", state: "CHANGES_REQUESTED"))])
     }
 
+    /// A request you hadn't reviewed is listed without verdicts, so your first review would
+    /// otherwise announce every earlier one.
+    @Test func yourFirstReviewDoesntAnnounceOlderVerdicts() {
+        let requested = reviewing(reviewedAt: nil)
+        #expect(diff(requested, reviewing(head: "c2", verdicts: [("anna", "APPROVED")])).isEmpty)
+    }
+
     @Test func requestOnAReviewedPRIsARerequest() {
         #expect(AlertDiff.requests([pr(1), pr(2)], reviewed: [pr(2).url]) == [.request(pr(1)), .reRequest(pr(2))])
         #expect(Notifier.content(.reRequest(pr(2, author: "priya-s"))).title == "Review re-requested by priya-s")

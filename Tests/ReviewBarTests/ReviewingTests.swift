@@ -272,6 +272,18 @@ struct ReviewingTests {
         #expect(try one(node(4, reviews: [review("me", "APPROVED")])).status == "You approved")
     }
 
+    @Test func aDismissedOnlyReviewIsYourTurn() throws {
+        let dismissed = review("me", "DISMISSED", commit: "old1234")
+        for r in [try one(node(1, reviews: [dismissed])),
+                  try one(node(1, viewerLatest: dismissed))] {   // the reviews window missed it
+            #expect(r.turn == .yours(.dismissed))
+            #expect(r.status == "Your review was dismissed")
+        }
+        // A review after the dismissal counts again; a pending draft alone is no dismissal.
+        #expect(try one(node(2, reviews: [dismissed, review("me", "COMMENTED")])).turn == .authors)
+        #expect(try one(node(3, reviews: [review("me", "PENDING", at: nil)])).turn == .authors)
+    }
+
     // MARK: Reviews
 
     @Test func pendingAndDismissedReviewsOfMineAreSkipped() throws {

@@ -42,13 +42,13 @@ enum AlertDiff {
     }
 
     /// Changes on PRs you reviewed since the previous refresh: the head moved and your review is
-    /// older, your last thread got resolved, or someone's verdict is new. PRs not in `before`
-    /// (such as one you just reviewed) stay quiet.
+    /// older, your last thread got resolved, or someone's verdict is new. PRs you hadn't reviewed
+    /// in `before` (not listed, or only requested) stay quiet: their verdicts were never baselined.
     static func reviewing(_ now: [ReviewingPR], before: [String: ReviewingPR]?) -> [ReviewAlert] {
         guard let before else { return [] }
         var alerts: [ReviewAlert] = []
         for r in now {
-            guard let old = before[r.pr.url], r.myLastReview != nil else { continue }
+            guard let old = before[r.pr.url], old.myLastReview != nil, r.myLastReview != nil else { continue }
             if r.hasNewCommits, r.pr.headRefOid != old.pr.headRefOid { alerts.append(.pushed(r)) }
             if r.myThreads > 0, r.resolved == r.myThreads, old.resolved < old.myThreads {
                 alerts.append(.allResolved(r))

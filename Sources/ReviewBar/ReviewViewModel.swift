@@ -501,6 +501,10 @@ final class ReviewViewModel: ObservableObject {
                 if let u = URL(string: pr.url + "/files") { NSWorkspace.shared.open(u) }
             } catch {
                 draftState[pr.reviewKey] = .failed(error.localizedDescription)
+                // Open the PR's files page, where the pending review can be submitted or discarded.
+                if error is Backend.PendingReviewExists, let u = URL(string: pr.url + "/files") {
+                    NSWorkspace.shared.open(u)
+                }
             }
         }
     }

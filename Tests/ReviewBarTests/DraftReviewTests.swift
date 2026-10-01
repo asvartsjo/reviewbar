@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import ReviewBar
 
 struct DraftReviewTests {
@@ -60,5 +61,17 @@ struct DraftReviewTests {
         #expect((body["body"] as? String)?.contains("src/a.swift:40") == true)
         #expect(body["event"] == nil)   // no event: GitHub keeps it pending
         #expect(body["commit_id"] as? String == "abc")
+    }
+
+    @Test func pendingReviewIsFoundFromTheCount() {
+        let some = #"{"data":{"repository":{"pullRequest":{"reviews":{"totalCount":1}}}}}"#
+        let none = #"{"data":{"repository":{"pullRequest":{"reviews":{"totalCount":0}}}}}"#
+        #expect(Backend.parsePendingReview(Data(some.utf8)))
+        #expect(!Backend.parsePendingReview(Data(none.utf8)))
+    }
+
+    @Test func pendingReviewLookupThatFailsCountsAsNone() {
+        #expect(!Backend.parsePendingReview(Data(#"{"data":{"repository":null}}"#.utf8)))
+        #expect(!Backend.parsePendingReview(Data("gh: Not Found (HTTP 404)".utf8)))
     }
 }

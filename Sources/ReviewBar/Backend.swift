@@ -1418,12 +1418,48 @@ enum Backend {
         let path = "repos/\(pr.repository.nameWithOwner)/pulls/\(pr.number)/reviews"
         do {
             _ = try await sh("gh api --method POST \(q(path)) --input -", input: json)
-        } catch let e as ShellError where e.stderr.contains("pending review") || e.stderr.contains("one pending") {
-            throw ShellError(code: e.code, stderr: "You already have a pending review on this PR. "
-                + "Submit or discard it on GitHub first.")
+        } catch let e as ShellError {
+            // GitHub's reason goes to stdout, which sh() drops when gh also writes to stderr
+            // ("gh: Unprocessable Entity (HTTP 422)"), so ask GitHub instead of matching text.
+            if await hasPendingReview(pr) { throw PendingReviewExists() }
+            throw e
         }
         let inline = (body["comments"] as? [Any])?.count ?? 0
         return (inline, comments.count - inline)
+    }
+
+    /// GitHub allows one pending review per person on a PR, and a second one fails with a bare 422.
+    struct PendingReviewExists: LocalizedError {
+        var errorDescription: String? {
+            "You already have a pending review on this PR. Submit or discard it on GitHub, then try again."
+        }
+    }
+
+    /// Whether you have a pending review on the PR. GitHub shows pending reviews only to their
+    /// author, so any it returns is yours. False when the lookup fails.
+    static func hasPendingReview(_ pr: PR) async -> Bool {
+        let parts = pr.repository.nameWithOwner.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2,
+              let out = try? await sh("gh api graphql -f query=\(q(pendingReviewQuery)) -f owner=\(q(parts[0])) "
+                + "-f name=\(q(parts[1])) -F number=\(pr.number)") else { return false }
+        return parsePendingReview(Data(out.utf8))
+    }
+
+    static let pendingReviewQuery = """
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+        reviews(states: PENDING, first: 1) { totalCount } } }
+    }
+    """
+
+    /// The `pendingReviewQuery` response → whether a pending review exists. Pure, for tests.
+    static func parsePendingReview(_ json: Data) -> Bool {
+        struct Reviews: Decodable { let totalCount: Int }
+        struct PullRequest: Decodable { let reviews: Reviews }
+        struct Repository: Decodable { let pullRequest: PullRequest? }
+        struct Root: Decodable { let repository: Repository? }
+        let root = try? JSONDecoder().decode(GQL<Root>.self, from: json).data
+        return (root?.repository?.pullRequest?.reviews.totalCount ?? 0) > 0
     }
 
     /// Creates or updates the PR's worktree for a headless review. Nil (review the diff only)

@@ -469,11 +469,12 @@ enum Backend {
             }
 
             var latestAt = ""
-            var mine: ReviewingPR.MyReview?
+            var mine: ReviewingPR.MyReview?, dismissed = n.viewerLatestReview?.state == "DISMISSED"
             var verdicts: [String: String] = [:]
             for r in n.reviews.items {
                 if r.author?.login == me {
                     mine = submitted(r, after: mine) ?? mine
+                    if r.state == "DISMISSED" { dismissed = true }
                     continue
                 }
                 guard isOther(r.author), let who = r.author?.login, who != author else { continue }
@@ -507,8 +508,8 @@ enum Backend {
                         updatedAt: n.updatedAt, repository: n.repository,
                         author: PR.Author(login: author), headRefOid: n.headRefOid)
             pr.createdAt = n.createdAt
-            return ReviewingPR(pr: pr, myLastReview: mine, waiting: waiting,
-                               myThreads: opened, resolved: resolved, outdated: outdated,
+            return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: mine == nil && dismissed,
+                               waiting: waiting, myThreads: opened, resolved: resolved, outdated: outdated,
                                verdicts: verdicts.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) },
                                checks: n.commits.items.first?.commit.statusCheckRollup?.state,
                                latestAt: latestAt.isEmpty ? n.updatedAt : latestAt,

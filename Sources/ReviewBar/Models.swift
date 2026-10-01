@@ -61,6 +61,8 @@ struct ReviewingPR: Identifiable, Hashable {
     /// Your latest review, skipping your pending draft and dismissed reviews. A later Comment
     /// (a thread reply is one) keeps your earlier verdict, as it does on GitHub.
     let myLastReview: MyReview?
+    /// No review of yours counts, and one was dismissed: GitHub still lists you as a reviewer.
+    var myReviewDismissed = false
     /// Unresolved threads you took part in whose last comment is someone else's (not a bot).
     let waiting: Int
     /// Threads you opened, and how many of those are resolved or point at changed code.
@@ -108,7 +110,7 @@ struct ReviewingPR: Identifiable, Hashable {
         case done
     }
 
-    enum Reason: Equatable { case requested, reRequested, newCommits, reply }
+    enum Reason: Equatable { case requested, reRequested, dismissed, newCommits, reply }
 
     /// Your last review was of an older commit. A review whose commit is gone counts too.
     /// Replying in a thread also creates a review on GitHub, so a reply after new commits
@@ -129,6 +131,7 @@ struct ReviewingPR: Identifiable, Hashable {
 
     var turn: Turn {
         if isRequested { return .yours(myLastReview == nil ? .requested : .reRequested) }
+        if myReviewDismissed { return .yours(.dismissed) }
         if hasNewCommits { return .yours(.newCommits) }
         if waiting > 0 { return .yours(.reply) }
         return myLastReview?.state == "APPROVED" ? .done : .authors
@@ -178,6 +181,7 @@ struct ReviewingPR: Identifiable, Hashable {
         let reason: String? = switch turn {
         case .yours(.requested): "Review requested"
         case .yours(.reRequested): "Review re-requested"
+        case .yours(.dismissed): "Your review was dismissed"
         case .yours(.newCommits): "New commits since your review"
         case .yours(.reply): nil   // the reply count below says it
         case .authors, .done:

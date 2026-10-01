@@ -29,6 +29,12 @@ enum TerminalApp: String, CaseIterable, Identifiable {
     /// For button labels: "Follow up in Ghostty", or "Copy follow-up command".
     var buttonTarget: String { self == .copy ? "any terminal (copies a command)" : name }
 
+    /// "Follow up in Ghostty", or "Follow up (copy command)" when no terminal can be driven.
+    func label(_ verb: String) -> String { self == .copy ? "\(verb) (copy command)" : "\(verb) in \(name)" }
+
+    /// The icon on every button that opens (or copies a command for) your terminal.
+    static let symbol = "apple.terminal"
+
     var bundleID: String? {
         switch self {
         case .terminal: return "com.apple.Terminal"
@@ -92,7 +98,9 @@ enum TerminalApp: String, CaseIterable, Identifiable {
 
         var ref: String { "refs/reviewbar/pr-\(number)" }
 
-        /// Shell lines: fetch the PR head, create or update the worktree, cd into it. Any failure
+        /// Shell lines: fetch the PR head, create or update the worktree, cd into it. A worktree
+        /// with edits to tracked files, or commits the PR doesn't have yet, stays where it is
+        /// (untracked files move along, unless the new head would overwrite one). Any failure
         /// falls back to the clone itself, with a message. Pure, for tests.
         var script: String {
             let repo = q(repoFolder), wt = q(path)
@@ -101,8 +109,13 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             if git -C \(repo) fetch --quiet origin +pull/\(number)/head:\(ref); then
               git -C \(repo) worktree prune
               if [[ -d \(wt) ]]; then
-                git -C \(wt) checkout --quiet --detach \(ref) \
-                  || print "Kept the worktree as it is: it has local changes."
+                if (cd \(wt) && \(Self.exitOnLocalCommits(notIn: [ref]))); then
+                  [[ -z "$(git -C \(wt) status --porcelain --untracked-files=no)" ]] \
+                    && git -C \(wt) checkout --quiet --detach \(ref) \
+                    || print "Kept the worktree as it is: it has local changes."
+                else
+                  print "Kept the worktree as it is: it has commits the PR doesn't have yet."
+                fi
               else
                 mkdir -p "$(dirname \(wt))"
                 git -C \(repo) worktree add --quiet --detach \(wt) \(ref)
@@ -113,12 +126,91 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             """
         }
 
-        /// Worktrees live under Application Support, not inside your clone.
-        static func forPR(_ pr: PR, repoFolder: String) -> Worktree {
-            let base = Store.dir.appendingPathComponent("worktrees", isDirectory: true)
-            let name = pr.repository.nameWithOwner.replacingOccurrences(of: "/", with: "-")
-            return Worktree(repoFolder: repoFolder,
-                            path: base.appendingPathComponent("\(name)/pr-\(pr.number)").path, number: pr.number)
+        static let nextToCloneKey = "worktreesNextToClone"
+
+        /// Worktrees live under Application Support, never inside your clone. With `nextToClone`
+        /// (Settings › Terminal) they go beside it instead: ~/code/gauss → ~/code/gauss-worktrees/pr-7.
+        static func forPR(_ pr: PR, repoFolder: String,
+                          nextToClone: Bool = UserDefaults.standard.bool(forKey: nextToCloneKey)) -> Worktree {
+            forPR(pr.number, repo: pr.repository.nameWithOwner, repoFolder: repoFolder, nextToClone: nextToClone)
+        }
+
+        static func forPR(_ number: Int, repo: String, repoFolder: String, nextToClone: Bool) -> Worktree {
+            let path: URL
+            if nextToClone {
+                let clone = URL(fileURLWithPath: repoFolder, isDirectory: true).standardized
+                path = clone.deletingLastPathComponent()
+                    .appendingPathComponent("\(clone.lastPathComponent)-worktrees/pr-\(number)")
+            } else {
+                let name = repo.replacingOccurrences(of: "/", with: "-")
+                path = Store.dir.appendingPathComponent("worktrees/\(name)/pr-\(number)")
+            }
+            return Worktree(repoFolder: repoFolder, path: path.path, number: number)
+        }
+
+        /// One entry of `git worktree list --porcelain`.
+        struct Listed: Equatable {
+            let path: String
+            let detached: Bool
+        }
+
+        /// Parses `git worktree list --porcelain`: blocks of `worktree <path>`, `HEAD <sha>`, then
+        /// `detached` or `branch <ref>`, separated by blank lines. Pure, for tests.
+        static func parseList(_ porcelain: String) -> [Listed] {
+            porcelain.components(separatedBy: "\n\n").compactMap { block in
+                var path: String?, detached = false
+                for line in block.split(separator: "\n").map(String.init) {
+                    if line.hasPrefix("worktree ") { path = String(line.dropFirst("worktree ".count)) }
+                    else if line == "detached" { detached = true }
+                }
+                return path.map { Listed(path: $0, detached: detached) }
+            }
+        }
+
+        /// The worktrees ReviewBar made for `repo`: named `pr-<N>`, exactly where `forPR` puts
+        /// PR N under either location setting, and detached. Your own worktrees (a branch checked
+        /// out, or any other folder) never match. Pure, for tests.
+        static func ours(_ listed: [Listed], repo: String, repoFolder: String) -> [Worktree] {
+            func real(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+            return listed.compactMap { w in
+                let name = (w.path as NSString).lastPathComponent
+                guard w.detached, name.hasPrefix("pr-"), let n = Int(name.dropFirst(3)), n > 0 else { return nil }
+                let candidates = [true, false].map { forPR(n, repo: repo, repoFolder: repoFolder, nextToClone: $0) }
+                return candidates.first { real($0.path) == real(w.path) }
+            }
+        }
+
+        /// Shell lines that remove this worktree and its ref only if nothing would be lost:
+        /// `git status` is empty (ignored files such as a copied `vendor/` don't count; untracked
+        /// ones do, whatever `status.showUntrackedFiles` says), and HEAD and every commit made in
+        /// the worktree are the PR's last head on GitHub or already in the ref, so no unpushed
+        /// commit goes. `git worktree remove` runs without `--force`. The ref may already be gone
+        /// (the PR's worktree in the other location took it); then only the last head counts.
+        /// Exits non-zero when it keeps the worktree. Pure, for tests.
+        func removeScript(finalHead: String?) -> String {
+            let repo = q(repoFolder), wt = q(path), final = q(finalHead ?? "")
+            return """
+            cd \(wt) || exit 1
+            [[ -z "$(git status --porcelain --untracked-files=all)" ]] || exit 1
+            [[ "$(git rev-parse HEAD)" == \(final) ]] || git merge-base --is-ancestor HEAD \(ref) || exit 1
+            \(Self.exitOnLocalCommits(notIn: [ref, final]))
+            cd /
+            git -C \(repo) worktree remove \(wt) && { git -C \(repo) update-ref -d \(ref) 2>/dev/null; true; }
+            """
+        }
+
+        /// Shell lines that exit 1 when a commit made in the worktree (read from its HEAD reflog)
+        /// is in none of `refs`: a local commit, even one HEAD has since moved away from.
+        /// Every entry counts (`pull` writes its own) except checkouts and resets, which only move
+        /// to commits that already exist, and the empty one `worktree add` writes. No reflog, or
+        /// one git can't read, exits 1 too.
+        private static func exitOnLocalCommits(notIn refs: [String]) -> String {
+            let inRefs = refs.map { "git merge-base --is-ancestor $c \($0) 2>/dev/null" }.joined(separator: " || ")
+            return """
+            git reflog exists HEAD && log=$(git log -g --format='%H %gs' HEAD) || exit 1; \
+            for c in $(print -r -- "$log" | awk 'NF > 1 && $2 !~ /^(checkout|reset):$/ { print $1 }'); do \
+            \(inRefs) || exit 1; done
+            """
         }
     }
 

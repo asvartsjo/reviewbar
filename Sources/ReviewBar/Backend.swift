@@ -108,6 +108,7 @@ enum Backend {
     }
 
     static func fetchPRs(skipping skipped: Set<String> = []) async throws -> [PR] {
+        if DemoData.isOn { return await DemoData.requests() }
         let (owner, repos) = settingsScope(skipping: skipped)
         var scope = repos.map { "--repo \(q($0))" }.joined(separator: " ")
         if scope.isEmpty, !owner.isEmpty { scope = "--owner \(q(owner))" }
@@ -143,6 +144,7 @@ enum Backend {
 
     /// @mentions since `since`, read on GitHub or not, in the given repos (all when empty). Read-only.
     static func fetchMentions(since: String, repos: [String]) async -> [Mention] {
+        if DemoData.isOn { return DemoData.mentions() }
         let jq = #"[.[] | select(.reason == "mention" or .reason == "team_mention") | "#
             + #"{repo: .repository.full_name, title: .subject.title, url: .subject.url, "#
             + #"comment: .subject.latest_comment_url, updatedAt: .updated_at}]"#
@@ -188,8 +190,30 @@ enum Backend {
         return text.count > 140 ? String(text.prefix(139)) + "…" : text
     }
 
+    /// A review comment's first real line, bold dropped: "🟡 LOW — title" for the pr-review skill's
+    /// comments, whose Description / Consequence / Suggested fix paragraphs follow. Pure, for tests.
+    static func threadTitle(_ body: String) -> String {
+        let first = body.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && !$0.hasPrefix(">") && !$0.hasPrefix("```") } ?? ""
+        let text = first.replacingOccurrences(of: "**", with: "")
+        return text.count > 140 ? String(text.prefix(139)) + "…" : text
+    }
+
+    /// The whole comment for a tooltip: paragraphs kept, code blocks and bold dropped. Pure, for tests.
+    static func threadText(_ body: String) -> String {
+        var inCode = false, lines: [String] = []
+        for line in body.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") { inCode.toggle(); continue }
+            if !inCode { lines.append(line) }
+        }
+        return lines.joined(separator: "\n").replacingOccurrences(of: "**", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// One conditional request for the newest notification. Nil when gh or the network failed.
     static func pollNotifications(etag: String?) async -> NotificationPoll? {
+        if DemoData.isOn { return nil }
         let header = etag.map { "-H \(q("If-None-Match: \($0)")) " } ?? ""
         // gh exits non-zero on 304, so read the status line instead of the exit code.
         guard let out = try? await sh("gh api -i \(header)'notifications?per_page=1' 2>/dev/null; true")
@@ -278,22 +302,37 @@ enum Backend {
         let fields = prs.indices.compactMap { i -> String? in
             guard let data = try? enc.encode(prs[i].url), let url = String(data: data, encoding: .utf8)
             else { return nil }
-            return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid } }"
+            return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid "
+                + "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }"
         }
         let query = "query { \(fields.joined(separator: " ")) }"
-        guard let out = try? await sh("gh api graphql -f query=\(q(query))"),
-              let resp = try? JSONDecoder().decode(HeadCommits.self, from: Data(out.utf8))
-        else { return prs }
+        guard let out = try? await sh("gh api graphql -f query=\(q(query))") else { return prs }
+        return applyHeadCommits(prs, Data(out.utf8))
+    }
+
+    /// The `withHeadCommits` response (aliases p0, p1, … by index) → head commit and CI per PR.
+    /// Unchanged PRs when it doesn't decode. Pure, for tests.
+    static func applyHeadCommits(_ prs: [PR], _ json: Data) -> [PR] {
+        guard let resp = try? JSONDecoder().decode(HeadCommits.self, from: json) else { return prs }
         return prs.enumerated().map { i, pr in
             var pr = pr
-            pr.headRefOid = resp.data["p\(i)"]??.headRefOid
+            let node = resp.data["p\(i)"] ?? nil
+            pr.headRefOid = node?.headRefOid
+            pr.checks = node?.commits?.nodes.first?.commit.statusCheckRollup?.state
             return pr
         }
     }
 
     private struct HeadCommits: Decodable {
         let data: [String: Node?]
-        struct Node: Decodable { let headRefOid: String? }
+        struct Node: Decodable {
+            let headRefOid: String?
+            let commits: Commits?
+        }
+        struct Commits: Decodable { let nodes: [CommitNode] }
+        struct CommitNode: Decodable { let commit: Commit }
+        struct Commit: Decodable { let statusCheckRollup: Rollup? }
+        struct Rollup: Decodable { let state: String }
     }
 
     // MARK: Replies on your review threads
@@ -318,11 +357,12 @@ enum Backend {
     /// Open PRs you have reviewed with an unresolved thread you took part in
     /// whose last comment is from someone else. One read-only GraphQL query.
     static func fetchReplies(skipping skipped: Set<String> = []) async throws -> [ReplyPR] {
+        if DemoData.isOn { return DemoData.replies() }
         let (owner, repos) = settingsScope(skipping: skipped)
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
         guard !terms.isEmpty else { return [] }
-        let search = "is:pr is:open reviewed-by:@me -author:@me " + terms.joined(separator: " ")
+        let search = "is:pr is:open reviewed-by:@me -author:@me sort:updated-desc " + terms.joined(separator: " ")
 
         let out = try await sh("gh api graphql -f query=\(q(repliesQuery)) -f q=\(q(search))")
         return try parseReplies(Data(out.utf8))
@@ -376,6 +416,384 @@ enum Backend {
         }
     }
 
+    // MARK: PRs you review
+
+    private static let reviewingQuery = """
+    query($q: String!) {
+      viewer { login }
+      search(query: $q, type: ISSUE, first: 30) {
+        nodes { ... on PullRequest {
+          number title url isDraft updatedAt createdAt headRefOid
+          repository { nameWithOwner } author { login }
+          commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+          reviews(last: 30) { nodes { author { login __typename } state submittedAt commit { oid } } }
+          viewerLatestReview { state submittedAt commit { oid } }
+          comments(last: 5) { nodes { author { login __typename } createdAt } }
+          reviewThreads(last: 50) { nodes {
+            isResolved isOutdated
+            opener: comments(first: 1) { nodes { author { login __typename } createdAt } }
+            recent: comments(last: 10) { nodes { author { login __typename } createdAt } }
+          } }
+        } }
+      }
+    }
+    """
+
+    /// Open PRs of others that you have reviewed. Requested PRs come from `fetchPRs` instead,
+    /// through `merge`. One read-only GraphQL query.
+    static func fetchReviewing(skipping skipped: Set<String> = []) async throws -> [ReviewingPR] {
+        if DemoData.isOn { return await DemoData.reviewing() }
+        let (owner, repos) = settingsScope(skipping: skipped)
+        var terms = repos.map { "repo:\($0)" }
+        if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
+        guard !terms.isEmpty else { return [] }
+        let search = "is:pr is:open reviewed-by:@me -author:@me sort:updated-desc " + terms.joined(separator: " ")
+
+        let out = try await sh("gh api graphql -f query=\(q(reviewingQuery)) -f q=\(q(search))")
+        return try parseReviewing(Data(out.utf8))
+    }
+
+    /// The `reviewingQuery` response → PRs you reviewed, newest activity first. Pure, for tests.
+    static func parseReviewing(_ json: Data) throws -> [ReviewingPR] {
+        let data = try JSONDecoder().decode(GQL<ReviewingData>.self, from: json).data
+        let me = data.viewer.login
+
+        return data.search.items.map { n -> ReviewingPR in
+            let author = n.author?.login ?? "ghost"
+            func isOther(_ u: GitHubUser?) -> Bool { u.map { $0.login != me && !$0.isBot } ?? false }
+
+            func submitted(_ r: ReviewingData.Review?, after prev: ReviewingPR.MyReview?) -> ReviewingPR.MyReview? {
+                guard let r, let at = r.submittedAt, r.state != "PENDING", r.state != "DISMISSED" else { return nil }
+                let state = r.state == "COMMENTED" ? prev?.state ?? r.state : r.state
+                return ReviewingPR.MyReview(state: state, commit: r.commit?.oid, at: at)
+            }
+
+            var latestAt = ""
+            var mine: ReviewingPR.MyReview?, dismissed = n.viewerLatestReview?.state == "DISMISSED"
+            var verdicts: [String: String] = [:]
+            for r in n.reviews.items {
+                if r.author?.login == me {
+                    mine = submitted(r, after: mine) ?? mine
+                    if r.state == "DISMISSED" { dismissed = true }
+                    continue
+                }
+                guard isOther(r.author), let who = r.author?.login, who != author else { continue }
+                latestAt = max(latestAt, r.submittedAt ?? "")
+                switch r.state {
+                case "APPROVED", "CHANGES_REQUESTED": verdicts[who] = r.state
+                case "DISMISSED": verdicts[who] = nil
+                default: break
+                }
+            }
+
+            mine = submitted(n.viewerLatestReview, after: mine) ?? mine
+            for c in n.comments?.items ?? [] where isOther(c.author) { latestAt = max(latestAt, c.createdAt ?? "") }
+
+            // `waiting` is the Replies rule (`parseReplies`), with bots left out.
+            var waiting = 0, opened = 0, resolved = 0, outdated = 0
+            for t in n.reviewThreads.items {
+                let comments = t.opener.items + t.recent.items
+                for c in comments where isOther(c.author) { latestAt = max(latestAt, c.createdAt ?? "") }
+                if t.opener.items.first?.author?.login == me {
+                    opened += 1
+                    if t.isResolved { resolved += 1 }
+                    if t.isOutdated { outdated += 1 }
+                }
+                guard !t.isResolved, comments.contains(where: { $0.author?.login == me }),
+                      let last = t.recent.items.last, isOther(last.author) else { continue }
+                waiting += 1
+            }
+
+            var pr = PR(number: n.number, title: n.title, url: n.url, isDraft: n.isDraft,
+                        updatedAt: n.updatedAt, repository: n.repository,
+                        author: PR.Author(login: author), headRefOid: n.headRefOid)
+            pr.createdAt = n.createdAt
+            return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: mine == nil && dismissed,
+                               waiting: waiting, myThreads: opened, resolved: resolved, outdated: outdated,
+                               verdicts: verdicts.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) },
+                               checks: n.commits.items.first?.commit.statusCheckRollup?.state,
+                               latestAt: latestAt.isEmpty ? n.updatedAt : latestAt,
+                               lastOtherAt: latestAt.isEmpty ? nil : latestAt)
+        }
+        .sorted { $0.latestAt > $1.latestAt }
+    }
+
+    /// Reviewed PRs plus your review requests (`fetchPRs`): a requested PR you reviewed before is marked
+    /// re-requested, one you never reviewed is added. Each PR once. Pure, for tests.
+    static func merge(_ reviewed: [ReviewingPR], requested: [PR]) -> [ReviewingPR] {
+        let requestedURLs = Set(requested.map(\.url))
+        let reviewedURLs = Set(reviewed.map(\.pr.url))
+        let marked = reviewed.map { r -> ReviewingPR in
+            var r = r
+            r.isRequested = requestedURLs.contains(r.pr.url)
+            return r
+        }
+        let added = requested.filter { !reviewedURLs.contains($0.url) }.map {
+            ReviewingPR(pr: $0, isRequested: true, myLastReview: nil, waiting: 0, myThreads: 0,
+                        resolved: 0, outdated: 0, verdicts: [], checks: $0.checks, latestAt: $0.updatedAt)
+        }
+        return marked + added
+    }
+
+    private struct ReviewingData: Decodable {
+        let viewer: Login
+        let search: Nodes<Node>
+        struct Node: Decodable {
+            let number: Int
+            let title: String
+            let url: String
+            let isDraft: Bool
+            let updatedAt: String
+            let createdAt: String?
+            let headRefOid: String?
+            let repository: PR.Repo
+            let author: Login?
+            let commits: Nodes<CommitNode>
+            let reviews: Nodes<Review>
+            /// Your latest review, which a busy PR's `reviews` window (thread replies and bots
+            /// count) can leave out. It may be pending or dismissed; then the window decides.
+            let viewerLatestReview: Review?
+            /// The PR's conversation, outside review threads.
+            let comments: Nodes<Comment>?
+            let reviewThreads: Nodes<ReviewThread>
+        }
+        struct CommitNode: Decodable {
+            let commit: Commit
+            struct Commit: Decodable { let statusCheckRollup: Rollup? }
+            struct Rollup: Decodable { let state: String }
+        }
+        struct Review: Decodable {
+            let author: GitHubUser?
+            let state: String
+            let submittedAt: String?
+            let commit: Oid?
+            struct Oid: Decodable { let oid: String }
+        }
+        struct ReviewThread: Decodable {
+            let isResolved: Bool
+            let isOutdated: Bool
+            let opener: Nodes<Comment>
+            let recent: Nodes<Comment>
+        }
+        struct Comment: Decodable {
+            let author: GitHubUser?
+            let createdAt: String?
+        }
+    }
+
+    // MARK: Detail of a PR you review
+
+    /// Activity reads reviews and the timeline separately: thread replies are stored as reviews
+    /// but never appear in the timeline. The timeline's `since` is by submit time for reviews
+    /// but by commit date for commits, so commits come from the compare call instead.
+    private static let reviewingDetailQuery = """
+    query($owner: String!, $name: String!, $number: Int!, $since: DateTime) {
+      viewer { login }
+      repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+        reviewThreads(first: 100) { nodes {
+          isResolved isOutdated path line originalLine
+          opener: comments(first: 1) { nodes { author { login __typename } body url } }
+          recent: comments(last: 1) { nodes { author { login __typename } } }
+        } }
+        reviews(last: \(activityLimit)) { nodes {
+          author { login __typename } state submittedAt url
+          comments(first: 10) { totalCount nodes { replyTo { id } } }
+        } }
+        timelineItems(since: $since, last: \(activityLimit), itemTypes: [ISSUE_COMMENT, HEAD_REF_FORCE_PUSHED_EVENT,
+            REVIEW_REQUESTED_EVENT, REVIEW_DISMISSED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT]) { nodes {
+          __typename
+          ... on IssueComment { author { login __typename } createdAt url }
+          ... on HeadRefForcePushedEvent { actor { login __typename } createdAt }
+          ... on ReviewRequestedEvent { actor { login __typename } createdAt
+            requestedReviewer { ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { name } } }
+          ... on ReviewDismissedEvent { actor { login __typename } createdAt review { author { login } } }
+          ... on ReadyForReviewEvent { actor { login __typename } createdAt }
+          ... on ConvertToDraftEvent { actor { login __typename } createdAt }
+        } }
+      } }
+    }
+    """
+    static let activityLimit = 30
+
+    /// Your threads, other people's open threads, what happened and how the branch moved since
+    /// your last review. One read-only GraphQL query (about 2 points), plus a REST compare after
+    /// new commits, made each time the PR is opened.
+    static func fetchReviewingDetail(_ r: ReviewingPR) async throws -> ReviewingDetail {
+        if DemoData.isOn { return await DemoData.detail(for: r) }
+        let repo = r.pr.repository.nameWithOwner
+        let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { throw ShellError(code: 1, stderr: "Not an owner/repo name: \(repo)") }
+        let since = r.myLastReview.map { "-f since=\(q($0.at)) " } ?? ""
+        async let out = sh("gh api graphql -f query=\(q(reviewingDetailQuery)) -f owner=\(q(parts[0])) "
+            + "-f name=\(q(parts[1])) -F number=\(r.pr.number) " + since)
+
+        var compared: CompareInfo?
+        if let base = r.myLastReview?.commit, let head = r.pr.headRefOid, base != head {
+            compared = await compare(repo, base: base, head: head)
+        }
+        var detail = try parseReviewingDetail(Data(try await out.utf8), author: r.pr.author.login,
+                                              since: r.myLastReview?.at)
+        detail.commits = .init(review: r.myLastReview, head: r.pr.headRefOid, compare: compared)
+        return detail
+    }
+
+    /// The `reviewingDetailQuery` response → your threads, other people's open ones, and activity
+    /// after `since` (none without it). Pure, for tests.
+    static func parseReviewingDetail(_ json: Data, author: String, since: String? = nil) throws -> ReviewingDetail {
+        let data = try JSONDecoder().decode(GQL<ReviewingDetailData>.self, from: json).data
+        guard let pr = data.repository?.pullRequest else {
+            throw ShellError(code: 1, stderr: "Couldn't load the PR's review threads.")
+        }
+        let me = data.viewer.login
+
+        var mine: [ReviewingDetail.MyThread] = [], openBy: [String: Int] = [:]
+        for t in pr.reviewThreads.items {
+            guard let first = t.opener.items.first, let by = first.author else { continue }
+            guard by.login == me else {
+                if !t.isResolved, !by.isBot, by.login != author { openBy[by.login, default: 0] += 1 }
+                continue
+            }
+            let state: ReviewingDetail.MyThread.State
+            if t.isResolved {
+                state = .resolved
+            } else if let last = t.recent.items.last?.author, last.login != me, !last.isBot {
+                state = .replied(by: last.login)
+            } else {
+                state = .open
+            }
+            mine.append(.init(path: t.path, line: t.line ?? t.originalLine,
+                              snippet: threadTitle(first.body ?? ""), fullText: threadText(first.body ?? ""),
+                              url: first.url, state: state, isOutdated: t.isOutdated))
+        }
+
+        func rank(_ t: ReviewingDetail.MyThread) -> (Int, Int) {
+            let state = switch t.state { case .replied: 0; case .open: 1; case .resolved: 2 }
+            return (state, t.severity?.rawValue ?? ReviewingDetail.MyThread.Severity.allCases.count)
+        }
+        let sorted = mine.enumerated()
+            .sorted {
+                let (a, b) = (rank($0.element), rank($1.element))
+                return (a.0, a.1, $0.offset) < (b.0, b.1, $1.offset)
+            }
+            .map(\.element)
+        var detail = ReviewingDetail(myThreads: sorted, openThreadsBy: openBy)
+        if let since { (detail.activity, detail.activityCapped) = activity(pr, me: me, since: since) }
+        return detail
+    }
+
+    /// Newest first, with a person's back-to-back replies, or force-pushes, merged into one line.
+    private static func activity(_ pr: ReviewingDetailData.PullRequest, me: String,
+                                 since: String) -> ([ReviewingDetail.Activity], Bool) {
+        typealias A = ReviewingDetail.Activity
+        func isOther(_ u: GitHubUser?) -> Bool { u.map { $0.login != me && !$0.isBot } ?? true }
+
+        var items: [A] = pr.reviews.items.compactMap { r in
+            guard let at = r.submittedAt, at > since, isOther(r.author) else { return nil }
+            let comments = r.comments.totalCount
+            let onlyReplies = comments > 0 && comments == r.comments.nodes.count
+                && r.comments.nodes.allSatisfy { $0.replyTo != nil }
+            let kind: A.Kind = switch r.state {
+            case "APPROVED": .approved
+            case "CHANGES_REQUESTED": .changesRequested(comments: comments)
+            case "COMMENTED" where onlyReplies: .replied(threads: comments)
+            case "COMMENTED": .reviewed(comments: comments)
+            default: .reviewed(comments: comments)   // DISMISSED; PENDING drafts aren't visible to you
+            }
+            return A(login: r.author?.login ?? "ghost", kind: kind, at: at, url: r.url)
+        }
+        items += pr.timelineItems.items.compactMap { e in
+            let who = e.author ?? e.actor
+            guard e.createdAt > since, isOther(who) else { return nil }
+            let kind: A.Kind
+            switch e.type {
+            case "IssueComment": kind = .commented
+            case "HeadRefForcePushedEvent": kind = .forcePushed(times: 1)
+            case "ReviewRequestedEvent":
+                let to = e.requestedReviewer?.login ?? e.requestedReviewer?.name ?? "a team"
+                kind = .reviewRequested(from: to == me ? nil : to)
+            case "ReviewDismissedEvent":
+                let of = e.review?.author?.login ?? "ghost"
+                kind = .dismissedReview(of: of == me ? nil : of)
+            case "ReadyForReviewEvent": kind = .readyForReview
+            case "ConvertToDraftEvent": kind = .convertedToDraft
+            default: return nil
+            }
+            return A(login: who?.login ?? "ghost", kind: kind, at: e.createdAt, url: e.url)
+        }
+
+        var merged: [A] = []
+        for a in items.sorted(by: { $0.at > $1.at }) {
+            let kind: A.Kind? = switch (merged.last?.kind, a.kind) {
+            case (.replied(let n)?, .replied(let m)): .replied(threads: n + m)
+            case (.forcePushed(let n)?, .forcePushed(let m)): .forcePushed(times: n + m)
+            default: nil
+            }
+            if let kind, let last = merged.last, last.login == a.login {
+                merged[merged.count - 1] = A(login: a.login, kind: kind, at: last.at, url: last.url)
+            } else {
+                merged.append(a)
+            }
+        }
+        // A full page whose oldest entry is still after your review may have more before it.
+        let reviews = pr.reviews.items
+        let capped = (reviews.count == activityLimit && (reviews.first?.submittedAt ?? "") > since)
+            || pr.timelineItems.items.count == activityLimit
+        return (merged, capped)
+    }
+
+    private struct ReviewingDetailData: Decodable {
+        let viewer: Login
+        let repository: Repository?
+        struct Repository: Decodable { let pullRequest: PullRequest? }
+        struct PullRequest: Decodable {
+            let reviewThreads: Nodes<ReviewThread>
+            let reviews: Nodes<Review>
+            let timelineItems: Nodes<Event>
+        }
+        struct Review: Decodable {
+            let author: GitHubUser?
+            let state: String
+            let submittedAt: String?
+            let url: String?
+            let comments: Counted<ReviewComment>
+        }
+        struct Counted<T: Decodable>: Decodable {
+            let totalCount: Int
+            let nodes: [T]
+        }
+        struct ReviewComment: Decodable { let replyTo: Ref? }
+        struct Ref: Decodable { let id: String }
+        /// One timeline item; which fields are set depends on `type`.
+        struct Event: Decodable {
+            let type: String
+            let author: GitHubUser?
+            let actor: GitHubUser?
+            let createdAt: String
+            let url: String?
+            let requestedReviewer: Reviewer?
+            let review: DismissedReview?
+            struct Reviewer: Decodable { let login: String?; let name: String? }
+            struct DismissedReview: Decodable { let author: Login? }
+            enum CodingKeys: String, CodingKey {
+                case type = "__typename", author, actor, createdAt, url, requestedReviewer, review
+            }
+        }
+        struct ReviewThread: Decodable {
+            let isResolved: Bool
+            let isOutdated: Bool
+            let path: String
+            let line: Int?
+            let originalLine: Int?
+            let opener: Nodes<Comment>
+            let recent: Nodes<Comment>
+        }
+        struct Comment: Decodable {
+            let author: GitHubUser?
+            let body: String?
+            let url: String?
+        }
+    }
+
     // MARK: Feedback on your own PRs
 
     private static let myPRsQuery = """
@@ -402,11 +820,12 @@ enum Backend {
     /// an unresolved thread whose last comment is theirs, or a review or comment
     /// newer than your last commit or comment. One read-only GraphQL query.
     static func fetchMyPRs(skipping skipped: Set<String> = []) async throws -> [FeedbackPR] {
+        if DemoData.isOn { return DemoData.myPRs() }
         let (owner, repos) = settingsScope(skipping: skipped)
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
         guard !terms.isEmpty else { return [] }
-        let search = "is:pr is:open author:@me " + terms.joined(separator: " ")
+        let search = "is:pr is:open author:@me sort:updated-desc " + terms.joined(separator: " ")
 
         let out = try await sh("gh api graphql -f query=\(q(myPRsQuery)) -f q=\(q(search))")
         return try parseMyPRs(Data(out.utf8))
@@ -543,8 +962,8 @@ enum Backend {
     static let maxFeedbackSectionBytes = 25_000
 
     /// The PR's reviews, review threads (unresolved first) and conversation as plain text,
-    /// with my own comments marked "(me)". Best effort: never throws.
-    static func feedback(for pr: PR) async -> String {
+    /// with my own comments marked "(me)" and, given `since`, later ones marked "NEW". Best effort: never throws.
+    static func feedback(for pr: PR, since: String? = nil) async -> String {
         let parts = pr.repository.nameWithOwner.split(separator: "/", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return "(could not load feedback)" }
         let cmd = "gh api graphql -f query=\(q(feedbackQuery)) -f owner=\(q(parts[0])) "
@@ -559,42 +978,56 @@ enum Backend {
             let l = a?.login ?? "ghost"
             return "@\(l)\(l == me ? " (me)" : "")"
         }
-        func capped(_ text: String) -> String {
+        func isNew(_ at: String?) -> Bool {
+            guard let since, let at else { return false }
+            return at > since
+        }
+        func new(_ at: String?) -> String { isNew(at) ? " NEW" : "" }
+        /// Given `since`, an oldest-first section keeps its end, where the NEW entries are.
+        func capped(_ text: String, oldestFirst: Bool = false) -> String {
             guard text.utf8.count > maxFeedbackSectionBytes else { return text }
+            let kb = maxFeedbackSectionBytes / 1000
+            if oldestFirst, since != nil {
+                return "(NOTE: section truncated to its last \(kb) KB.)\n"
+                    + String(decoding: Data(text.utf8.suffix(maxFeedbackSectionBytes)), as: UTF8.self)
+            }
             return String(decoding: Data(text.utf8.prefix(maxFeedbackSectionBytes)), as: UTF8.self)
-                + "\n(NOTE: section truncated at \(maxFeedbackSectionBytes / 1000) KB.)\n"
+                + "\n(NOTE: section truncated at \(kb) KB.)\n"
         }
 
         var reviews = ""
         for r in p.reviews.items {
             let body = r.body.trimmingCharacters(in: .whitespacesAndNewlines)
             if r.state == "COMMENTED" && body.isEmpty { continue }   // only wraps thread comments
-            reviews += "\(who(r.author)) \(r.state) \(r.submittedAt ?? ""):\n\(body)\n\n"
+            reviews += "\(who(r.author)) \(r.state) \(r.submittedAt ?? "")\(new(r.submittedAt)):\n\(body)\n\n"
         }
 
         var threads = ""
-        let sorted = p.reviewThreads.items.sorted { !$0.isResolved && $1.isResolved }
+        func rank(_ t: FeedbackData.ReviewThread) -> Int {
+            (t.comments.items.contains { isNew($0.createdAt) } ? 2 : 0) + (t.isResolved ? 0 : 1)
+        }
+        let sorted = p.reviewThreads.items.sorted { rank($0) > rank($1) }
         for (i, t) in sorted.enumerated() {
             let line = (t.line ?? t.originalLine).map { ":\($0)" } ?? ""
             threads += "--- Thread \(i + 1) · \(t.isResolved ? "resolved" : "UNRESOLVED") · "
                 + "\(t.path)\(line)\(t.isOutdated ? " (outdated)" : "")\n"
             for c in t.comments.items {
-                threads += "\(who(c.author)) \(c.createdAt):\n\(c.body)\n\n"
+                threads += "\(who(c.author)) \(c.createdAt)\(new(c.createdAt)):\n\(c.body)\n\n"
             }
         }
 
         var conversation = ""
         for c in p.comments.items {
-            conversation += "\(who(c.author)) \(c.createdAt):\n\(c.body)\n\n"
+            conversation += "\(who(c.author)) \(c.createdAt)\(new(c.createdAt)):\n\(c.body)\n\n"
         }
 
         return """
         REVIEWS (verdicts and summaries, oldest first):
-        \(reviews.isEmpty ? "(none)\n" : capped(reviews))
-        REVIEW THREADS (unresolved first):
+        \(reviews.isEmpty ? "(none)\n" : capped(reviews, oldestFirst: true))
+        REVIEW THREADS (\(since == nil ? "" : "those with NEW comments first, then ")unresolved first):
         \(threads.isEmpty ? "(none)\n" : capped(threads))
         CONVERSATION (latest 30 comments):
-        \(conversation.isEmpty ? "(none)\n" : capped(conversation))
+        \(conversation.isEmpty ? "(none)\n" : capped(conversation, oldestFirst: true))
         """
     }
 
@@ -783,6 +1216,8 @@ enum Backend {
         case followUp(notes: String?, summary: String?)
         /// Work through feedback on my own PR, with the quick summary if any.
         case author(summary: String?)
+        /// Check someone else's PR against my review threads: the Verify command, sent as is.
+        case verify(command: String)
     }
 
     /// Hands a quick-model summary to the review model as a map, never as the source of truth.
@@ -820,6 +1255,15 @@ enum Backend {
     private static let compareJQ =
         #"{status: .status, ahead_by: .ahead_by, commits: [.commits[] | {sha: .sha[0:7], message: (.commit.message | split("\n")[0])}]}"#
 
+    /// GitHub's compare of `base...head`, trimmed by `compareJQ`. Nil when it fails, e.g. when
+    /// `base` was force-pushed away.
+    static func compare(_ repo: String, base: String, head: String) async -> CompareInfo? {
+        guard isCommitSHA(base), isCommitSHA(head),
+              let out = try? await sh("gh api \(q("repos/\(repo)/compare/\(base)...\(head)")) --jq \(q(compareJQ))")
+        else { return nil }
+        return try? parseCompare(Data(out.utf8))
+    }
+
     static func isCommitSHA(_ s: String) -> Bool {
         s.range(of: "^[0-9a-f]{7,40}$", options: .regularExpression) != nil
     }
@@ -827,6 +1271,7 @@ enum Backend {
     /// Reviews only the commits since `earlier`, or everything with the earlier notes when the
     /// branch was rebased or force-pushed. Returns the text and whether it had to fall back.
     static func reviewChanges(_ pr: PR, since earlier: SavedReview) async throws -> (text: String, fellBack: Bool) {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         guard let base = earlier.pr.headRefOid, let head = pr.headRefOid,
               isCommitSHA(base), isCommitSHA(head) else {
             throw ShellError(code: 1, stderr: "Can't tell which commits are new: the earlier review has no commit recorded.")
@@ -835,10 +1280,7 @@ enum Backend {
         let path = "repos/\(repo)/compare/\(base)...\(head)"
 
         // A missing base commit (force-pushed away) also lands here: fall back to the full diff.
-        var info: CompareInfo?
-        if let out = try? await sh("gh api \(q(path)) --jq \(q(compareJQ))") {
-            info = try? parseCompare(Data(out.utf8))
-        }
+        let info = await compare(repo, base: base, head: head)
         let feedback = await feedback(for: pr)
 
         var diff = "", note = "", fellBack = true
@@ -957,6 +1399,7 @@ enum Backend {
 
     /// Headless review with the review model (uses your logged-in Max session).
     static func review(_ pr: PR) async throws -> String {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         async let prompt = buildPrompt(for: pr)
         let codebase = await prepareCodebase(pr)
         return try await runAgent(try await prompt + codebaseNote(codebase), codebase: codebase)
@@ -965,6 +1408,7 @@ enum Backend {
     /// Creates a pending review from `text` (nits left out). Returns how many comments were placed
     /// on lines and how many went into the review body, plus the PR's files page to finish it on.
     static func createDraftReview(_ pr: PR, text: String) async throws -> (inline: Int, loose: Int) {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         let comments = DraftReview.comments(from: text)
         guard !comments.isEmpty else {
             throw ShellError(code: 1, stderr: "No findings to post: only nits, or no suggested comments with a file and line.")
@@ -1018,15 +1462,23 @@ enum Backend {
 
     /// Short summary of the comments with the quick model. Reads only the feedback, never the diff,
     /// so it reports what people said and what is waiting on me, not whether the code is right.
-    static func summariseFeedback(_ pr: PR, mine: Bool) async throws -> String {
-        let feedback = await feedback(for: pr)
-        let task = mine
-            ? """
-              This is MY pull request. Summarise what reviewers are asking for, grouped as: must address, questions to answer, optional. One line each: `path:line` if there is one, who, and what they want. Then one line on anything reviewers are waiting on me for.
-              """
-            : """
-              I reviewed this pull request. For each UNRESOLVED thread I took part in where someone else spoke last, give one line: `path:line`, who replied, and whether it is an answer, a question for me, pushback, or a claim that it is fixed. Then one line on what is left for me to do.
-              """
+    /// With `since` (my last review), it covers what others said after it, marked NEW in the feedback.
+    static func summariseFeedback(_ pr: PR, mine: Bool, since: String? = nil) async throws -> String {
+        if DemoData.isOn { throw DemoData.Unavailable() }
+        let feedback = await feedback(for: pr, since: mine ? nil : since)
+        let task = if mine {
+            """
+            This is MY pull request. Summarise what reviewers are asking for, grouped as: must address, questions to answer, optional. One line each: `path:line` if there is one, who, and what they want. Then one line on anything reviewers are waiting on me for.
+            """
+        } else if since != nil {
+            """
+            I reviewed this pull request. Entries marked NEW came after my last review; the rest is only context. First, one line per person on what they did since: a verdict, replies, new comments. Then, for each thread with a NEW reply from someone else, one line: `path:line`, who, and whether it is an answer, a question for me, pushback, or a claim that it is fixed. Then one line on what is left for me to do. Nothing marked NEW from others: say so in one line.
+            """
+        } else {
+            """
+            I reviewed this pull request. For each UNRESOLVED thread I took part in where someone else spoke last, give one line: `path:line`, who replied, and whether it is an answer, a question for me, pushback, or a claim that it is fixed. Then one line on what is left for me to do.
+            """
+        }
         let prompt = """
         You are summarising code review comments for me, briefly.
 
@@ -1047,18 +1499,31 @@ enum Backend {
 
     /// Opens a new Terminal window with an interactive Claude Code session seeded for `mode`.
     /// Returns a command to copy instead when the chosen terminal is "Copy command".
+    /// A new Claude review sends only the Review command from Settings, and Verify only the Verify
+    /// command, since anything after a slash command becomes its arguments.
     static func openInTerminal(_ pr: PR, mode: TerminalMode) async throws -> String? {
+        if DemoData.isOn { throw DemoData.Unavailable() }
         var prompt: String
+        var isCommand = false
         switch mode {
-        case .review: prompt = try await buildPrompt(for: pr)
+        case .review:
+            if Agent.current == .claude, let command = ClaudeSettings.reviewCommand(for: pr.url) {
+                prompt = command
+                isCommand = true
+            } else {
+                prompt = try await buildPrompt(for: pr)
+            }
         case .followUp(let notes, let summary):
             prompt = try await buildFollowUpPrompt(for: pr, review: notes, summary: summary)
         case .author(let summary):
             prompt = try await buildAuthorPrompt(for: pr, summary: summary)
+        case .verify(let command):
+            prompt = command
+            isCommand = true
         }
         let worktree = RepoList.folder(for: pr.repository.nameWithOwner)
             .map { TerminalApp.Worktree.forPR(pr, repoFolder: $0) }
-        if let worktree {
+        if let worktree, !isCommand {
             prompt += "\n\nLOCAL CHECKOUT: you are in a git worktree made for this PR (\(worktree.path)), "
                 + "detached at the PR's head commit. My own clone is elsewhere and untouched. Read files here "
                 + "for context. If I ask you to push fixes to my PR, commit here and "
@@ -1092,5 +1557,60 @@ enum Backend {
             try p.run()
             return nil
         }
+    }
+}
+
+// MARK: Removing worktrees of closed PRs
+
+extension Backend {
+    /// Removes the worktrees ReviewBar made (`Worktree.ours`) for PRs that are merged or closed,
+    /// in every repo with a local clone, when `Worktree.removeScript` finds nothing to lose. Best effort:
+    /// anything that fails is left for the next run.
+    static func removeClosedWorktrees(repos: [String]) async {
+        for repo in repos {
+            guard let folder = RepoList.folder(for: repo),
+                  let list = try? await sh("git -C \(q(folder)) worktree list --porcelain") else { continue }
+            let ours = TerminalApp.Worktree.ours(TerminalApp.Worktree.parseList(list), repo: repo, repoFolder: folder)
+            guard !ours.isEmpty, let states = await prStates(repo: repo, numbers: ours.map(\.number))
+            else { continue }
+            for worktree in ours {
+                guard let pr = states[worktree.number], pr.state != "OPEN" else { continue }
+                _ = try? await sh(worktree.removeScript(finalHead: pr.headRefOid))
+            }
+        }
+    }
+
+    struct PRState: Decodable, Equatable {
+        let state: String
+        let headRefOid: String?
+    }
+
+    /// State and last head commit of these PRs in one read-only GraphQL query; nil if it fails.
+    /// `gh` exits 1 when any of them doesn't resolve but still prints the others, so that's let through.
+    private static func prStates(repo: String, numbers: [Int]) async -> [Int: PRState]? {
+        let parts = repo.split(separator: "/").map(String.init)
+        let enc = JSONEncoder()
+        guard parts.count == 2, let owner = try? enc.encode(parts[0]), let name = try? enc.encode(parts[1])
+        else { return nil }
+        let prs = numbers.map { "p\($0): pullRequest(number: \($0)) { state headRefOid }" }.joined(separator: " ")
+        let query = "query { repository(owner: \(String(decoding: owner, as: UTF8.self)), "
+            + "name: \(String(decoding: name, as: UTF8.self))) { \(prs) } }"
+        guard let out = try? await sh("gh api graphql -f query=\(q(query)) || true") else { return nil }
+        return parsePRStates(Data(out.utf8))
+    }
+
+    /// The `prStates` response (aliases p<number>) → state per PR number. PRs GitHub returns as
+    /// null (deleted, or an error) are left out; nil when it doesn't decode. Pure, for tests.
+    static func parsePRStates(_ json: Data) -> [Int: PRState]? {
+        struct Response: Decodable {
+            struct Repo: Decodable { let repository: [String: PRState?]? }
+            let data: Repo?
+        }
+        guard let repo = (try? JSONDecoder().decode(Response.self, from: json))?.data?.repository else { return nil }
+        var states: [Int: PRState] = [:]
+        for (alias, state) in repo {
+            if let state, alias.hasPrefix("p"), let n = Int(alias.dropFirst()) { states[n] = state }
+        }
+        return states
     }
 }

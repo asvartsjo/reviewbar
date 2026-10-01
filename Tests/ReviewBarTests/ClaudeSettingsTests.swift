@@ -6,7 +6,8 @@ import Testing
 @Suite(.serialized)
 final class ClaudeSettingsTests {
     private let keys = [ClaudeSettings.reviewModelKey, ClaudeSettings.reviewEffortKey,
-                        ClaudeSettings.quickModelKey, ClaudeSettings.quickEffortKey]
+                        ClaudeSettings.quickModelKey, ClaudeSettings.quickEffortKey,
+                        ClaudeSettings.reviewCommandKey, ClaudeSettings.verifyCommandKey]
     private var saved: [String: Any] = [:]
 
     init() {
@@ -55,5 +56,26 @@ final class ClaudeSettingsTests {
         #expect(ClaudeSettings.label(("", "")) == "default")
         #expect(ClaudeSettings.displayName("xhigh") == "Extra high")
         #expect(ClaudeSettings.displayName(ClaudeSettings.sameAsReview) == "Same as reviews")
+    }
+
+    @Test func reviewCommand() {
+        let url = "https://github.com/o/r/pull/7"
+        #expect(ClaudeSettings.reviewCommand(for: url) == nil)
+        UserDefaults.standard.set("/pr-review {url}", forKey: ClaudeSettings.reviewCommandKey)
+        #expect(ClaudeSettings.reviewCommand(for: url) == "/pr-review \(url)")
+        #expect(ClaudeSettings.command("/pr-review {url} --deep", url: url) == "/pr-review \(url) --deep")
+        #expect(ClaudeSettings.command("  /pr-review  ", url: url) == "/pr-review \(url)")
+        #expect(ClaudeSettings.command(" \n ", url: url) == nil)
+        UserDefaults.standard.set("", forKey: ClaudeSettings.reviewCommandKey)
+        #expect(ClaudeSettings.reviewCommand(for: url) == nil)
+    }
+
+    @Test func verifyCommand() throws {
+        let url = "https://github.com/o/r/pull/7"
+        let command = try #require(ClaudeSettings.verifyCommand(for: url))
+        #expect(command.hasPrefix("Verify fixes on \(url). My earlier review comments on GitHub are the baseline."))
+        #expect(!command.contains("{url}"))
+        UserDefaults.standard.set("  ", forKey: ClaudeSettings.verifyCommandKey)
+        #expect(ClaudeSettings.verifyCommand(for: url) == nil)
     }
 }

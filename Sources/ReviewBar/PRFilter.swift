@@ -16,4 +16,8 @@ enum PRFilter {
     static func others(_ replies: [ReplyPR], includeDrafts: Bool) -> [ReplyPR] {
         includeDrafts ? replies : replies.filter { !$0.pr.isDraft }
     }
+
+    static func others(_ reviewing: [ReviewingPR], includeDrafts: Bool) -> [ReviewingPR] {
+        includeDrafts ? reviewing : reviewing.filter { !$0.pr.isDraft }
+    }
 }

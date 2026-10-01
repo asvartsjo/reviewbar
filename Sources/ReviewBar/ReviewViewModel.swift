@@ -12,6 +12,10 @@ final class ReviewViewModel: ObservableObject {
     @Published var error: String?
     @Published var reviews: [String: ReviewState] = [:]   // keyed by PR.reviewKey
     @Published var replies: [ReplyPR] = []
+    /// PRs you review: reviewed before, or requested now (merged in from `prs`).
+    @Published var reviewing: [ReviewingPR] = []
+    /// The last Reviewing fetch that succeeded, so requests still show when a later one fails.
+    private var reviewed: [ReviewingPR] = []
     @Published var myPRs: [FeedbackPR] = []
     /// Shown under the terminal button, e.g. after copying a command.
     @Published var terminalNotice: String?
@@ -27,6 +31,7 @@ final class ReviewViewModel: ObservableObject {
     private var seenRequests: Set<String>?
     private var seenReplies: [String: String]?
     private var seenFeedback: [String: String]?
+    private var seenReviewing: [String: ReviewingPR]?
     /// Repos left out of searches because `gh` can't read them; cleared when Settings change.
     @Published private(set) var skippedRepos: Set<String> = []
 
@@ -71,6 +76,7 @@ final class ReviewViewModel: ObservableObject {
         seenRequests = nil
         seenReplies = nil
         seenFeedback = nil
+        seenReviewing = nil
         seenMentions = nil
         await refresh()
     }
@@ -85,21 +91,25 @@ final class ReviewViewModel: ObservableObject {
         // One at a time; a request made meanwhile (e.g. after editing Settings) runs right after.
         if loading { refreshAgain = true; return }
         loading = true
+        if DemoData.isOn { DemoData.advance() }
         let skip = skippedRepos
         async let fetchedPRs = Backend.fetchPRs(skipping: skip)
         async let fetchedReplies = Backend.fetchReplies(skipping: skip)
+        async let fetchedReviewing = Backend.fetchReviewing(skipping: skip)
         async let fetchedMine = Backend.fetchMyPRs(skipping: skip)
         let week = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 86_400))
         async let fetchedMentions = Backend.fetchMentions(since: week, repos: RepoList.load())
         var errors: [String] = []
         var alerts: [ReviewAlert] = []
+        var freshRequests: [PR] = []
+        var repliesLoaded = false
 
-        // Each list only updates (and only notifies) when its own fetch succeeded.
+        // Each list only updates (and only notifies) when its own fetch succeeded; Reviewing
+        // still takes in the latest requests.
         do {
             prs = PRFilter.others(try await fetchedPRs, includeDrafts: PRFilter.includeDrafts)
-            let fresh = AlertDiff.newRequests(prs, seen: seenRequests)
-            alerts += fresh.map(ReviewAlert.request)
-            if AutoReview.isOn { autoReview(fresh) }
+            freshRequests = AlertDiff.newRequests(prs, seen: seenRequests)
+            if AutoReview.isOn, !DemoData.isOn { autoReview(freshRequests) }
             seenRequests = Set(prs.map(\.url))
         } catch { errors.append(error.localizedDescription) }
         do {
@@ -107,7 +117,23 @@ final class ReviewViewModel: ObservableObject {
             alerts += AlertDiff.newer(visibleReplies, seen: seenReplies, url: \.pr.url, latestAt: \.latestAt)
                 .map(ReviewAlert.reply)
             seenReplies = AlertDiff.latestByURL(replies, url: \.pr.url, latestAt: \.latestAt)
-        } catch { errors.append("Replies: \(error.localizedDescription)") }
+            repliesLoaded = true
+        } catch { errors.append("Thread replies: \(error.localizedDescription)") }
+        var reviewingLoaded = false
+        do {
+            reviewed = PRFilter.others(try await fetchedReviewing, includeDrafts: PRFilter.includeDrafts)
+            reviewingLoaded = true
+        } catch { errors.append("Reviewing: \(error.localizedDescription)") }
+        reviewing = Backend.merge(reviewed, requested: prs)
+        if reviewingLoaded {
+            alerts += AlertDiff.reviewing(reviewing.filter { !mutedForever.contains($0.pr.url) }, before: seenReviewing)
+            seenReviewing = Dictionary(reviewing.map { ($0.pr.url, $0) }, uniquingKeysWith: { a, _ in a })
+            updateSeen()
+            if repliesLoaded { migrateReplyDismissals() }
+        }
+        // After Reviewing, so a request on a PR you reviewed reads as a re-request.
+        let reviewedURLs = Set(reviewing.filter { $0.myLastReview != nil }.map(\.pr.url))
+        alerts += AlertDiff.requests(freshRequests, reviewed: reviewedURLs)
         do {
             myPRs = try await fetchedMine
             alerts += AlertDiff.newer(visibleFeedback, seen: seenFeedback, url: \.pr.url, latestAt: \.latestAt)
@@ -139,6 +165,7 @@ final class ReviewViewModel: ObservableObject {
         self.error = errors.isEmpty ? nil : errors.joined(separator: "\n")
         Notifier.post(alerts)
         lastRefresh = Date()
+        removeClosedWorktreesDaily()
         loading = false
         if refreshAgain {
             refreshAgain = false
@@ -146,14 +173,182 @@ final class ReviewViewModel: ObservableObject {
         }
     }
 
-    /// Replies you have not dismissed (or that are newer than what you dismissed).
-    var visibleReplies: [ReplyPR] {
-        replies.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
+    private static let worktreeCleanupKey = "worktreeCleanupAt"
+
+    /// At most once a day, in the background: remove worktrees of merged or closed PRs. The day
+    /// starts before the run, so a failure waits until tomorrow. Never in demo mode.
+    private func removeClosedWorktreesDaily() {
+        guard !DemoData.isOn else { return }
+        let last = UserDefaults.standard.object(forKey: Self.worktreeCleanupKey) as? Date ?? .distantPast
+        guard Date().timeIntervalSince(last) > 86_400 else { return }
+        UserDefaults.standard.set(Date(), forKey: Self.worktreeCleanupKey)
+        let repos = RepoList.load()
+        Task.detached(priority: .background) { await Backend.removeClosedWorktrees(repos: repos) }
     }
 
-    func reply(for pr: PR) -> ReplyPR? { visibleReplies.first { $0.pr.url == pr.url } }
+    /// Replies for notifications and the PR detail: not dismissed (or newer than what you
+    /// dismissed) and not on a PR muted for good.
+    var visibleReplies: [ReplyPR] {
+        replies.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") && !mutedForever.contains($0.pr.url) }
+    }
+
+    /// Nil while the PR is muted.
+    func reply(for pr: PR) -> ReplyPR? {
+        if let r = reviewingPR(for: pr), isMuted(r) { return nil }
+        return visibleReplies.first { $0.pr.url == pr.url }
+    }
 
     func dismissReplies(_ r: ReplyPR) { dismiss(r.pr.url, until: r.latestAt) }
+
+    var reviewingSections: [(group: ReviewingPR.Group, prs: [ReviewingPR])] {
+        ReviewingPR.sections(reviewing, muted: isMuted)
+    }
+
+    var yourTurnCount: Int { reviewing.filter { $0.group == .yours && !isMuted($0) }.count }
+
+    func reviewingPR(for pr: PR) -> ReviewingPR? { reviewing.first { $0.pr.url == pr.url } }
+
+    /// Verify fixes is the next step: you have threads here, something changed since your review,
+    /// and a Verify command is set. Then it's the one prominent button in the PR detail.
+    func verifyIsDue(_ pr: PR) -> Bool {
+        guard Agent.current == .claude, ClaudeSettings.verifyCommand(for: pr.url) != nil,
+              let r = reviewingPR(for: pr), r.verifyIsDue,
+              let d = detailLoad(for: pr).detail else { return false }
+        return !d.myThreads.isEmpty
+    }
+
+    // MARK: New since you last looked
+
+    private static let seenKey = "reviewingSeen", seenSeededKey = "reviewingSeenSeeded"
+    private static let lastListedKey = "reviewingLastListed"
+    /// PR url -> when you last opened it, and its head then. Survives restarts.
+    @Published private var seen = loadSnapshots(seenKey)
+    /// PR url -> when a Reviewing fetch last listed it, for PRs with a seen or mute snapshot.
+    private var lastListed = UserDefaults.standard.dictionary(forKey: lastListedKey) as? [String: String] ?? [:]
+    /// The snapshot each PR had before this session's latest opening, for the open detail.
+    private var seenBefore: [String: PRSnapshot] = [:]
+
+    /// Changed since you last opened it; a PR you never opened is new.
+    func isNew(_ r: ReviewingPR) -> Bool { seen[r.pr.url].map { r.changed(since: $0) } ?? true }
+
+    /// When you looked before opening this PR now; nil the first time.
+    func previouslySeen(_ pr: PR) -> String? { seenBefore[pr.url]?.at }
+
+    func markSeen(_ r: ReviewingPR) {
+        let url = r.pr.url
+        seenBefore[url] = seen[url]
+        seen[url] = PRSnapshot(at: Self.isoNow(), head: r.pr.headRefOid)
+        saveSeen()
+    }
+
+    /// After a successful Reviewing fetch: the first time there is a list, record every listed PR
+    /// so they don't all start as new; after that, forget PRs gone from the list for a month.
+    /// Skipped in demo mode, so demo PRs start as new and real snapshots are never pruned.
+    private func updateSeen() {
+        guard !DemoData.isOn else { return }
+        let now = Self.isoNow()
+        if !UserDefaults.standard.bool(forKey: Self.seenSeededKey), !reviewing.isEmpty {
+            for r in reviewing where seen[r.pr.url] == nil { seen[r.pr.url] = PRSnapshot(at: now, head: r.pr.headRefOid) }
+            UserDefaults.standard.set(true, forKey: Self.seenSeededKey)
+        }
+        let month = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30 * 86_400))
+        let listed = Set(reviewing.map(\.pr.url))
+        for url in listed { lastListed[url] = now }
+        seen = PRSnapshot.pruned(seen, listed: listed, lastListed: lastListed, cutoff: month)
+        mutedUntil = PRSnapshot.pruned(mutedUntil, listed: listed, lastListed: lastListed, cutoff: month)
+        lastListed = lastListed.filter { seen[$0.key] != nil || mutedUntil[$0.key] != nil }
+        saveSeen()
+        Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+        UserDefaults.standard.set(lastListed, forKey: Self.lastListedKey)
+    }
+
+    private func saveSeen() { Self.saveSnapshots(seen, Self.seenKey) }
+
+    private static func loadSnapshots(_ key: String) -> [String: PRSnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [:] }
+        return (try? JSONDecoder().decode([String: PRSnapshot].self, from: data)) ?? [:]
+    }
+
+    /// Not in demo mode: its made-up PRs would stay in your settings for good.
+    private static func saveSnapshots(_ s: [String: PRSnapshot], _ key: String) {
+        guard !DemoData.isOn else { return }
+        if let data = try? JSONEncoder().encode(s) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    private static func isoNow() -> String { ISO8601DateFormatter().string(from: Date()) }
+
+    // MARK: Mute
+
+    private static let mutedUntilKey = "reviewingMutedUntil", mutedForeverKey = "reviewingMutedForever"
+    /// PR url -> the moment you muted it: it comes back when something changes after that.
+    @Published private var mutedUntil = loadSnapshots(mutedUntilKey)
+    /// PRs muted for good: no new-commits, resolved or verdict notifications either.
+    @Published private var mutedForever = Set(UserDefaults.standard.stringArray(forKey: mutedForeverKey) ?? [])
+
+    func isMuted(_ r: ReviewingPR) -> Bool {
+        r.isMuted(forever: mutedForever.contains(r.pr.url), until: mutedUntil[r.pr.url])
+    }
+
+    func muteUntilSomethingHappens(_ r: ReviewingPR) {
+        mutedUntil[r.pr.url] = PRSnapshot(at: Self.isoNow(), head: r.pr.headRefOid)
+        Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+    }
+
+    func muteForGood(_ r: ReviewingPR) {
+        mutedForever.insert(r.pr.url)
+        saveMutedForever()
+    }
+
+    private static let migratedDismissalsKey = "reviewingMigratedReplyDismissals"
+
+    /// Once: Replies dismissals that still hide a reply become mutes, now that Reviewing
+    /// replaces the Replies tab.
+    private func migrateReplyDismissals() {
+        guard !DemoData.isOn else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.migratedDismissalsKey) else { return }
+        let mutes = PRSnapshot.mutes(fromDismissed: dismissed, replies: replies, reviewing: reviewing)
+        mutedUntil.merge(mutes) { current, _ in current }
+        Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+        UserDefaults.standard.set(true, forKey: Self.migratedDismissalsKey)
+    }
+
+    private func saveMutedForever() {
+        guard !DemoData.isOn else { return }
+        UserDefaults.standard.set(Array(mutedForever), forKey: Self.mutedForeverKey)
+    }
+
+    func unmute(_ r: ReviewingPR) {
+        mutedUntil[r.pr.url] = nil
+        mutedForever.remove(r.pr.url)
+        Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+        saveMutedForever()
+    }
+
+    struct DetailLoad {
+        var detail: ReviewingDetail?
+        var loading = false
+        var error: String?
+    }
+
+    /// By PR url. Reloaded each time a PR is opened; the previous result shows meanwhile.
+    @Published private(set) var details: [String: DetailLoad] = [:]
+
+    func detailLoad(for pr: PR) -> DetailLoad { details[pr.url] ?? DetailLoad() }
+
+    func loadDetail(_ r: ReviewingPR) {
+        let url = r.pr.url
+        guard details[url]?.loading != true else { return }
+        details[url, default: DetailLoad()].loading = true
+        details[url]?.error = nil
+        Task {
+            do {
+                details[url]?.detail = try await Backend.fetchReviewingDetail(r)
+            } catch {
+                details[url]?.error = error.localizedDescription
+            }
+            details[url]?.loading = false
+        }
+    }
 
     @Published var mentions: [Mention] = []
     private var seenMentions: [String: String]?
@@ -179,16 +374,20 @@ final class ReviewViewModel: ObservableObject {
 
     private func dismiss(_ url: String, until latestAt: String) {
         dismissed[url] = latestAt
+        guard !DemoData.isOn else { return }
         UserDefaults.standard.set(dismissed, forKey: "dismissedReplies")
     }
 
-    /// Distinct PRs needing you: review requests, replies and feedback on your PRs.
+    static let badgeCountsMyPRsKey = "badgeCountsMyPRs"
+    /// Settings › Panel; on unless turned off.
+    static var badgeCountsMyPRs: Bool { UserDefaults.standard.object(forKey: badgeCountsMyPRsKey) as? Bool ?? true }
+
+    /// Distinct PRs needing you: Reviewing's Your turn (requests, new commits since your review,
+    /// replies in your threads; not muted), feedback on your PRs unless turned off, and mentions.
     var badgeCount: Int {
-        Set(prs.map(\.url))
-            .union(visibleReplies.map(\.pr.url))
-            .union(visibleFeedback.map(\.pr.url))
-            .union(visibleMentions.map(\.url))
-            .count
+        var urls = Set(reviewing.filter { $0.group == .yours && !isMuted($0) }.map(\.pr.url))
+        if Self.badgeCountsMyPRs { urls.formUnion(visibleFeedback.map(\.pr.url)) }
+        return urls.union(visibleMentions.map(\.url)).count
     }
 
     func state(for pr: PR) -> ReviewState { reviews[pr.reviewKey] ?? .idle }
@@ -233,9 +432,10 @@ final class ReviewViewModel: ObservableObject {
 
     // MARK: Review all
 
-    /// PRs "Review all" would pick up: no review of this version yet, and none running.
+    /// PRs "Review all" would pick up: not muted, no review of this version yet, and none running.
     var unreviewed: [PR] {
         prs.filter { pr in
+            if let r = reviewingPR(for: pr), isMuted(r) { return false }
             switch state(for: pr) { case .idle, .failed: return true; default: return false }
         }
     }
@@ -413,15 +613,23 @@ final class ReviewViewModel: ObservableObject {
 
     // MARK: Quick summaries
 
-    /// Summaries are offered where there are comments to read: replies to you, or your own PRs.
+    /// Summaries are offered where there are comments to read: replies to you, your own PRs,
+    /// or a PR where others spoke after your review.
     func canSummarise(_ pr: PR) -> Bool {
-        isMine(pr) || replies.contains { $0.pr.url == pr.url }
+        isMine(pr) || replies.contains { $0.pr.url == pr.url } || summarySince(pr) != nil
+    }
+
+    /// Your last review, when others spoke after it: the summary then covers what happened since.
+    func summarySince(_ pr: PR) -> String? {
+        guard !isMine(pr), let r = reviewingPR(for: pr), r.othersSpokeSinceReview else { return nil }
+        return r.myLastReview?.at
     }
 
     /// Changes when new comments arrive, so an old summary isn't shown as current.
     private func summaryKey(_ pr: PR) -> String {
         let latest = myPRs.first { $0.pr.url == pr.url }?.latestAt
-            ?? replies.first { $0.pr.url == pr.url }?.latestAt ?? ""
+            ?? [replies.first { $0.pr.url == pr.url }?.latestAt, reviewingPR(for: pr)?.latestAt].compactMap { $0 }.max()
+            ?? ""
         return pr.url + "#" + latest
     }
 
@@ -435,10 +643,11 @@ final class ReviewViewModel: ObservableObject {
     func summarise(_ pr: PR) {
         let key = summaryKey(pr)
         let mine = isMine(pr)
+        let since = summarySince(pr)
         summaries[key] = .running
         Task {
             do {
-                let text = try await Backend.summariseFeedback(pr, mine: mine)
+                let text = try await Backend.summariseFeedback(pr, mine: mine, since: since)
                 summaries[key] = .done(text)
             } catch {
                 summaries[key] = .failed(error.localizedDescription)
@@ -460,6 +669,16 @@ final class ReviewViewModel: ObservableObject {
         } else {
             mode = .review
         }
+        launchTerminal(pr, mode: mode)
+    }
+
+    /// Your Verify command (Settings › Terminal) in the PR's worktree.
+    func verifyInTerminal(_ pr: PR) {
+        guard let command = ClaudeSettings.verifyCommand(for: pr.url) else { return }
+        launchTerminal(pr, mode: .verify(command: command))
+    }
+
+    private func launchTerminal(_ pr: PR, mode: Backend.TerminalMode) {
         terminalNotice = nil
         Task {
             do {

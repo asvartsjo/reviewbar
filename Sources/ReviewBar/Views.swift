@@ -4,8 +4,7 @@ import ServiceManagement
 import UserNotifications
 
 private enum Tab: String, CaseIterable {
-    case pending = "Awaiting me"
-    case replies = "Replies"
+    case reviewing = "Reviewing"
     case mine = "My PRs"
     case mentions = "Mentions"
     case saved = "Saved"
@@ -17,7 +16,9 @@ struct ContentView: View {
     @EnvironmentObject var vm: ReviewViewModel
     @ViewState private var showSettings = false
     @ViewState private var selected: PR?
-    @ViewState private var tab: Tab = .pending
+    @ViewState private var tab: Tab = .reviewing
+    @ViewState private var showMuted = false
+    @AppStorage(AsWindow.key) private var asWindow = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,15 +44,15 @@ struct ContentView: View {
                     Text(e).font(.caption).foregroundStyle(.red).padding(.horizontal, 10)
                 }
                 switch tab {
-                case .pending: pendingList
-                case .replies: repliesList
+                case .reviewing: reviewingList
                 case .mine: mineList
                 case .mentions: mentionsList
                 case .saved: savedList
                 }
             }
         }
-        .frame(width: 480, height: 580)
+        .frame(minWidth: AsWindow.minimumSize.width, maxWidth: .infinity,
+               minHeight: AsWindow.minimumSize.height, maxHeight: .infinity)
         // Solid, and follows the system Light/Dark setting rather than the menu bar's look.
         .background(systemDark ? Color(white: 0.11) : Color(white: 0.985))
         .environment(\.colorScheme, systemDark ? .dark : .light)
@@ -70,33 +71,22 @@ struct ContentView: View {
 
     private var header: some View {
         HStack {
-            Text("Reviews").font(.headline)
+            // The window's title bar already says ReviewBar; the popup has none.
+            if !asWindow { Text("Reviews").font(.headline) }
             Spacer()
             if vm.loading { ProgressView().controlSize(.small) }
             Button { Task { await vm.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+                .help("Refresh now").accessibilityLabel("Refresh")
             Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }
+                .help(showSettings ? "Close Settings" : "Settings").accessibilityLabel("Settings")
             Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power") }
+                .help("Quit ReviewBar").accessibilityLabel("Quit ReviewBar")
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.hoverBorderless)
         .padding(10)
     }
 
-    // MARK: pending
-
-    private var pendingList: some View {
-        Group {
-            if vm.prs.isEmpty && !vm.loading {
-                empty("checkmark.circle", "Nothing waiting. Check settings if that looks wrong.")
-            } else {
-                reviewAllBar
-                List(vm.prs) { pr in
-                    Button { selected = pr } label: { row(pr) }.buttonStyle(.plain)
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-            }
-        }
-    }
+    // MARK: reviewing
 
     @ViewBuilder private var reviewAllBar: some View {
         HStack {
@@ -104,71 +94,129 @@ struct ContentView: View {
                 ProgressView(value: Double(b.done), total: Double(b.total)).frame(width: 120)
                 Text("Reviewed \(b.done) of \(b.total)").font(.caption)
                 Spacer()
-                Button("Stop") { vm.cancelAll() }.font(.caption)
+                Button("Stop", systemImage: "stop.circle") { vm.cancelAll() }.font(.caption)
+                    .help("Stop the remaining reviews")
             } else if !vm.unreviewed.isEmpty {
                 Text("\(vm.unreviewed.count) without a review").font(.caption)
                 Spacer()
-                Menu("Review all") {
+                Menu("Review all", systemImage: "sparkles") {
                     Button("One by one") { vm.reviewAll(parallel: false) }
                     Button("In parallel (3 at a time)") { vm.reviewAll(parallel: true) }
                 }
                 .menuStyle(.borderlessButton).fixedSize().font(.caption)
+                .help("Review every PR you haven't reviewed yet with \(Agent.current.name). Notes stay in ReviewBar.")
+                .modifier(HoverHighlight(inset: 4))
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 10).padding(.vertical, 4)
     }
 
-    private func row(_ pr: PR) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(verbatim: "\(pr.repository.nameWithOwner) #\(pr.number)")
-                    .font(.caption).foregroundStyle(.secondary)
-                if pr.isDraft {
-                    Text("DRAFT").font(.caption2).padding(.horizontal, 4)
-                        .background(.quaternary, in: Capsule())
-                }
-                Spacer()
-                if case .done = vm.state(for: pr) {
-                    Image(systemName: "sparkles").foregroundStyle(.orange)
-                } else if vm.hasOlderReview(pr) {
-                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
-                }
-            }
-            Text(pr.title).font(.body).lineLimit(2)
-            HStack(spacing: 4) {
-                Text("\(pr.author.login) · updated \(age(pr.updatedAt))")
-                    .foregroundStyle(.secondary)
-                if let opened = pr.createdAt {
-                    let days = daysSince(opened)
-                    Text(days < 1 ? "· opened today" : "· open \(days)d")
-                        .foregroundStyle(days >= Self.oldAfterDays ? .orange : .secondary)
-                        .help(days >= Self.oldAfterDays ? "Open for \(days) days" : "")
-                }
-            }
-            .font(.caption)
+    /// ✨ when a review made here is saved for this version, 🕘 when only an older one is.
+    @ViewBuilder private func savedReviewIcon(_ pr: PR) -> some View {
+        if case .done = vm.state(for: pr) {
+            Image(systemName: "sparkles").foregroundStyle(.orange).help("Review saved in ReviewBar")
+        } else if vm.hasOlderReview(pr) {
+            Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
+                .help("A review of an older version is saved in ReviewBar")
         }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
     }
 
-    // MARK: replies
+    /// "open 4d", orange from `oldAfterDays`.
+    @ViewBuilder private func openAge(_ pr: PR) -> some View {
+        if let opened = pr.createdAt {
+            let days = daysSince(opened)
+            Text(days < 1 ? "open today" : "open \(days)d")
+                .foregroundStyle(days >= Self.oldAfterDays ? .orange : .secondary)
+                .help(days < 1 ? "Opened today" : "Open for \(days) day\(days == 1 ? "" : "s")")
+        }
+    }
 
-    private var repliesList: some View {
+    private var reviewingList: some View {
         Group {
-            if vm.visibleReplies.isEmpty && !vm.loading {
-                empty("bubble.left.and.bubble.right", "No one is waiting on you in your review threads.")
+            if vm.reviewing.isEmpty && !vm.loading {
+                empty("eyeglasses", "No open PRs you review.")
             } else {
-                List(vm.visibleReplies) { r in
-                    Button { selected = r.pr } label: { replyRow(r) }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("Dismiss until the next reply") { vm.dismissReplies(r) }
+                reviewAllBar
+                List {
+                    ForEach(vm.reviewingSections, id: \.group) { s in
+                        Group {
+                            if s.group == .muted {
+                                Button { showMuted.toggle() } label: {
+                                    sectionHeader(s.group.title, count: s.prs.count, folded: !showMuted)
+                                }
+                                .buttonStyle(.hoverRow)
+                                .help(showMuted ? "Hide muted PRs" : "Show muted PRs")
+                            } else {
+                                sectionHeader(s.group.title, count: s.prs.count)
+                            }
                         }
+                        .padding(.top, s.group == vm.reviewingSections.first?.group ? 0 : 10)
+                        .listRowSeparator(.hidden)
+                        ForEach(s.group == .muted && !showMuted ? [] : s.prs) { r in
+                            Button { selected = r.pr } label: { reviewingRow(r) }
+                                .listRowSeparator(.hidden)
+                                .buttonStyle(.hoverRow)
+                                .opacity(s.group == .muted ? 0.55 : 1)
+                                .contextMenu {
+                                    if vm.isMuted(r) {
+                                        Button("Unmute", systemImage: "bell") { vm.unmute(r) }
+                                    } else if !r.isRequested {
+                                        Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(r) }
+                                        Button("Mute for good", systemImage: "bell.slash.fill") { vm.muteForGood(r) }
+                                    } else if r.myLastReview == nil {   // a re-request always shows
+                                        Button("Mute for good", systemImage: "bell.slash.fill") { vm.muteForGood(r) }
+                                    }
+                                }
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
         }
+    }
+
+    /// "YOUR TURN 6": capitals in the primary colour over a line, so the groups stand out from
+    /// the rows, which have no separators. A plain row, not a Section header: a pinned header
+    /// gets a second line from macOS. `folded` adds a chevron (Muted starts folded).
+    private func sectionHeader(_ title: String, count: Int, folded: Bool? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title).textCase(.uppercase).font(.callout.bold()).tracking(0.6).foregroundStyle(.primary)
+                Text(verbatim: "\(count)").font(.callout).foregroundStyle(.secondary)
+                if let folded {
+                    Image(systemName: folded ? "chevron.right" : "chevron.down")
+                        .font(.caption.bold()).foregroundStyle(.secondary)
+                }
+            }
+            Divider()
+        }
+    }
+
+    /// The dot sits in its own column, so titles line up whether or not a row is new.
+    private func reviewingRow(_ r: ReviewingPR) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Group {
+                if vm.isNew(r) { NewDot() } else { Color.clear.frame(width: 7, height: 7) }
+            }
+            .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    numberedTitle(r.pr.number, r.pr.title)
+                    if r.pr.isDraft { draftBadge }
+                    Spacer(minLength: 4)
+                    HStack(spacing: 5) {
+                        if r.isRequested { openAge(r.pr) }
+                        savedReviewIcon(r.pr)
+                        ChecksIcon(state: r.checks, labelled: true)
+                    }
+                    .font(.caption)
+                }
+                metaLine(r.pr.repository.nameWithOwner, r.pr.author.login, " · \(r.status)")
+            }
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 
     // MARK: mentions
@@ -180,8 +228,9 @@ struct ContentView: View {
             } else {
                 List(vm.visibleMentions) { m in
                     Button { if let u = URL(string: m.url) { NSWorkspace.shared.open(u) } } label: { mentionRow(m) }
-                        .buttonStyle(.plain)
-                        .contextMenu { Button("Dismiss") { vm.dismissMention(m) } }
+                        .listRowSeparator(.hidden)
+                        .buttonStyle(.hoverRow)
+                        .contextMenu { Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) } }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -190,36 +239,19 @@ struct ContentView: View {
     }
 
     private func mentionRow(_ m: Mention) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(verbatim: "\(m.repo) #\(m.number)").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Dismiss") { vm.dismissMention(m) }.buttonStyle(.borderless).font(.caption)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                numberedTitle(m.number, m.title)
+                Spacer(minLength: 4)
+                Button("Dismiss", systemImage: "xmark") { vm.dismissMention(m) }.buttonStyle(.hoverBorderless).font(.caption)
+                    .help("Hide this mention until it gets a new comment")
             }
-            Text(m.title).font(.body).lineLimit(2)
-            Text("\(m.author) mentioned you \(age(m.updatedAt))").font(.caption).foregroundStyle(.blue)
+            metaLine(m.repo, m.author, " mentioned you \(age(m.updatedAt))")
             if !m.snippet.isEmpty {
                 Text(m.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(.vertical, 2)
-    }
-
-    private func replyRow(_ r: ReplyPR) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(verbatim: "\(r.pr.repository.nameWithOwner) #\(r.pr.number)")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Label("\(r.waiting)", systemImage: "bubble.left.fill")
-                    .font(.caption).foregroundStyle(.blue)
-            }
-            Text(r.pr.title).font(.body).lineLimit(2)
-            Text("\(r.latestBy) replied \(age(r.latestAt))")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
+        .padding(.vertical, 6)
     }
 
     // MARK: my PRs
@@ -231,9 +263,10 @@ struct ContentView: View {
             } else {
                 List(vm.visibleFeedback) { f in
                     Button { selected = f.pr } label: { feedbackRow(f) }
-                        .buttonStyle(.plain)
+                        .listRowSeparator(.hidden)
+                        .buttonStyle(.hoverRow)
                         .contextMenu {
-                            Button("Dismiss until new feedback") { vm.dismissFeedback(f) }
+                            Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
                         }
                 }
                 .listStyle(.plain)
@@ -243,23 +276,17 @@ struct ContentView: View {
     }
 
     private func feedbackRow(_ f: FeedbackPR) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(verbatim: "\(f.pr.repository.nameWithOwner) #\(f.pr.number)")
-                    .font(.caption).foregroundStyle(.secondary)
-                if f.pr.isDraft {
-                    Text("DRAFT").font(.caption2).padding(.horizontal, 4)
-                        .background(.quaternary, in: Capsule())
-                }
-                Spacer()
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                numberedTitle(f.pr.number, f.pr.title)
+                if f.pr.isDraft { draftBadge }
+                Spacer(minLength: 4)
                 StatusBadge(feedback: f)
                 DecisionBadge(decision: f.decision)
             }
-            Text(f.pr.title).font(.body).lineLimit(2)
-            Text("\(f.summary) · \(f.latestBy) \(age(f.latestAt))")
-                .font(.caption).foregroundStyle(.secondary)
+            metaLine(f.pr.repository.nameWithOwner, f.latestBy, " \(age(f.latestAt)) · \(f.summary)")
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
     }
 
@@ -272,9 +299,10 @@ struct ContentView: View {
             } else {
                 List(vm.saved) { s in
                     Button { selected = s.pr } label: { savedRow(s) }
-                        .buttonStyle(.plain)
+                        .listRowSeparator(.hidden)
+                        .buttonStyle(.hoverRow)
                         .contextMenu {
-                            Button("Delete", role: .destructive) { vm.delete(s) }
+                            Button("Delete", systemImage: "trash", role: .destructive) { vm.delete(s) }
                         }
                 }
                 .listStyle(.plain)
@@ -282,37 +310,55 @@ struct ContentView: View {
             }
             Divider()
             HStack {
-                Button("Reveal in Finder") {
+                Button("Reveal in Finder", systemImage: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([Store.dir])
                 }
+                .help("Show the folder where reviews are saved")
                 Spacer()
                 Text("Right-click a row to delete").font(.caption2).foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.hoverBorderless)
             .padding(8)
         }
     }
 
     private func savedRow(_ s: SavedReview) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(verbatim: "\(s.pr.repository.nameWithOwner) #\(s.pr.number)")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(s.pr.title).lineLimit(2)
-            Text("\(s.pr.author.login) · reviewed \(s.date.formatted(.relative(presentation: .named)))"
-                 + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
-                 + (s.producedBy.map { " · \($0)" } ?? ""))
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 2) {
+            numberedTitle(s.pr.number, s.pr.title)
+            metaLine(s.pr.repository.nameWithOwner, s.pr.author.login,
+                     " · reviewed \(s.date.formatted(.relative(presentation: .named)))"
+                        + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
+                        + (s.producedBy.map { " · \($0)" } ?? ""))
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
     }
 
     // MARK: helpers
 
+    /// The line under a row's title: "acme/api · lina · New commits since your review", with the
+    /// person in normal text and the rest in grey. The repo lives here, not on a line of its own.
+    private func metaLine(_ repo: String, _ person: String, _ rest: String) -> some View {
+        (Text(verbatim: "\(repo) · ").foregroundStyle(.secondary)
+            + Text(verbatim: person).foregroundStyle(.primary)
+            + Text(verbatim: rest).foregroundStyle(.secondary))
+            .font(.caption).lineLimit(2)
+    }
+
+    private var draftBadge: some View {
+        Text("DRAFT").font(.caption2).foregroundStyle(.secondary)
+            .padding(.horizontal, 4).background(.quaternary, in: Capsule())
+    }
+
+    /// "#482 Add CSV export", with the number in grey.
+    private func numberedTitle(_ number: Int, _ title: String) -> some View {
+        (Text(verbatim: "#\(number) ").foregroundStyle(.secondary) + Text(verbatim: title))
+            .font(.body.weight(.medium)).lineLimit(2)
+    }
+
     private func title(_ t: Tab) -> String {
         switch t {
-        case .pending where !vm.prs.isEmpty: return "\(t.rawValue) (\(vm.prs.count))"
-        case .replies where !vm.visibleReplies.isEmpty: return "\(t.rawValue) (\(vm.visibleReplies.count))"
+        case .reviewing where vm.yourTurnCount > 0: return "\(t.rawValue) (\(vm.yourTurnCount))"
         case .mine where !vm.visibleFeedback.isEmpty: return "\(t.rawValue) (\(vm.visibleFeedback.count))"
         case .mentions where !vm.visibleMentions.isEmpty: return "\(t.rawValue) (\(vm.visibleMentions.count))"
         default: return t.rawValue
@@ -347,12 +393,10 @@ struct ContentView: View {
 struct DetailView: View {
     @EnvironmentObject var vm: ReviewViewModel
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
+    @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     private var terminal: TerminalApp { TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed) }
 
-    /// "Follow up in Ghostty", or "Follow up (copy command)" when no terminal can be driven.
-    private func terminalLabel(_ verb: String) -> String {
-        terminal == .copy ? "\(verb) (copy command)" : "\(verb) in \(terminal.name)"
-    }
+    private func terminalLabel(_ verb: String) -> String { terminal.label(verb) }
     let pr: PR
     let back: () -> Void
 
@@ -361,10 +405,12 @@ struct DetailView: View {
             HStack {
                 Button { back() } label: { Label("Back", systemImage: "chevron.left") }
                 Spacer()
-                Button("Open PR") { open(pr.url) }
-                Button("Files") { open(pr.url + "/files") }
+                Button("Open PR", systemImage: "arrow.up.right.square") { open(pr.url) }
+                    .help("Open this PR on GitHub")
+                Button("Files", systemImage: "doc.text") { open(pr.url + "/files") }
+                    .help("Open the changed files on GitHub")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.hoverBorderless)
 
             Text(pr.title).font(.headline)
             Text(verbatim: "\(pr.repository.nameWithOwner) #\(pr.number) · \(pr.author.login)")
@@ -376,10 +422,11 @@ struct DetailView: View {
                     Text(f.threads + f.reviews + f.comments == 0
                          ? "\(f.summary)."
                          : "New feedback: \(f.summary). Latest from \(f.latestBy).")
-                        .font(.caption).foregroundStyle(.blue)
+                        .font(.caption).foregroundStyle(.orange)
                     Spacer()
-                    Button("Dismiss") { vm.dismissFeedback(f) }
-                        .buttonStyle(.borderless).font(.caption)
+                    Button("Dismiss", systemImage: "xmark") { vm.dismissFeedback(f) }
+                        .buttonStyle(.hoverBorderless).font(.caption)
+                        .help("Hide this feedback until someone adds more")
                 }
             }
 
@@ -387,10 +434,17 @@ struct DetailView: View {
                 HStack {
                     Text("\(r.waiting) of your review threads \(r.waiting == 1 ? "has a reply" : "have replies") waiting. "
                         + "Latest from \(r.latestBy).")
-                        .font(.caption).foregroundStyle(.blue)
+                        .font(.caption).foregroundStyle(.orange)
                     Spacer()
-                    Button("Dismiss") { vm.dismissReplies(r) }
-                        .buttonStyle(.borderless).font(.caption)
+                    if let rv = vm.reviewingPR(for: pr), !rv.isRequested {
+                        Button("Mute until something happens", systemImage: "bell.slash") { vm.muteUntilSomethingHappens(rv) }
+                            .buttonStyle(.hoverBorderless).font(.caption)
+                            .help("Move this PR to Muted until a new commit, comment or review arrives")
+                    } else {
+                        Button("Dismiss", systemImage: "xmark") { vm.dismissReplies(r) }
+                            .buttonStyle(.hoverBorderless).font(.caption)
+                            .help("Hide this until someone replies again")
+                    }
                 }
             }
 
@@ -405,11 +459,14 @@ struct DetailView: View {
                 }
             }
 
-            actions
+            actions.controlSize(.large)
 
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    if !vm.isMine(pr), let r = vm.reviewingPR(for: pr), r.myLastReview != nil {
+                        ReviewingDetailBox(reviewing: r)
+                    }
                     if vm.canSummarise(pr) { summaryBox }
                     reviewContent
                 }
@@ -420,23 +477,27 @@ struct DetailView: View {
             }
         }
         .padding(10)
+        .onAppear { if let r = vm.reviewingPR(for: pr) { vm.markSeen(r) } }
     }
 
     /// Quick-model summary of the comments, or the button to make one.
     @ViewBuilder private var summaryBox: some View {
         let quick = Agent.current.label(Agent.current.quick)
+        let sinceReview = vm.summarySince(pr) != nil
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Feedback summary").font(.caption.bold())
-                Text(quick).font(.caption2).foregroundStyle(.secondary)
+                Text(sinceReview ? "Since your review, summarised" : "Feedback summary").font(.callout.bold())
+                Text(quick).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 switch vm.summaryState(for: pr) {
                 case .running:
                     ProgressView().controlSize(.small)
                 case .done:
-                    Button("Redo") { vm.summarise(pr) }.buttonStyle(.borderless).font(.caption)
+                    Button("Redo", systemImage: "arrow.counterclockwise") { vm.summarise(pr) }.buttonStyle(.hoverBorderless).font(.caption)
+                        .help("Summarise the comments again")
                 default:
-                    Button("Summarise feedback") { vm.summarise(pr) }.font(.caption)
+                    Button(sinceReview ? "Summarise what happened" : "Summarise feedback", systemImage: "text.alignleft") { vm.summarise(pr) }.font(.caption)
+                        .help("\(quick) reads the comments, not the code, and sums up who said what")
                 }
             }
             switch vm.summaryState(for: pr) {
@@ -449,12 +510,14 @@ struct DetailView: View {
             case .failed(let msg):
                 Text(msg).foregroundStyle(.red)
             case .idle:
-                Text("A quick read of who said what and what's waiting on you. It doesn't see the code.")
+                Text(sinceReview
+                     ? "A quick read of what people said since your review and what's waiting on you. It doesn't see the code."
+                     : "A quick read of who said what and what's waiting on you. It doesn't see the code.")
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(8)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        .font(.callout)
+        .card()
     }
 
     @ViewBuilder private var reviewContent: some View {
@@ -467,21 +530,25 @@ struct DetailView: View {
         case .failed(let msg):
             Text(msg).foregroundStyle(.red)
         default:
-            Text(vm.isMine(pr)
-                 ? "Opens \(Agent.current.appName) with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub."
-                 : "Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
-                .foregroundStyle(.secondary)
+            if !vm.isMine(pr) {
+                Text("Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
     @ViewBuilder private var actions: some View {
         HStack {
             if vm.isMine(pr) {
-                Button(terminalLabel("Work through feedback")) { vm.openTerminal(pr) }
+                Button(terminalLabel("Work through feedback"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
                     .buttonStyle(.borderedProminent)
             } else {
                 reviewActions
             }
+        }
+        if vm.isMine(pr) {
+            Text("Opens \(Agent.current.appName) with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         switch vm.draftState[pr.reviewKey] ?? .idle {
         case .done(let msg): Text(msg).font(.caption).foregroundStyle(.green)
@@ -501,7 +568,7 @@ struct DetailView: View {
         if case .running = vm.draftState[pr.reviewKey] ?? .idle {
             ProgressView().controlSize(.small)
         } else {
-            Button("Draft on GitHub") { confirmDraft = true }
+            Button("Draft on GitHub", systemImage: "square.and.pencil") { confirmDraft = true }
                 .disabled(count == 0)
                 .help(count == 0 ? "No non-nit findings with a file and line" : "Create a pending review from the findings, nits left out")
                 .confirmationDialog("Create a draft review with \(count) comment\(count == 1 ? "" : "s")?",
@@ -514,40 +581,80 @@ struct DetailView: View {
         }
     }
 
-    @ViewBuilder private var reviewActions: some View {
+    /// The full row when it fits; in the narrow popup, the buttons after the first show only
+    /// their icon (with the title as tooltip) instead of truncating.
+    private var reviewActions: some View {
+        ViewThatFits(in: .horizontal) {
+            reviewActionRow(compact: false)
+            reviewActionRow(compact: true)
+        }
+    }
+
+    @ViewBuilder private func reviewActionRow(compact: Bool) -> some View {
         HStack {
             switch vm.state(for: pr) {
             case .running:
                 ProgressView().controlSize(.small)
                 Text("\(Agent.current.name) is reading the diff…").font(.caption)
-                Button("Cancel") { vm.cancelReview(pr) }.font(.caption)
+                Button("Cancel", systemImage: "stop.circle") { vm.cancelReview(pr) }.font(.caption)
+                    .help("Stop this review")
             case .done(let text):
-                Button(terminalLabel("Follow up")) { vm.openTerminal(pr) }
-                    .buttonStyle(.borderedProminent)
-                Button("Open in browser") {
+                Button(terminalLabel("Follow up"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
+                    .prominent(!vm.verifyIsDue(pr))
+                    .help("Continue in \(Agent.current.appName) with this PR and the review above")
+                Button("Open in browser", systemImage: "arrow.up.right.square") {
                     let s = vm.savedReview(for: pr)
                     ReviewPage.open(pr: pr, text: text, label: s.map(ReviewPage.label), date: s?.date)
                 }
-                draftButton(text)
-                Button("Re-run") { vm.rerun(pr) }
-                Button("Copy") {
+                .help("Open this review as a web page")
+                .iconOnly(compact)
+                draftButton(text).iconOnly(compact)
+                Button("Re-run", systemImage: "arrow.counterclockwise") { vm.rerun(pr) }
+                    .help("Run the same review again on this version")
+                    .iconOnly(compact)
+                Button("Copy", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
+                .help("Copy the review as Markdown")
+                .iconOnly(compact)
             default:
                 if let earlier = vm.earlierReview(for: pr) {
-                    Button("Review changes since \(earlier.pr.versionLabel)") { vm.reviewChanges(pr, since: earlier) }
-                        .buttonStyle(.borderedProminent)
-                    Button("Full review") { vm.review(pr) }
+                    Button("Review changes since \(earlier.pr.versionLabel)", systemImage: "sparkles") { vm.reviewChanges(pr, since: earlier) }
+                        .prominent(!vm.verifyIsDue(pr))
+                        .help("Review only the commits since \(earlier.pr.versionLabel)")
+                    Button("Full review", systemImage: "sparkles") { vm.review(pr) }
+                        .help("Review the whole diff again")
+                        .iconOnly(compact)
+                    terminalButton.iconOnly(compact)
+                } else if runsReviewCommand {
+                    terminalButton.prominent(!vm.verifyIsDue(pr))
+                    Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
+                        .help("Quick read-only review with the built-in prompt; notes are saved here")
+                        .iconOnly(compact)
                 } else {
-                    Button("Review with \(Agent.current.name)") { vm.review(pr) }
-                        .buttonStyle(.borderedProminent)
-                }
-                Button(terminalLabel(vm.hasFollowUpContext(pr) ? "Follow up" : "Review")) {
-                    vm.openTerminal(pr)
+                    Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
+                        .prominent(!vm.verifyIsDue(pr))
+                        .help("\(Agent.current.name) reads the diff and writes private notes here. Nothing is posted to GitHub.")
+                    terminalButton.iconOnly(compact)
                 }
             }
         }
+    }
+
+    private var terminalButtonTitle: String { terminalLabel(vm.hasFollowUpContext(pr) ? "Follow up" : "Review") }
+
+    private var terminalButton: some View {
+        Button(terminalButtonTitle, systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
+            .help(vm.hasFollowUpContext(pr)
+                  ? "Continue in \(Agent.current.appName) with this PR and your earlier review"
+                  : "Review this PR in \(Agent.current.appName) in your terminal")
+    }
+
+    /// The terminal button sends your Review command (Settings › Terminal), so it becomes the main one.
+    private var runsReviewCommand: Bool {
+        !vm.hasFollowUpContext(pr) && Agent.current == .claude
+            && ClaudeSettings.command(reviewCommand, url: pr.url) != nil
     }
 
     private func open(_ url: String) {
@@ -573,10 +680,19 @@ struct SettingsView: View {
     @AppStorage(CodexSettings.quickEffortKey) private var codexQuickEffort = CodexSettings.quickEffortDefault
     @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
     @AppStorage(AutoReview.key) private var autoReview = false
+    @AppStorage(StayOpen.key) private var stayOpen = false
+    @AppStorage(AsWindow.key) private var asWindow = false
+    @AppStorage(ReviewViewModel.badgeCountsMyPRsKey) private var badgeCountsMyPRs = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
+    @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
+    @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
+    @AppStorage(TerminalApp.Worktree.nextToCloneKey) private var worktreesNextToClone = false
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
+    @AppStorage(NotifySettings.pushedKey) private var notifyPushed = true
+    @AppStorage(NotifySettings.resolvedKey) private var notifyAllResolved = true
+    @AppStorage(NotifySettings.verdictsKey) private var notifyVerdicts = true
     @AppStorage(NotifySettings.mentionsKey) private var notifyMentions = true
     @ViewState private var notificationsAllowed: UNAuthorizationStatus?
     @ViewState private var openAtLogin = LoginItem.isAvailable && LoginItem.status == .enabled
@@ -632,56 +748,57 @@ struct SettingsView: View {
                         UserDefaults.standard.removeObject(forKey: RepoList.legacyOwnerKey)
                         legacyOwner = ""
                     }
-                    .buttonStyle(.borderless).font(.caption)
+                    .buttonStyle(.hoverBorderless).font(.caption)
                 }
             }
 
-            List {
-                ForEach(repos, id: \.self) { r in
-                    HStack {
-                        Image(systemName: "book.closed").foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(r).font(.system(.body, design: .monospaced))
-                            if let f = folders[r.lowercased()] {
-                                Text((f as NSString).abbreviatingWithTildeInPath)
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                    .lineLimit(1).truncationMode(.middle)
-                            } else if let f = RepoList.detectFolder(for: r) {
-                                Text("Found \((f as NSString).abbreviatingWithTildeInPath)")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                    .lineLimit(1).truncationMode(.middle)
-                            } else {
-                                Text("No local clone found: choose one to open Terminal there")
-                                    .font(.caption2).foregroundStyle(.orange)
+            if repos.isEmpty {
+                Label("No repos yet. Add one above.", systemImage: "tray")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+            } else {
+                List {
+                    ForEach(repos, id: \.self) { r in
+                        HStack {
+                            Image(systemName: "book.closed").foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(r).font(.system(.body, design: .monospaced))
+                                if let f = folders[r.lowercased()] {
+                                    Text((f as NSString).abbreviatingWithTildeInPath)
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                } else if let f = RepoList.detectFolder(for: r) {
+                                    Text("Found \((f as NSString).abbreviatingWithTildeInPath)")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                } else {
+                                    Text("No local clone found: choose one to open Terminal there")
+                                        .font(.caption2).foregroundStyle(.orange)
+                                }
                             }
-                        }
-                        Spacer()
-                        Button { chooseFolder(for: r) } label: {
-                            Image(systemName: folders[r.lowercased()] == nil ? "folder.badge.plus" : "folder")
-                        }
-                        .buttonStyle(.borderless)
-                        .help(folders[r.lowercased()] == nil
-                              ? "Choose the local checkout of \(r): Terminal sessions start there"
-                              : "Change the local folder (Terminal sessions start there)")
-                        .contextMenu {
-                            if folders[r.lowercased()] != nil {
-                                Button("Forget folder") { RepoList.setFolder(nil, for: r); loadFolders() }
+                            Spacer()
+                            Button { chooseFolder(for: r) } label: {
+                                Image(systemName: folders[r.lowercased()] == nil ? "folder.badge.plus" : "folder")
                             }
+                            .buttonStyle(.hoverBorderless)
+                            .help(folders[r.lowercased()] == nil
+                                  ? "Choose the local checkout of \(r): Terminal sessions start there"
+                                  : "Change the local folder (Terminal sessions start there)")
+                            .contextMenu {
+                                if folders[r.lowercased()] != nil {
+                                    Button("Forget folder") { RepoList.setFolder(nil, for: r); loadFolders() }
+                                }
+                            }
+                            Button { remove(r) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.hoverBorderless)
+                                .help("Remove \(r)")
+                                .accessibilityLabel("Remove \(r)")
                         }
-                        Button { remove(r) } label: { Image(systemName: "minus.circle") }
-                            .buttonStyle(.borderless)
-                            .help("Remove \(r)")
-                            .accessibilityLabel("Remove \(r)")
                     }
                 }
-            }
-            .listStyle(.bordered(alternatesRowBackgrounds: true))
-            .frame(height: 150)
-            .onAppear(perform: loadFolders)
-            .overlay {
-                if repos.isEmpty {
-                    Text("No repos yet").font(.callout).foregroundStyle(.secondary)
-                }
+                .listStyle(.bordered(alternatesRowBackgrounds: true))
+                .frame(height: 150)
+                .onAppear(perform: loadFolders)
             }
 
             Text("\(repos.count) repo\(repos.count == 1 ? "" : "s")")
@@ -791,11 +908,40 @@ struct SettingsView: View {
                 }
             }
             .font(.caption2).foregroundStyle(.secondary)
+            HStack {
+                Text("Review command")
+                TextField("Review command", text: $reviewCommand, prompt: Text("Built-in review prompt"))
+                    .labelsHidden()
+                    .disabled(agentRaw == Agent.codex.rawValue)
+            }
+            Text(agentRaw == Agent.codex.rawValue
+                 ? "Claude Code only. Codex reviews use the built-in prompt."
+                 : "The first message of a new review in the terminal, with {url} as the PR's link. "
+                   + "Leave it empty for the built-in review prompt.")
+                .font(.caption2).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Verify command")
+                TextField("Verify command", text: $verifyCommand, prompt: Text("No Verify fixes button"),
+                          axis: .vertical)
+                    .lineLimit(1...4)
+                    .labelsHidden()
+                    .disabled(agentRaw == Agent.codex.rawValue)
+            }
+            Text(agentRaw == Agent.codex.rawValue
+                 ? "Claude Code only."
+                 : "Sent by Verify fixes (PRs where you have review threads), with {url} as the PR's link. "
+                   + "Leave it empty to hide the button.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
+            Text(worktreesNextToClone
+                 ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. gauss-worktrees/pr-42."
+                 : "Each PR is checked out in ReviewBar's Application Support folder.")
+                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             Text("Pull requests").font(.headline)
             Toggle("Include draft PRs", isOn: $includeDrafts)
-            Text("Applies to Awaiting me and Replies. Your own drafts always show in My PRs.")
+            Text("Applies to Reviewing. Your own drafts always show in My PRs.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Review new requests automatically", isOn: $autoReview)
             Text("Runs a full review in the background when a PR first asks for your review, one at a time, "
@@ -805,11 +951,27 @@ struct SettingsView: View {
 
             Divider()
             Text("Notifications").font(.headline)
-            Toggle("New review requests", isOn: $notifyRequests)
+            Toggle("New review requests and re-requests", isOn: $notifyRequests)
             Toggle("Replies on your review threads", isOn: $notifyReplies)
+            Toggle("New commits after your review", isOn: $notifyPushed)
+            Toggle("All your threads on a PR resolved", isOn: $notifyAllResolved)
+            Toggle("Other reviewers approve or request changes", isOn: $notifyVerdicts)
             Toggle("Feedback on your PRs", isOn: $notifyFeedback)
             Toggle("@mentions of you or your teams", isOn: $notifyMentions)
             notificationHint
+
+            Divider()
+            Text("Panel").font(.headline)
+            Toggle("Count feedback on your PRs in the menu bar", isOn: $badgeCountsMyPRs)
+            Text("The menu bar number is PRs in Your turn and mentions, plus your PRs with new feedback when this is on.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Open as a window", isOn: $asWindow)
+            Text("A normal window you can move and resize, open until you close it. Takes effect the next time you click the menu bar icon.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Stay open when clicking elsewhere", isOn: $stayOpen)
+                .disabled(asWindow)
+            Text("Close it with the menu bar icon or Esc.")
+                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             Text("Startup").font(.headline)
@@ -843,7 +1005,7 @@ struct SettingsView: View {
                         NSWorkspace.shared.open(url)
                     }
                 }
-                .buttonStyle(.borderless).font(.caption2)
+                .buttonStyle(.hoverBorderless).font(.caption2)
             }
         } else {
             Text("Clicking a notification opens the PR on GitHub. Several at once are grouped into one.")
@@ -976,6 +1138,30 @@ struct DecisionBadge: View {
     }
 }
 
+/// CI state of a PR's head commit as a small icon; nothing when it has no checks.
+struct ChecksIcon: View {
+    let state: String?
+    /// "Checks failing" / "Checks running" beside the icon, like My PRs' badges. Passing stays a bare ✓.
+    var labelled = false
+
+    var body: some View {
+        switch state ?? "" {
+        case "SUCCESS":
+            Image(systemName: "checkmark.circle").foregroundStyle(.green).help("Checks passed")
+        case "FAILURE", "ERROR":
+            icon("xmark.octagon.fill", "Checks failing").foregroundStyle(.red)
+        case "PENDING", "EXPECTED":
+            icon("clock", "Checks running").foregroundStyle(.orange)
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder private func icon(_ symbol: String, _ text: String) -> some View {
+        if labelled { Label(text, systemImage: symbol) } else { Image(systemName: symbol).help(text) }
+    }
+}
+
 /// CI and merge state of one of your PRs: conflict, failing checks, running, or ready to merge.
 struct StatusBadge: View {
     let feedback: FeedbackPR
@@ -1002,3 +1188,14 @@ struct StatusBadge: View {
     }
 }
 
+extension View {
+    /// The filled accent style when `on`, the regular bordered one otherwise.
+    @ViewBuilder func prominent(_ on: Bool) -> some View {
+        if on { buttonStyle(.borderedProminent) } else { self }
+    }
+
+    /// A labelled button showing only its icon when `on`; its tooltip says what it does.
+    @ViewBuilder func iconOnly(_ on: Bool) -> some View {
+        if on { labelStyle(.iconOnly) } else { self }
+    }
+}

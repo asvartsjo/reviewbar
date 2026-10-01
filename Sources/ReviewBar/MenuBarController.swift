@@ -2,22 +2,40 @@ import SwiftUI
 import AppKit
 import Combine
 
+/// Keeps the panel open when you click elsewhere; it then closes with the icon or Esc.
+enum StayOpen {
+    static let key = "stayOpen"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+}
+
+/// Opens a normal, movable and resizable window instead of the popup; it stays open until closed.
+enum AsWindow {
+    static let key = "openAsWindow"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+    /// The popup's fixed size, and the window's smallest.
+    static let minimumSize = NSSize(width: 480, height: 580)
+}
+
 /// The menu bar icon and its panel, in AppKit rather than SwiftUI's MenuBarExtra, which always
 /// opens at the icon's left edge and draws the panel as translucent glass.
+/// One view is moved between the popup and the window, so switching keeps what's on screen.
 @MainActor
 final class MenuBarController: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let host: NSView
     private let panel: Panel
+    private var window: NSWindow?
     private var watch: AnyCancellable?
     private var resignObserver: NSObjectProtocol?
 
     init(vm: ReviewViewModel) {
         let host = NSHostingView(rootView: ContentView().environmentObject(vm))
         host.wantsLayer = true
-        host.layer?.cornerRadius = 12
         host.layer?.masksToBounds = true
-        panel = Panel(contentRect: NSRect(origin: .zero, size: host.fittingSize))
-        panel.contentView = host
+        // The container sets the size; SwiftUI only sets the minimum.
+        host.sizingOptions = [.minSize]
+        self.host = host
+        panel = Panel(contentRect: NSRect(origin: .zero, size: AsWindow.minimumSize))
         super.init()
         panel.onEscape = { [weak self] in self?.close() }
 
@@ -29,10 +47,10 @@ final class MenuBarController: NSObject {
             .receive(on: RunLoop.main)
             .sink { [weak self, weak vm] _ in if let vm { self?.updateIcon(vm.badgeCount) } }
 
-        // Clicking anywhere else closes it, like a menu.
+        // Clicking anywhere else closes it, like a menu, unless Settings keep it open.
         resignObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+            MainActor.assumeIsolated { if !StayOpen.isOn { self?.close() } }
         }
     }
 
@@ -54,14 +72,47 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func toggle() {
+        if AsWindow.isOn { showWindow(); return }
+        window?.orderOut(nil)
         if panel.isVisible { close(); return }
         if Date().timeIntervalSince(closedAt) < 0.3 { return }
         guard let button = item.button, let buttonWindow = button.window else { return }
+        if panel.contentView !== host {
+            host.layer?.cornerRadius = 12
+            panel.contentView = host
+        }
         let icon = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         panel.setFrameOrigin(Self.origin(icon: icon, size: panel.frame.size,
                                          visible: buttonWindow.screen?.visibleFrame))
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Clicking the icon brings the window to the front; only its close button closes it.
+    private func showWindow() {
+        if panel.isVisible { close() }
+        let window = self.window ?? Self.makeWindow()
+        self.window = window
+        if window.contentView !== host {
+            host.layer?.cornerRadius = 0
+            window.contentView = host
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Remembers where it was and how big, across launches.
+    private static func makeWindow() -> NSWindow {
+        let w = NSWindow(contentRect: NSRect(origin: .zero, size: AsWindow.minimumSize),
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                         backing: .buffered, defer: false)
+        w.title = "ReviewBar"
+        w.isReleasedWhenClosed = false
+        let name = "ReviewBarWindow"
+        if !w.setFrameUsingName(name) { w.center() }
+        w.setFrameAutosaveName(name)
+        return w
     }
 
     /// Top-right corner under the icon's right edge, kept on screen. Pure, for tests.
@@ -82,6 +133,8 @@ final class MenuBarController: NSObject {
             level = .popUpMenu
             collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             isReleasedWhenClosed = false
+            // Panels hide when the app loses focus by default; closing is up to MenuBarController.
+            hidesOnDeactivate = false
         }
         override var canBecomeKey: Bool { true }
         var onEscape: (() -> Void)?

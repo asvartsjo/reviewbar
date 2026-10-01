@@ -6,6 +6,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var menuBar: MenuBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Tooltips after 2 seconds of hovering (milliseconds). A default only: a value set with
+        // `defaults write` still wins. Before the panel is built, so its tooltips pick it up.
+        UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 2000])
         MainActor.assumeIsolated { menuBar = MenuBarController(vm: ReviewViewModel.shared) }
         // Menu bar only: no Dock icon or app switcher entry, also when started with `swift run`
         // (the .app bundle from scripts/make-app.sh sets LSUIElement as well).
@@ -26,12 +29,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         completionHandler([.banner, .sound])
     }
 
-    /// Clicking a notification opens the PR on GitHub.
+    /// Clicking a notification opens the PR on GitHub. Its Verify fixes button opens a Verify
+    /// session instead, or the PR when Verify stopped being possible after the notification
+    /// (e.g. the terminal is now Copy command). A launch that fails shows its error in the panel.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         if let s = response.notification.request.content.userInfo[Notifier.urlKey] as? String,
            let url = URL(string: s), url.scheme == "https", url.host == "github.com" {
-            Task { @MainActor in NSWorkspace.shared.open(url) }
+            let verify = response.actionIdentifier == Notifier.verifyAction
+            Task { @MainActor in
+                let vm = ReviewViewModel.shared
+                if verify, Notifier.canVerify, let pr = vm.reviewing.first(where: { $0.pr.url == s })?.pr {
+                    vm.verifyInTerminal(pr)
+                } else {
+                    NSWorkspace.shared.open(url)
+                }
+            }
         }
         completionHandler()
     }

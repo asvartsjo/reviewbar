@@ -294,4 +294,6 @@ struct Mention: Equatable, Identifiable {
     /// The comment's page, or the PR/issue when GitHub gives no comment.
     let url: String
     let updatedAt: String
+    /// The PR's own link, whichever comment `url` points at: what the menu bar number counts by.
+    var prURL: String { "https://github.com/\(repo)/pull/\(number)" }
 }

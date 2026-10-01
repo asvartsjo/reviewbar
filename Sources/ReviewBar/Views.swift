@@ -682,10 +682,14 @@ struct SettingsView: View {
     @AppStorage(AutoReview.key) private var autoReview = false
     @AppStorage(StayOpen.key) private var stayOpen = false
     @AppStorage(AsWindow.key) private var asWindow = false
-    @AppStorage(ReviewViewModel.badgeCountsMyPRsKey) private var badgeCountsMyPRs = true
+    @AppStorage(MenuBarCount.requestsKey) private var countRequests = true
+    @AppStorage(MenuBarCount.reviewedKey) private var countReviewed = true
+    @AppStorage(MenuBarCount.myPRsKey) private var countMyPRs = true
+    @AppStorage(MenuBarCount.mentionsKey) private var countMentions = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
+    @AppStorage(Backend.reviewStyleKey) private var reviewStyle = Backend.reviewStyleDefault
     @AppStorage(TerminalApp.Worktree.nextToCloneKey) private var worktreesNextToClone = false
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
@@ -939,6 +943,38 @@ struct SettingsView: View {
                 .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
+            Text("Review prompt").font(.headline)
+            Text("How reviews are written and how suggested comments are worded. Used by every review and re-review, "
+                 + "and by new reviews in the terminal unless a Review command is set.")
+                .font(.caption2).foregroundStyle(.secondary)
+            TextEditor(text: $reviewStyle)
+                .font(.system(.caption, design: .monospaced))
+                .frame(height: 220)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
+                // Text equal to the built-in style isn't saved, so later changes to it still apply.
+                .onChange(of: reviewStyle) { _, v in
+                    if v == Backend.reviewStyleDefault { UserDefaults.standard.removeObject(forKey: Backend.reviewStyleKey) }
+                }
+            HStack {
+                if Backend.reviewStyle(saved: reviewStyle) != Backend.reviewStyleDefault {
+                    Text("Edited").font(.caption).foregroundStyle(.orange)
+                }
+                Spacer()
+                Button("Reset to built-in") { UserDefaults.standard.removeObject(forKey: Backend.reviewStyleKey) }
+                    .disabled(reviewStyle == Backend.reviewStyleDefault)
+            }
+            DisclosureGroup("Full prompt") {
+                Text(Backend.reviewPromptPreview(style: reviewStyle))
+                    .font(.system(.caption2, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.caption)
+            Text("The rules and the verdict and finding markers around it are fixed: ReviewBar reads the verdict and "
+                 + "findings from them. How comments are worded is up to the text above. Empty means the built-in prompt.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            Divider()
             Text("Pull requests").font(.headline)
             Toggle("Include draft PRs", isOn: $includeDrafts)
             Text("Applies to Reviewing. Your own drafts always show in My PRs.")
@@ -962,8 +998,18 @@ struct SettingsView: View {
 
             Divider()
             Text("Panel").font(.headline)
-            Toggle("Count feedback on your PRs in the menu bar", isOn: $badgeCountsMyPRs)
-            Text("The menu bar number is PRs in Your turn and mentions, plus your PRs with new feedback when this is on.")
+            Text("Menu bar number counts")
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Review requests (awaiting your review)", isOn: $countRequests)
+                Toggle("New commits or replies on PRs you reviewed", isOn: $countReviewed)
+                Toggle("Feedback on your PRs", isOn: $countMyPRs)
+                Toggle("Mentions", isOn: $countMentions)
+            }
+            .padding(.leading, 12)
+            Text(countRequests || countReviewed || countMyPRs || countMentions
+                 ? "Each PR counts once, even when it's in more than one of these. PRs muted in Reviewing don't count "
+                   + "as requests or activity, but a mention still counts."
+                 : "Nothing is counted, so the menu bar shows only the icon.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Open as a window", isOn: $asWindow)
             Text("A normal window you can move and resize, open until you close it. Takes effect the next time you click the menu bar icon.")

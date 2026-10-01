@@ -1,8 +1,9 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ReviewBar
 
-final class MarkdownTests: XCTestCase {
-    func testReviewShapedMarkdown() {
+struct MarkdownTests {
+    @Test func reviewShapedMarkdown() {
         let md = """
         ## Summary
         - Adds a cache
@@ -20,7 +21,7 @@ final class MarkdownTests: XCTestCase {
         > quoted
         ---
         """
-        XCTAssertEqual(MarkdownBlock.parse(md), [
+        #expect(MarkdownBlock.parse(md) == [
             .heading(level: 2, text: "Summary"),
             .bullet(indent: 0, text: "Adds a cache"),
             .bullet(indent: 1, text: "nested point"),
@@ -34,106 +35,105 @@ final class MarkdownTests: XCTestCase {
         ])
     }
 
-    func testNotHeadingsOrListsStayText() {
-        XCTAssertEqual(MarkdownBlock.parse("#hashtag\n2026 was a year\n-dash"),
-                       [.paragraph("#hashtag\n2026 was a year\n-dash")])
+    @Test func notHeadingsOrListsStayText() {
+        #expect(MarkdownBlock.parse("#hashtag\n2026 was a year\n-dash")
+                == [.paragraph("#hashtag\n2026 was a year\n-dash")])
     }
 
     /// Claude sometimes forgets the closing fence; keep the code rather than dropping it.
-    func testUnclosedFenceKeepsCode() {
-        XCTAssertEqual(MarkdownBlock.parse("```\nlet x = 1"), [.code(language: "", text: "let x = 1")])
+    @Test func unclosedFenceKeepsCode() {
+        #expect(MarkdownBlock.parse("```\nlet x = 1") == [.code(language: "", text: "let x = 1")])
     }
 }
 
-final class ClaudeErrorsTests: XCTestCase {
-    func testUsageLimitWithResetTime() {
+struct ClaudeErrorsTests {
+    @Test func usageLimitWithResetTime() throws {
         let now = Date(timeIntervalSince1970: 1_790_000_000)
-        let m = ClaudeErrors.usageLimitMessage("Claude AI usage limit reached|1790003600", now: now)
-        XCTAssertNotNil(m)
-        XCTAssertTrue(m!.hasPrefix("Claude usage limit reached. It resets "))
-        XCTAssertTrue(m!.hasSuffix("Try again then, or pick a lighter model in Settings."))
+        let m = try #require(ClaudeErrors.usageLimitMessage("Claude AI usage limit reached|1790003600", now: now))
+        #expect(m.hasPrefix("Claude usage limit reached. It resets "))
+        #expect(m.hasSuffix("Try again then, or pick a lighter model in Settings."))
     }
 
-    func testUsageLimitWithoutResetTime() {
-        XCTAssertEqual(ClaudeErrors.usageLimitMessage("5-hour limit reached ∙ resets 3pm"),
-                       "Claude usage limit reached. Try again then, or pick a lighter model in Settings.")
+    @Test func usageLimitWithoutResetTime() {
+        #expect(ClaudeErrors.usageLimitMessage("5-hour limit reached ∙ resets 3pm")
+                == "Claude usage limit reached. Try again then, or pick a lighter model in Settings.")
     }
 
-    func testOrdinaryOutputIsNotALimit() {
-        XCTAssertNil(ClaudeErrors.usageLimitMessage("## Summary\n- Adds rate limiting to the API"))
+    @Test func ordinaryOutputIsNotALimit() {
+        #expect(ClaudeErrors.usageLimitMessage("## Summary\n- Adds rate limiting to the API") == nil)
     }
 }
 
-final class TerminalAppTests: XCTestCase {
-    func testLauncherScript() {
+struct TerminalAppTests {
+    @Test func launcherScript() {
         let s = TerminalApp.launcherScript(claude: "env -u ANTHROPIC_API_KEY claude --model opus",
                                            promptFile: "/tmp/it's here/p.md", path: "/opt/homebrew/bin:/usr/bin")
-        XCTAssertTrue(s.hasPrefix("#!/bin/zsh\n"))
-        XCTAssertTrue(s.contains("export PATH='/opt/homebrew/bin:/usr/bin'"))
+        #expect(s.hasPrefix("#!/bin/zsh\n"))
+        #expect(s.contains("export PATH='/opt/homebrew/bin:/usr/bin'"))
         // The prompt path is shell-quoted, including the apostrophe.
-        XCTAssertTrue(s.contains(#"[[ -f '/tmp/it'\''s here/p.md' ]] || exit 0"#))
-        XCTAssertTrue(s.contains(#"rm -f '/tmp/it'\''s here/p.md' "$0""#))
-        XCTAssertTrue(s.contains(#"env -u ANTHROPIC_API_KEY claude --model opus "$prompt""#))
-        XCTAssertTrue(s.contains(#"exec "${SHELL:-/bin/zsh}" -l"#))
+        #expect(s.contains(#"[[ -f '/tmp/it'\''s here/p.md' ]] || exit 0"#))
+        #expect(s.contains(#"rm -f '/tmp/it'\''s here/p.md' "$0""#))
+        #expect(s.contains(#"env -u ANTHROPIC_API_KEY claude --model opus "$prompt""#))
+        #expect(s.contains(#"exec "${SHELL:-/bin/zsh}" -l"#))
     }
 
-    func testLauncherWithoutPathSkipsExport() {
-        XCTAssertFalse(TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "").contains("export PATH"))
+    @Test func launcherWithoutPathSkipsExport() {
+        #expect(!TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "").contains("export PATH"))
     }
 
-    func testLaunchCommands() {
+    @Test func launchCommands() {
         guard case .process(let t, let targs) = TerminalApp.terminal.launch(launcher: "/tmp/r.sh", app: "/System/Applications/Utilities/Terminal.app")
-        else { return XCTFail() }
-        XCTAssertEqual(t, "/usr/bin/osascript")
-        XCTAssertTrue(targs[1].contains(#"tell application "Terminal""#))
-        XCTAssertTrue(targs[1].contains(#"do script "'/tmp/r.sh'""#))
+        else { Issue.record(); return }
+        #expect(t == "/usr/bin/osascript")
+        #expect(targs[1].contains(#"tell application "Terminal""#))
+        #expect(targs[1].contains(#"do script "'/tmp/r.sh'""#))
 
         guard case .process(let i, let iargs) = TerminalApp.iterm.launch(launcher: "/tmp/r.sh", app: "/Applications/iTerm.app")
-        else { return XCTFail() }
-        XCTAssertEqual(i, "/usr/bin/osascript")
-        XCTAssertTrue(iargs[1].contains(#"create window with default profile command "/tmp/r.sh""#))
+        else { Issue.record(); return }
+        #expect(i == "/usr/bin/osascript")
+        #expect(iargs[1].contains(#"create window with default profile command "/tmp/r.sh""#))
 
-        XCTAssertEqual(TerminalApp.ghostty.launch(launcher: "/tmp/r.sh", app: "/Applications/Ghostty.app"),
-                       .process("/usr/bin/open", ["-na", "/Applications/Ghostty.app", "--args",
-                                                  "--window-save-state=never", "-e", "/tmp/r.sh"]))
-        XCTAssertEqual(TerminalApp.wezterm.launch(launcher: "/tmp/r.sh", app: "/Applications/WezTerm.app"),
-                       .process("/Applications/WezTerm.app/Contents/MacOS/wezterm", ["start", "--", "/tmp/r.sh"]))
-        XCTAssertEqual(TerminalApp.kitty.launch(launcher: "/tmp/r.sh", app: "/Applications/kitty.app"),
-                       .process("/usr/bin/open", ["-na", "/Applications/kitty.app", "--args", "/tmp/r.sh"]))
-        XCTAssertEqual(TerminalApp.alacritty.launch(launcher: "/tmp/r.sh", app: "/Applications/Alacritty.app"),
-                       .process("/usr/bin/open", ["-na", "/Applications/Alacritty.app", "--args", "-e", "/tmp/r.sh"]))
-        XCTAssertEqual(TerminalApp.copy.launch(launcher: "/tmp/r.sh", app: ""), .copy("zsh '/tmp/r.sh'"))
+        #expect(TerminalApp.ghostty.launch(launcher: "/tmp/r.sh", app: "/Applications/Ghostty.app")
+                == .process("/usr/bin/open", ["-na", "/Applications/Ghostty.app", "--args",
+                                              "--window-save-state=never", "-e", "/tmp/r.sh"]))
+        #expect(TerminalApp.wezterm.launch(launcher: "/tmp/r.sh", app: "/Applications/WezTerm.app")
+                == .process("/Applications/WezTerm.app/Contents/MacOS/wezterm", ["start", "--", "/tmp/r.sh"]))
+        #expect(TerminalApp.kitty.launch(launcher: "/tmp/r.sh", app: "/Applications/kitty.app")
+                == .process("/usr/bin/open", ["-na", "/Applications/kitty.app", "--args", "/tmp/r.sh"]))
+        #expect(TerminalApp.alacritty.launch(launcher: "/tmp/r.sh", app: "/Applications/Alacritty.app")
+                == .process("/usr/bin/open", ["-na", "/Applications/Alacritty.app", "--args", "-e", "/tmp/r.sh"]))
+        #expect(TerminalApp.copy.launch(launcher: "/tmp/r.sh", app: "") == .copy("zsh '/tmp/r.sh'"))
     }
 
-    func testAutomaticPrefersInstalledAlternativesOverTerminal() {
-        XCTAssertEqual(TerminalApp.resolve(saved: "", installed: [.terminal, .iterm, .ghostty, .copy]), .ghostty)
-        XCTAssertEqual(TerminalApp.resolve(saved: "", installed: [.terminal, .iterm, .copy]), .iterm)
-        XCTAssertEqual(TerminalApp.resolve(saved: "", installed: [.terminal, .copy]), .terminal)
-        XCTAssertEqual(TerminalApp.resolve(saved: "", installed: [.copy]), .copy)
+    @Test func automaticPrefersInstalledAlternativesOverTerminal() {
+        #expect(TerminalApp.resolve(saved: "", installed: [.terminal, .iterm, .ghostty, .copy]) == .ghostty)
+        #expect(TerminalApp.resolve(saved: "", installed: [.terminal, .iterm, .copy]) == .iterm)
+        #expect(TerminalApp.resolve(saved: "", installed: [.terminal, .copy]) == .terminal)
+        #expect(TerminalApp.resolve(saved: "", installed: [.copy]) == .copy)
     }
 
-    func testSavedChoiceUsedOnlyWhileInstalled() {
+    @Test func savedChoiceUsedOnlyWhileInstalled() {
         let here: [TerminalApp] = [.terminal, .iterm, .ghostty, .copy]
-        XCTAssertEqual(TerminalApp.resolve(saved: "iterm", installed: here), .iterm)
-        XCTAssertEqual(TerminalApp.resolve(saved: "copy", installed: here), .copy)
+        #expect(TerminalApp.resolve(saved: "iterm", installed: here) == .iterm)
+        #expect(TerminalApp.resolve(saved: "copy", installed: here) == .copy)
         // A colleague's Mac without Ghostty: fall back to automatic.
-        XCTAssertEqual(TerminalApp.resolve(saved: "ghostty", installed: [.terminal, .copy]), .terminal)
-        XCTAssertEqual(TerminalApp.resolve(saved: "warp", installed: here), .ghostty)
+        #expect(TerminalApp.resolve(saved: "ghostty", installed: [.terminal, .copy]) == .terminal)
+        #expect(TerminalApp.resolve(saved: "warp", installed: here) == .ghostty)
     }
 }
 
-final class NotificationPollTests: XCTestCase {
-    func testChangedWithETagAndInterval() {
+struct NotificationPollTests {
+    @Test func changedWithETagAndInterval() {
         let out = "HTTP/2.0 200 OK\r\nEtag: \"abc\"\r\nX-Poll-Interval: 60\r\n\r\n[]"
-        XCTAssertEqual(Backend.parseNotificationPoll(out), .init(changed: true, etag: "\"abc\"", interval: 60))
+        #expect(Backend.parseNotificationPoll(out) == .init(changed: true, etag: "\"abc\"", interval: 60))
     }
 
-    func testNotModified() {
-        XCTAssertEqual(Backend.parseNotificationPoll("HTTP/2.0 304 Not Modified\r\n\r\n")?.changed, false)
+    @Test func notModified() {
+        #expect(Backend.parseNotificationPoll("HTTP/2.0 304 Not Modified\r\n\r\n")?.changed == false)
     }
 
-    func testErrorsAreNil() {
-        XCTAssertNil(Backend.parseNotificationPoll("HTTP/2.0 401 Unauthorized\r\n"))
-        XCTAssertNil(Backend.parseNotificationPoll(""))
+    @Test func errorsAreNil() {
+        #expect(Backend.parseNotificationPoll("HTTP/2.0 401 Unauthorized\r\n") == nil)
+        #expect(Backend.parseNotificationPoll("") == nil)
     }
 }

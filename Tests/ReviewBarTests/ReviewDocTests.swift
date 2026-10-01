@@ -1,8 +1,8 @@
-import XCTest
+import Testing
 @testable import ReviewBar
 
-final class ReviewDocTests: XCTestCase {
-    func testVerdictAndFindingBoxes() {
+struct ReviewDocTests {
+    @Test func verdictAndFindingBoxes() {
         let doc = ReviewDoc.parse("""
         VERDICT: Request changes — refresh can race.
 
@@ -16,26 +16,26 @@ final class ReviewDocTests: XCTestCase {
         ## Good
         - Tests.
         """)
-        XCTAssertEqual(doc.first, .verdict(.requestChanges, reason: "refresh can race."))
+        #expect(doc.first == .verdict(.requestChanges, reason: "refresh can race."))
         let findings = doc.compactMap { s -> ReviewDoc.Severity?? in
             if case .finding(let sev, _, _) = s { return sev } else { return nil }
         }
-        XCTAssertEqual(findings, [.blocker, .nit])
-        XCTAssertTrue(doc.contains(.block(.heading(level: 2, text: "Good"))))
+        #expect(findings == [.blocker, .nit])
+        #expect(doc.contains(.block(.heading(level: 2, text: "Good"))))
     }
 
-    func testLegacyLeanBecomesVerdict() {
-        XCTAssertEqual(ReviewDoc.parse("## Lean\nApprove, small and safe.").first,
-                       .verdict(.approve, reason: "small and safe."))
+    @Test func legacyLeanBecomesVerdict() {
+        #expect(ReviewDoc.parse("## Lean\nApprove, small and safe.").first
+                == .verdict(.approve, reason: "small and safe."))
     }
 
-    func testNoVerdictIsFine() {
-        XCTAssertEqual(ReviewDoc.parse("Just notes."), [.block(.paragraph("Just notes."))])
+    @Test func noVerdictIsFine() {
+        #expect(ReviewDoc.parse("Just notes.") == [.block(.paragraph("Just notes."))])
     }
 }
 
-final class PostableCommentTests: XCTestCase {
-    func testQuestionSeverityAndPostableComment() {
+struct PostableCommentTests {
+    @Test func questionSeverityAndPostableComment() {
         let doc = ReviewDoc.parse("""
         ### [question] `a.swift:3` Archived projects?
         Why: old query excluded them.
@@ -44,14 +44,14 @@ final class PostableCommentTests: XCTestCase {
         .filter { !$0.archived }
         ```
         """)
-        guard case .finding(let sev, _, let blocks) = doc.first else { return XCTFail("no finding") }
-        XCTAssertEqual(sev, .question)
-        XCTAssertEqual(ReviewDoc.postable(blocks),
-                       "question: Is this meant to include archived projects? The old query excluded them.\n\n"
-                       + "```suggestion\n.filter { !$0.archived }\n```")
+        guard case .finding(let sev, _, let blocks) = doc.first else { Issue.record("no finding"); return }
+        #expect(sev == .question)
+        #expect(ReviewDoc.postable(blocks)
+                == "question: Is this meant to include archived projects? The old query excluded them.\n\n"
+                + "```suggestion\n.filter { !$0.archived }\n```")
     }
 
-    func testNoCommentNoButton() {
-        XCTAssertNil(ReviewDoc.postable([.paragraph("Why: x")]))
+    @Test func noCommentNoButton() {
+        #expect(ReviewDoc.postable([.paragraph("Why: x")]) == nil)
     }
 }

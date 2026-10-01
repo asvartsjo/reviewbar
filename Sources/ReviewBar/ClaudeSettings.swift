@@ -1,0 +1,55 @@
+import Foundation
+
+/// Two model/effort pairs, stored in UserDefaults:
+/// - review: "Review with Claude" and every Terminal session (anything that reads code)
+/// - quick: "Summarise feedback", which reads only comments, never the diff
+/// Models are Claude Code aliases, so each follows the latest model in its family.
+/// An empty value passes no flag, so Claude Code's own configuration applies.
+enum ClaudeSettings {
+    static let models = ["opus", "sonnet", "haiku", "fable", ""]
+    static let quickModels = [sameAsReview] + models
+    static let efforts = ["", "low", "medium", "high", "xhigh", "max"]
+    static let sameAsReview = "same"
+
+    static let reviewModelKey = "reviewModel", reviewEffortKey = "reviewEffort"
+    static let quickModelKey = "quickModel", quickEffortKey = "quickEffort"
+    static let reviewModelDefault = "opus", reviewEffortDefault = ""
+    static let quickModelDefault = "sonnet", quickEffortDefault = "low"
+
+    private static func value(_ key: String, _ fallback: String, allowed: [String]) -> String {
+        let v = UserDefaults.standard.string(forKey: key) ?? fallback
+        return allowed.contains(v) ? v : fallback   // only whitelisted values reach the shell
+    }
+
+    static var review: (model: String, effort: String) {
+        (value(reviewModelKey, reviewModelDefault, allowed: models),
+         value(reviewEffortKey, reviewEffortDefault, allowed: efforts))
+    }
+
+    static var quick: (model: String, effort: String) {
+        let m = value(quickModelKey, quickModelDefault, allowed: quickModels)
+        let e = value(quickEffortKey, quickEffortDefault, allowed: efforts)
+        return (m == sameAsReview ? review.model : m, e)
+    }
+
+    /// Command-line flags for a pair, with a leading space, or "" for all defaults.
+    static func flags(_ pair: (model: String, effort: String)) -> String {
+        (pair.model.isEmpty ? "" : " --model \(pair.model)")
+            + (pair.effort.isEmpty ? "" : " --effort \(pair.effort)")
+    }
+
+    /// Short label such as "Opus · high" or "default".
+    static func label(_ pair: (model: String, effort: String)) -> String {
+        let parts = [pair.model.isEmpty ? "" : displayName(pair.model), pair.effort].filter { !$0.isEmpty }
+        return parts.isEmpty ? "default" : parts.joined(separator: " · ")
+    }
+
+    static func displayName(_ value: String) -> String {
+        switch value {
+        case "": return "Default"
+        case sameAsReview: return "Same as reviews"
+        case "xhigh": return "Extra high"
+        default: return value.prefix(1).uppercased() + value.dropFirst()
+        }
+    }
+}

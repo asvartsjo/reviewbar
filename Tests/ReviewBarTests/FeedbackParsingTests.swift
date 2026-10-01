@@ -1,8 +1,9 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ReviewBar
 
 /// Feeds sample GraphQL responses (shaped like `repliesQuery` / `myPRsQuery`) to the parsers.
-final class FeedbackParsingTests: XCTestCase {
+struct FeedbackParsingTests {
 
     // MARK: Replies on threads I took part in
 
@@ -28,39 +29,39 @@ final class FeedbackParsingTests: XCTestCase {
         Data(#"{"data": {"viewer": {"login": "me"}, "search": {"nodes": [\#(nodes.joined(separator: ","))]}}}"#.utf8)
     }
 
-    func testReplyAfterMyCommentIsWaiting() throws {
+    @Test func replyAfterMyCommentIsWaiting() throws {
         let t = thread(opener: "me", recent: [("me", "2026-09-01T10:00:00Z"), ("alice", "2026-09-02T10:00:00Z")])
         let replies = try Backend.parseReplies(repliesJSON([replyNode(1, threads: t)]))
-        XCTAssertEqual(replies.count, 1)
-        XCTAssertEqual(replies[0].waiting, 1)
-        XCTAssertEqual(replies[0].latestBy, "alice")
-        XCTAssertEqual(replies[0].latestAt, "2026-09-02T10:00:00Z")
-        XCTAssertEqual(replies[0].pr.headRefOid, "abc1234def")
+        #expect(replies.count == 1)
+        #expect(replies[0].waiting == 1)
+        #expect(replies[0].latestBy == "alice")
+        #expect(replies[0].latestAt == "2026-09-02T10:00:00Z")
+        #expect(replies[0].pr.headRefOid == "abc1234def")
     }
 
-    func testNotWaitingWhenIAnsweredLastResolvedOrNotMine() throws {
+    @Test func notWaitingWhenIAnsweredLastResolvedOrNotMine() throws {
         let iAnswered = thread(opener: "me", recent: [("alice", "2026-09-02T10:00:00Z"), ("me", "2026-09-03T10:00:00Z")])
         let resolved = thread(resolved: true, opener: "me", recent: [("alice", "2026-09-02T10:00:00Z")])
         let notMine = thread(opener: "bob", recent: [("bob", "2026-09-01T10:00:00Z"), ("alice", "2026-09-02T10:00:00Z")])
         let replies = try Backend.parseReplies(repliesJSON([replyNode(2, threads: [iAnswered, resolved, notMine].joined(separator: ","))]))
-        XCTAssertTrue(replies.isEmpty)
+        #expect(replies.isEmpty)
     }
 
-    func testRepliesSortedNewestFirstAndCounted() throws {
+    @Test func repliesSortedNewestFirstAndCounted() throws {
         let older = thread(opener: "me", recent: [("alice", "2026-09-02T10:00:00Z")])
         let newer = thread(opener: "me", recent: [("bob", "2026-09-05T10:00:00Z")])
         let replies = try Backend.parseReplies(repliesJSON([
             replyNode(3, threads: older),
             replyNode(4, threads: [older, newer].joined(separator: ",")),
         ]))
-        XCTAssertEqual(replies.map(\.pr.number), [4, 3])
-        XCTAssertEqual(replies[0].waiting, 2)
-        XCTAssertEqual(replies[0].latestBy, "bob")
+        #expect(replies.map(\.pr.number) == [4, 3])
+        #expect(replies[0].waiting == 2)
+        #expect(replies[0].latestBy == "bob")
     }
 
-    func testNullNodesAreSkipped() throws {
+    @Test func nullNodesAreSkipped() throws {
         let replies = try Backend.parseReplies(repliesJSON(["null", "{}"]))
-        XCTAssertTrue(replies.isEmpty)
+        #expect(replies.isEmpty)
     }
 
     // MARK: Feedback on my own PRs
@@ -100,110 +101,110 @@ final class FeedbackParsingTests: XCTestCase {
         #"{"isResolved": \#(resolved), "comments": {"nodes": [\#(last)]}}"#
     }
 
-    func testChangeRequestAfterLastCommitCounts() throws {
+    @Test func changeRequestAfterLastCommitCounts() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             decision: "CHANGES_REQUESTED",
             reviews: [review("alice", "CHANGES_REQUESTED", "2026-09-11T09:00:00Z")]))
-        XCTAssertEqual(prs.count, 1)
-        XCTAssertEqual(prs[0].reviews, 1)
-        XCTAssertEqual(prs[0].decision, "CHANGES_REQUESTED")
-        XCTAssertEqual(prs[0].latestBy, "alice")
-        XCTAssertEqual(prs[0].summary, "1 review")
+        #expect(prs.count == 1)
+        #expect(prs[0].reviews == 1)
+        #expect(prs[0].decision == "CHANGES_REQUESTED")
+        #expect(prs[0].latestBy == "alice")
+        #expect(prs[0].summary == "1 review")
     }
 
-    func testFeedbackOlderThanMyLastCommitIsAnswered() throws {
+    @Test func feedbackOlderThanMyLastCommitIsAnswered() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             reviews: [review("alice", "CHANGES_REQUESTED", "2026-09-09T09:00:00Z")],
             comments: [comment("bob", "2026-09-08T09:00:00Z")]))
-        XCTAssertTrue(prs.isEmpty)
+        #expect(prs.isEmpty)
     }
 
-    func testMyLaterCommentCountsAsAnswer() throws {
+    @Test func myLaterCommentCountsAsAnswer() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             comments: [comment("bob", "2026-09-11T09:00:00Z"), comment("me", "2026-09-11T10:00:00Z")]))
-        XCTAssertTrue(prs.isEmpty)
+        #expect(prs.isEmpty)
     }
 
-    func testBotsAreIgnored() throws {
+    @Test func botsAreIgnored() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             reviews: [review("coverage", "COMMENTED", "2026-09-11T09:00:00Z", body: "Coverage 91%", bot: true)],
             comments: [comment("ci", "2026-09-11T09:00:00Z", bot: true)],
             threads: [myThread(last: comment("lint", "2026-09-11T09:00:00Z", bot: true))]))
-        XCTAssertTrue(prs.isEmpty)
+        #expect(prs.isEmpty)
     }
 
     /// A COMMENTED review with no summary only wraps thread comments, which are counted as threads.
-    func testEmptyCommentedReviewIsNotCountedTwice() throws {
+    @Test func emptyCommentedReviewIsNotCountedTwice() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             reviews: [review("alice", "COMMENTED", "2026-09-11T09:00:00Z")],
             threads: [myThread(last: comment("alice", "2026-09-11T09:00:00Z"))]))
-        XCTAssertEqual(prs.count, 1)
-        XCTAssertEqual(prs[0].threads, 1)
-        XCTAssertEqual(prs[0].reviews, 0)
-        XCTAssertEqual(prs[0].summary, "1 thread")
+        #expect(prs.count == 1)
+        #expect(prs[0].threads == 1)
+        #expect(prs[0].reviews == 0)
+        #expect(prs[0].summary == "1 thread")
     }
 
-    func testUnresolvedThreadWaitsEvenIfOlderThanLastCommit() throws {
+    @Test func unresolvedThreadWaitsEvenIfOlderThanLastCommit() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             threads: [myThread(last: comment("alice", "2026-09-01T09:00:00Z")),
                       myThread(resolved: true, last: comment("bob", "2026-09-01T09:00:00Z")),
                       myThread(last: comment("me", "2026-09-02T09:00:00Z"))]))
-        XCTAssertEqual(prs.count, 1)
-        XCTAssertEqual(prs[0].threads, 1)
+        #expect(prs.count == 1)
+        #expect(prs[0].threads == 1)
     }
 
-    func testSummaryPluralsAndOrder() throws {
+    @Test func summaryPluralsAndOrder() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             reviews: [review("alice", "APPROVED", "2026-09-11T09:00:00Z")],
             comments: [comment("bob", "2026-09-11T08:00:00Z"), comment("carol", "2026-09-11T12:00:00Z")],
             threads: [myThread(last: comment("alice", "2026-09-11T07:00:00Z")),
                       myThread(last: comment("bob", "2026-09-11T06:00:00Z"))]))
-        XCTAssertEqual(prs[0].summary, "2 threads · 1 review · 2 comments")
-        XCTAssertEqual(prs[0].latestBy, "carol")
+        #expect(prs[0].summary == "2 threads · 1 review · 2 comments")
+        #expect(prs[0].latestBy == "carol")
     }
 
     // MARK: CI and merge state
 
-    func testApprovedGreenMergeableIsListedAsReady() throws {
+    @Test func approvedGreenMergeableIsListedAsReady() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             decision: "APPROVED",
             reviews: [review("alice", "APPROVED", "2026-09-09T09:00:00Z")],   // before last commit: no feedback
             checks: "SUCCESS", mergeable: "MERGEABLE"))
-        XCTAssertEqual(prs.count, 1)
-        XCTAssertTrue(prs[0].readyToMerge)
-        XCTAssertEqual(prs[0].summary, "Ready to merge")
-        XCTAssertEqual(prs[0].latestAt, "2026-09-09T09:00:00Z")   // the approval: stable for dismissing
-        XCTAssertEqual(prs[0].latestBy, "alice")
+        #expect(prs.count == 1)
+        #expect(prs[0].readyToMerge)
+        #expect(prs[0].summary == "Ready to merge")
+        #expect(prs[0].latestAt == "2026-09-09T09:00:00Z")   // the approval: stable for dismissing
+        #expect(prs[0].latestBy == "alice")
     }
 
-    func testFailingChecksAndConflictsAreListed() throws {
+    @Test func failingChecksAndConflictsAreListed() throws {
         let failing = try Backend.parseMyPRs(myPRsJSON(checks: "FAILURE", mergeable: "MERGEABLE"))
-        XCTAssertEqual(failing.first?.status, "Checks failing")
-        XCTAssertEqual(failing.first?.latestAt, "2026-09-10T00:00:00Z")   // the head commit
+        #expect(failing.first?.status == "Checks failing")
+        #expect(failing.first?.latestAt == "2026-09-10T00:00:00Z")   // the head commit
         let conflict = try Backend.parseMyPRs(myPRsJSON(checks: "SUCCESS", mergeable: "CONFLICTING"))
-        XCTAssertEqual(conflict.first?.status, "Merge conflict")
+        #expect(conflict.first?.status == "Merge conflict")
     }
 
-    func testQuietPRsStayHidden() throws {
-        XCTAssertTrue(try Backend.parseMyPRs(myPRsJSON(checks: "SUCCESS", mergeable: "MERGEABLE")).isEmpty)
-        XCTAssertTrue(try Backend.parseMyPRs(myPRsJSON(checks: "PENDING", mergeable: "UNKNOWN")).isEmpty)
+    @Test func quietPRsStayHidden() throws {
+        #expect(try Backend.parseMyPRs(myPRsJSON(checks: "SUCCESS", mergeable: "MERGEABLE")).isEmpty)
+        #expect(try Backend.parseMyPRs(myPRsJSON(checks: "PENDING", mergeable: "UNKNOWN")).isEmpty)
     }
 
-    func testFeedbackRowsStillShowCountsWithStatus() throws {
+    @Test func feedbackRowsStillShowCountsWithStatus() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             comments: [comment("bob", "2026-09-11T09:00:00Z")], checks: "FAILURE", mergeable: "MERGEABLE"))
-        XCTAssertEqual(prs[0].summary, "1 comment")
-        XCTAssertEqual(prs[0].status, "Checks failing")
+        #expect(prs[0].summary == "1 comment")
+        #expect(prs[0].status == "Checks failing")
     }
 
     // MARK: Review keys
 
-    func testReviewKeyUsesHeadCommitWhenKnown() {
+    @Test func reviewKeyUsesHeadCommitWhenKnown() {
         var pr = PR(number: 1, title: "t", url: "u", isDraft: false, updatedAt: "2026-09-01T00:00:00Z",
                     repository: .init(nameWithOwner: "o/r"), author: .init(login: "a"))
-        XCTAssertEqual(pr.reviewKey, "u@2026-09-01T00:00:00Z")
+        #expect(pr.reviewKey == "u@2026-09-01T00:00:00Z")
         pr.headRefOid = "abc1234def"
-        XCTAssertEqual(pr.reviewKey, "u@abc1234def")
-        XCTAssertEqual(pr.versionLabel, "abc1234")
+        #expect(pr.reviewKey == "u@abc1234def")
+        #expect(pr.versionLabel == "abc1234")
     }
 }

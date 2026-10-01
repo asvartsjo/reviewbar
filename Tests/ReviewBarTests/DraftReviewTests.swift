@@ -1,7 +1,7 @@
-import XCTest
+import Testing
 @testable import ReviewBar
 
-final class DraftReviewTests: XCTestCase {
+struct DraftReviewTests {
     private let review = """
     ### [blocker] `src/a.swift:3` Crash
     > Guests crash here; moving the check up fixes it.
@@ -36,29 +36,29 @@ final class DraftReviewTests: XCTestCase {
      print(a)
     """
 
-    func testNitsAreLeftOutAndRangesKept() {
+    @Test func nitsAreLeftOutAndRangesKept() {
         let cs = DraftReview.comments(from: review)
-        XCTAssertEqual(cs.map(\.line), [3, 3, 40])
-        XCTAssertEqual(cs[1].startLine, 2)
-        XCTAssertFalse(cs.contains { $0.body.contains("nit:") })
+        #expect(cs.map(\.line) == [3, 3, 40])
+        #expect(cs[1].startLine == 2)
+        #expect(!cs.contains { $0.body.contains("nit:") })
     }
 
-    func testMultiLineSuggestionWithoutRangeIsDefused() {
+    @Test func multiLineSuggestionWithoutRangeIsDefused() {
         let cs = DraftReview.comments(from: review)
-        XCTAssertFalse(cs[0].body.contains("```suggestion"))
-        XCTAssertTrue(cs[1].body.contains("```suggestion"))
+        #expect(!cs[0].body.contains("```suggestion"))
+        #expect(cs[1].body.contains("```suggestion"))
     }
 
-    func testCommentableLines() {
-        XCTAssertEqual(DraftReview.commentableLines(diff)["src/a.swift"], [1, 2, 3, 4])
+    @Test func commentableLines() {
+        #expect(DraftReview.commentableLines(diff)["src/a.swift"] == [1, 2, 3, 4])
     }
 
-    func testOutsideDiffGoesToBody() {
+    @Test func outsideDiffGoesToBody() {
         let body = DraftReview.requestBody(comments: DraftReview.comments(from: review),
                                            commentable: DraftReview.commentableLines(diff), commit: "abc")
-        XCTAssertEqual((body["comments"] as? [[String: Any]])?.count, 2)
-        XCTAssertTrue((body["body"] as? String)?.contains("src/a.swift:40") == true)
-        XCTAssertNil(body["event"])   // no event: GitHub keeps it pending
-        XCTAssertEqual(body["commit_id"] as? String, "abc")
+        #expect((body["comments"] as? [[String: Any]])?.count == 2)
+        #expect((body["body"] as? String)?.contains("src/a.swift:40") == true)
+        #expect(body["event"] == nil)   // no event: GitHub keeps it pending
+        #expect(body["commit_id"] as? String == "abc")
     }
 }

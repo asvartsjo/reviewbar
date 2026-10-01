@@ -166,6 +166,16 @@ struct WorktreeCleanupTests {
         #expect(try await head(t.worktree.path) == next)
     }
 
+    @Test func aRelaunchKeepsEditedFiles() async throws {
+        let t = try await makeWorktree("print more >> .gitignore")
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        _ = try await sh("git -C \(q(t.worktree.repoFolder)) -c user.name=t -c user.email=t@t commit -q --allow-empty -m next")
+        try await publish(t, head: try await head(t.worktree.repoFolder))
+        let out = try await sh(t.worktree.script)
+        #expect(try await head(t.worktree.path) == t.head)
+        #expect(out.contains("it has local changes"))
+    }
+
     @Test func aRelaunchKeepsLocalCommits() async throws {
         let t = try await makeWorktree("print y > fix.txt && git add fix.txt && git -c user.name=t -c user.email=t@t commit -qm fix")
         defer { try? FileManager.default.removeItem(at: t.root) }

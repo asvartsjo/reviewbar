@@ -99,7 +99,8 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         var ref: String { "refs/reviewbar/pr-\(number)" }
 
         /// Shell lines: fetch the PR head, create or update the worktree, cd into it. A worktree
-        /// with local changes, or commits the PR doesn't have yet, stays where it is. Any failure
+        /// with edits to tracked files, or commits the PR doesn't have yet, stays where it is
+        /// (untracked files move along, unless the new head would overwrite one). Any failure
         /// falls back to the clone itself, with a message. Pure, for tests.
         var script: String {
             let repo = q(repoFolder), wt = q(path)
@@ -109,7 +110,8 @@ enum TerminalApp: String, CaseIterable, Identifiable {
               git -C \(repo) worktree prune
               if [[ -d \(wt) ]]; then
                 if (cd \(wt) && \(Self.exitOnLocalCommits(notIn: [ref]))); then
-                  git -C \(wt) checkout --quiet --detach \(ref) \
+                  [[ -z "$(git -C \(wt) status --porcelain --untracked-files=no)" ]] \
+                    && git -C \(wt) checkout --quiet --detach \(ref) \
                     || print "Kept the worktree as it is: it has local changes."
                 else
                   print "Kept the worktree as it is: it has commits the PR doesn't have yet."

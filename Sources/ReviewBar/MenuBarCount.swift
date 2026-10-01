@@ -21,12 +21,13 @@ enum MenuBarCount {
         }
     }
 
-    /// Distinct PRs from the parts that are on: a PR in several of them counts once. Pure, for tests.
-    static func count(yourTurn: [ReviewingPR], feedback: [String], mentions: [String], counting p: Parts) -> Int {
+    /// Distinct PRs from the parts that are on: a PR in several of them counts once. Mentions count
+    /// by their PR's link, since theirs usually points at a comment. Pure, for tests.
+    static func count(yourTurn: [ReviewingPR], feedback: [String], mentions: [Mention], counting p: Parts) -> Int {
         var urls = Set<String>()
         for r in yourTurn where r.isRequested ? p.requests : p.reviewed { urls.insert(r.pr.url) }
         if p.myPRs { urls.formUnion(feedback) }
-        if p.mentions { urls.formUnion(mentions) }
+        if p.mentions { urls.formUnion(mentions.map(\.prURL)) }
         return urls.count
     }
 }

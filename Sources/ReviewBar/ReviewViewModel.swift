@@ -383,7 +383,7 @@ final class ReviewViewModel: ObservableObject {
     /// PRs, and mentions.
     var badgeCount: Int {
         MenuBarCount.count(yourTurn: reviewing.filter { $0.group == .yours && !isMuted($0) },
-                           feedback: visibleFeedback.map(\.pr.url), mentions: visibleMentions.map(\.prURL),
+                           feedback: visibleFeedback.map(\.pr.url), mentions: visibleMentions,
                            counting: .current)
     }
 

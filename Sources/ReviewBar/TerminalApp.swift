@@ -199,11 +199,14 @@ enum TerminalApp: String, CaseIterable, Identifiable {
 
         /// Shell lines that exit 1 when a commit made in the worktree (read from its HEAD reflog)
         /// is in none of `refs`: a local commit, even one HEAD has since moved away from.
-        /// Checkouts and resets only move to commits that already exist, so they don't count.
+        /// Every entry counts (`pull` writes its own) except checkouts and resets, which only move
+        /// to commits that already exist, and the empty one `worktree add` writes. No reflog, or
+        /// one git can't read, exits 1 too.
         private static func exitOnLocalCommits(notIn refs: [String]) -> String {
             let inRefs = refs.map { "git merge-base --is-ancestor $c \($0) 2>/dev/null" }.joined(separator: " || ")
             return """
-            for c in $(git log -g --format='%H %gs' HEAD 2>/dev/null | awk '$2 ~ /^(commit|cherry-pick|revert|merge|rebase|am)/ { print $1 }'); do \
+            git reflog exists HEAD && log=$(git log -g --format='%H %gs' HEAD) || exit 1; \
+            for c in $(print -r -- "$log" | awk 'NF > 1 && $2 !~ /^(checkout|reset):$/ { print $1 }'); do \
             \(inRefs) || exit 1; done
             """
         }

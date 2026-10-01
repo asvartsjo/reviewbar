@@ -686,6 +686,7 @@ struct SettingsView: View {
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
+    @AppStorage(Backend.reviewStyleKey) private var reviewStyle = Backend.reviewStyleDefault
     @AppStorage(TerminalApp.Worktree.nextToCloneKey) private var worktreesNextToClone = false
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
@@ -936,6 +937,34 @@ struct SettingsView: View {
             Text(worktreesNextToClone
                  ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. gauss-worktrees/pr-42."
                  : "Each PR is checked out in ReviewBar's Application Support folder.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            Divider()
+            Text("Review prompt").font(.headline)
+            Text("How reviews are written and how suggested comments are worded. Used by every review and re-review, "
+                 + "and by new reviews in the terminal unless a Review command is set.")
+                .font(.caption2).foregroundStyle(.secondary)
+            TextEditor(text: $reviewStyle)
+                .font(.system(.caption, design: .monospaced))
+                .frame(height: 220)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
+            HStack {
+                if Backend.reviewStyle(saved: reviewStyle) != Backend.reviewStyleDefault {
+                    Text("Edited").font(.caption).foregroundStyle(.orange)
+                }
+                Spacer()
+                Button("Reset to built-in") { reviewStyle = Backend.reviewStyleDefault }
+                    .disabled(Backend.reviewStyle(saved: reviewStyle) == Backend.reviewStyleDefault)
+            }
+            DisclosureGroup("Full prompt") {
+                Text(Backend.reviewPromptPreview(style: reviewStyle))
+                    .font(.system(.caption2, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.caption)
+            Text("The rules and the output format around it are fixed: ReviewBar reads the verdict and findings "
+                 + "from them. Empty means the built-in prompt.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             Divider()

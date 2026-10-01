@@ -13,9 +13,18 @@ enum Backend {
     /// Tools are added per run: none, or read-only ones inside the PR's worktree.
     static let headlessFlags = "-p --output-format text --strict-mcp-config"
 
-    /// Shared output shape for reviews. ReviewDoc renders the VERDICT line as a colored banner
-    /// and each `###` finding as its own box, so keep those markers stable.
-    static let reviewStyle = """
+    /// How reviews are written and worded. Editable in Settings › Review prompt; the rules,
+    /// verdict line and finding format around it stay fixed.
+    static let reviewStyleKey = "reviewStyle"
+    static var reviewStyle: String { reviewStyle(saved: UserDefaults.standard.string(forKey: reviewStyleKey)) }
+
+    /// The saved style, or the built-in one when it's unset or blank. Pure, for tests.
+    static func reviewStyle(saved: String?) -> String {
+        guard let saved, !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return reviewStyleDefault }
+        return saved
+    }
+
+    static let reviewStyleDefault = """
         STYLE
         - Be brief. Short sentences, no filler, no restating the diff. If unsure, say so. Never invent line numbers.
         - Fewer, better findings. Group repeated nits into one. Skip anything a linter or formatter would catch.
@@ -41,6 +50,8 @@ enum Backend {
         Bad: "Great work! One small thought: it might perhaps be worth potentially looking at error handling here." (filler, hedging)
         """
 
+    /// Shared output shape for reviews. ReviewDoc renders the VERDICT line as a colored banner
+    /// and each `###` finding as its own box, so keep those markers stable.
     static let findingFormat = """
         Each finding is its own block, ordered blocker → should-fix → question → nit:
 
@@ -1108,12 +1119,18 @@ enum Backend {
     /// Fresh review prompt.
     static func buildPrompt(for pr: PR) async throws -> String {
         let c = try await context(for: pr)
-        return """
+        return reviewPrompt(style: reviewStyle, pr: "\(pr.repository.nameWithOwner)#\(pr.number) by \(pr.author.login)",
+                            url: pr.url, meta: c.meta, note: c.note, diff: c.diff)
+    }
+
+    /// The review prompt around a PR's details. Pure, so Settings can show it with placeholders.
+    static func reviewPrompt(style: String, pr: String, url: String, meta: String, note: String, diff: String) -> String {
+        """
         You are helping me prepare to review a pull request.
 
         \(rules)
 
-        \(reviewStyle)
+        \(style)
 
         OUTPUT (markdown)
 
@@ -1131,15 +1148,21 @@ enum Backend {
         ## Missing
         Tests, docs or edge cases not covered, one bullet each. Omit if none.
 
-        PR: \(pr.repository.nameWithOwner)#\(pr.number) by \(pr.author.login)
-        URL: \(pr.url)
+        PR: \(pr)
+        URL: \(url)
 
         METADATA (JSON):
-        \(c.meta)
-        \(c.note)
+        \(meta)
+        \(note)
         DIFF:
-        \(c.diff)
+        \(diff)
         """
+    }
+
+    /// The full review prompt with placeholders for the PR's details, for Settings.
+    static func reviewPromptPreview(style: String) -> String {
+        reviewPrompt(style: reviewStyle(saved: style), pr: "owner/repo#123 by author", url: "https://github.com/owner/repo/pull/123",
+                     meta: "{ title, description, author, branches, size }", note: "", diff: "(the PR's diff)")
     }
 
     /// Follow-up prompt: seeds a new session with the saved review (if any), the feedback

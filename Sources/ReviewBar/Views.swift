@@ -951,13 +951,17 @@ struct SettingsView: View {
                 .font(.system(.caption, design: .monospaced))
                 .frame(height: 220)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
+                // Text equal to the built-in style isn't saved, so later changes to it still apply.
+                .onChange(of: reviewStyle) { _, v in
+                    if v == Backend.reviewStyleDefault { UserDefaults.standard.removeObject(forKey: Backend.reviewStyleKey) }
+                }
             HStack {
                 if Backend.reviewStyle(saved: reviewStyle) != Backend.reviewStyleDefault {
                     Text("Edited").font(.caption).foregroundStyle(.orange)
                 }
                 Spacer()
-                Button("Reset to built-in") { reviewStyle = Backend.reviewStyleDefault }
-                    .disabled(Backend.reviewStyle(saved: reviewStyle) == Backend.reviewStyleDefault)
+                Button("Reset to built-in") { UserDefaults.standard.removeObject(forKey: Backend.reviewStyleKey) }
+                    .disabled(reviewStyle == Backend.reviewStyleDefault)
             }
             DisclosureGroup("Full prompt") {
                 Text(Backend.reviewPromptPreview(style: reviewStyle))
@@ -966,8 +970,8 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .font(.caption)
-            Text("The rules and the output format around it are fixed: ReviewBar reads the verdict and findings "
-                 + "from them. Empty means the built-in prompt.")
+            Text("The rules and the verdict and finding markers around it are fixed: ReviewBar reads the verdict and "
+                 + "findings from them. How comments are worded is up to the text above. Empty means the built-in prompt.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
@@ -1003,7 +1007,8 @@ struct SettingsView: View {
             }
             .padding(.leading, 12)
             Text(countRequests || countReviewed || countMyPRs || countMentions
-                 ? "Each PR counts once, even when it's in more than one of these. Muted PRs never count."
+                 ? "Each PR counts once, even when it's in more than one of these. PRs muted in Reviewing don't count "
+                   + "as requests or activity, but a mention still counts."
                  : "Nothing is counted, so the menu bar shows only the icon.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Open as a window", isOn: $asWindow)

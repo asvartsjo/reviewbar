@@ -378,14 +378,12 @@ final class ReviewViewModel: ObservableObject {
         UserDefaults.standard.set(dismissed, forKey: "dismissedReplies")
     }
 
-    static let badgeCountsMyPRsKey = MenuBarCount.myPRsKey
-
     /// Distinct PRs needing you, from what Settings › Menu bar number picks: Reviewing's Your turn
     /// (split into review requests and activity on PRs you reviewed; not muted), feedback on your
     /// PRs, and mentions.
     var badgeCount: Int {
         MenuBarCount.count(yourTurn: reviewing.filter { $0.group == .yours && !isMuted($0) },
-                           feedback: visibleFeedback.map(\.pr.url), mentions: visibleMentions.map(\.url),
+                           feedback: visibleFeedback.map(\.pr.url), mentions: visibleMentions.map(\.prURL),
                            counting: .current)
     }
 

@@ -60,7 +60,7 @@ enum Backend {
         the relevant code, max ~6 lines
         ```
         Why: one or two sentences, for me.
-        > The suggested comment, ready to post (see SUGGESTED COMMENTS).
+        > The suggested comment, ready to post, worded as the style above says.
         ```suggestion
         optional, only for a small concrete fix
         ```

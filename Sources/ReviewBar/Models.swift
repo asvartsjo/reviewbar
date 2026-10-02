@@ -428,19 +428,19 @@ struct FeedbackPR: Identifiable, Hashable {
     var checks: String? = nil
     /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub still computing).
     var mergeable: String? = nil
+    /// A reviewer (not a bot) left a review, comment or thread, answered or not.
+    var hasFeedback = false
     var id: String { pr.url }
 
     func with(latestAt: String, latestBy: String) -> FeedbackPR {
         FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
-                   latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable)
+                   latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable,
+                   hasFeedback: hasFeedback)
     }
 
     /// Nothing new: no unanswered feedback, no blocker, not ready to merge. Listed in My PRs,
     /// but never notifies or counts, and can't be dismissed.
     var isQuiet: Bool { latestAt.isEmpty }
-
-    /// Reviewer feedback you have not answered yet (threads, reviews or comments).
-    var hasFeedback: Bool { threads + reviews + comments > 0 }
 
     var checksFailing: Bool { checks == "FAILURE" || checks == "ERROR" }
     var hasConflict: Bool { mergeable == "CONFLICTING" }

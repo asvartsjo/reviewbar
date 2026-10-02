@@ -892,7 +892,10 @@ enum Backend {
                         createdAt: n.createdAt)
             var f = FeedbackPR(pr: pr, decision: n.reviewDecision, threads: threads, reviews: reviews,
                                comments: comments, latestAt: latestAt, latestBy: latestBy,
-                               checks: head?.statusCheckRollup?.state, mergeable: n.mergeable)
+                               checks: head?.statusCheckRollup?.state, mergeable: n.mergeable,
+                               hasFeedback: n.reviews.items.contains { isReviewer($0.author) }
+                                   || n.comments.items.contains { isReviewer($0.author) }
+                                   || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) })
 
             // No unanswered feedback: news only if something blocks it, or it can be merged.
             // Otherwise it's quiet (no `latestAt`): listed, but never notifies or counts.

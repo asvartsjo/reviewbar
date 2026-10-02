@@ -117,6 +117,7 @@ struct FeedbackParsingTests {
             reviews: [review("alice", "CHANGES_REQUESTED", "2026-09-09T09:00:00Z")],
             comments: [comment("bob", "2026-09-08T09:00:00Z")]))
         #expect(prs.map(\.isQuiet) == [true])
+        #expect(prs.map(\.hasFeedback) == [true])   // answered, but still worth a summary
     }
 
     @Test func myLaterCommentCountsAsAnswer() throws {
@@ -131,6 +132,7 @@ struct FeedbackParsingTests {
             comments: [comment("ci", "2026-09-11T09:00:00Z", bot: true)],
             threads: [myThread(last: comment("lint", "2026-09-11T09:00:00Z", bot: true))]))
         #expect(prs.map(\.isQuiet) == [true])
+        #expect(prs.map(\.hasFeedback) == [false])
     }
 
     /// A COMMENTED review with no summary only wraps thread comments, which are counted as threads.

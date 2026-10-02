@@ -410,7 +410,7 @@ struct ReviewingDetail: Equatable {
     var blockingOpen: Int { myOpenSeverities.filter(\.isBlocking).count }
 }
 
-/// One of your own open PRs with reviewer feedback you have not answered yet.
+/// One of your own open PRs, with any reviewer feedback you have not answered yet.
 struct FeedbackPR: Identifiable, Hashable {
     let pr: PR
     /// GitHub's overall review decision: APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or nil.
@@ -438,6 +438,9 @@ struct FeedbackPR: Identifiable, Hashable {
     /// Nothing new: no unanswered feedback, no blocker, not ready to merge. Listed in My PRs,
     /// but never notifies or counts, and can't be dismissed.
     var isQuiet: Bool { latestAt.isEmpty }
+
+    /// Reviewer feedback you have not answered yet (threads, reviews or comments).
+    var hasFeedback: Bool { threads + reviews + comments > 0 }
 
     var checksFailing: Bool { checks == "FAILURE" || checks == "ERROR" }
     var hasConflict: Bool { mergeable == "CONFLICTING" }

@@ -827,7 +827,7 @@ enum Backend {
     }
     """
 
-    /// All your open PRs, with what a reviewer (not a bot) left that you have not answered:
+    /// Your open PRs (the 30 most recently updated), with what a reviewer (not a bot) left that you have not answered:
     /// an unresolved thread whose last comment is theirs, or a review or comment
     /// newer than your last commit or comment. One read-only GraphQL query.
     static func fetchMyPRs(skipping skipped: Set<String> = []) async throws -> [FeedbackPR] {
@@ -848,7 +848,7 @@ enum Backend {
         let data = try JSONDecoder().decode(GQL<MyPRsData>.self, from: json).data
         let me = data.viewer.login
 
-        return data.search.items.compactMap { n -> FeedbackPR? in
+        return data.search.items.map { n -> FeedbackPR in
             func isReviewer(_ a: GitHubUser?) -> Bool { a.map { $0.login != me && !$0.isBot } ?? false }
 
             // Your last activity: newest commit, or anything you wrote on the PR.

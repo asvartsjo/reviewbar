@@ -621,10 +621,10 @@ final class ReviewViewModel: ObservableObject {
 
     // MARK: Quick summaries
 
-    /// Summaries are offered where there are comments to read: replies to you, your own PRs,
-    /// or a PR where others spoke after your review.
+    /// Summaries are offered where there are comments to read: replies to you, your own PRs
+    /// with feedback, or a PR where others spoke after your review.
     func canSummarise(_ pr: PR) -> Bool {
-        isMine(pr) || replies.contains { $0.pr.url == pr.url } || summarySince(pr) != nil
+        myPRs.contains { $0.pr.url == pr.url && $0.hasFeedback } || replies.contains { $0.pr.url == pr.url } || summarySince(pr) != nil
     }
 
     /// Your last review, when others spoke after it: the summary then covers what happened since.
@@ -635,7 +635,8 @@ final class ReviewViewModel: ObservableObject {
 
     /// Changes when new comments arrive, so an old summary isn't shown as current.
     private func summaryKey(_ pr: PR) -> String {
-        let latest = myPRs.first { $0.pr.url == pr.url }?.latestAt
+        // A quiet PR has no `latestAt`; `updatedAt` still moves with every comment or push.
+        let latest = myPRs.first { $0.pr.url == pr.url }.map { $0.latestAt.isEmpty ? $0.pr.updatedAt : $0.latestAt }
             ?? [replies.first { $0.pr.url == pr.url }?.latestAt, reviewingPR(for: pr)?.latestAt].compactMap { $0 }.max()
             ?? ""
         return pr.url + "#" + latest

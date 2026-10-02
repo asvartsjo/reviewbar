@@ -183,6 +183,7 @@ struct FeedbackParsingTests {
         #expect(failing.first?.latestAt == "2026-09-10T00:00:00Z")   // the head commit
         let conflict = try Backend.parseMyPRs(myPRsJSON(checks: "SUCCESS", mergeable: "CONFLICTING"))
         #expect(conflict.first?.status == "Merge conflict")
+        #expect(conflict.first?.isQuiet == false)
     }
 
     /// A PR nobody has looked at yet is still listed, but quiet: no time, so it never notifies.
@@ -191,6 +192,7 @@ struct FeedbackParsingTests {
             let prs = try Backend.parseMyPRs(myPRsJSON(checks: checks, mergeable: mergeable))
             #expect(prs.count == 1)
             #expect(prs[0].isQuiet)
+            #expect(!prs[0].hasFeedback)   // so no "Summarise feedback" box
             #expect(prs[0].latestBy == "")
             #expect(prs[0].pr.createdAt == "2026-09-09T00:00:00Z")
             #expect(AlertDiff.newer(prs, seen: [:], url: \.pr.url, latestAt: \.latestAt).isEmpty)

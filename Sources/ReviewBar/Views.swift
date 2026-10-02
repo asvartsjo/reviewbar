@@ -256,18 +256,31 @@ struct ContentView: View {
 
     // MARK: my PRs
 
+    /// PRs with new feedback first, then the rest of your open PRs.
     private var mineList: some View {
         Group {
-            if vm.visibleFeedback.isEmpty && !vm.loading {
-                empty("tray", "No new feedback on your open PRs.")
+            if vm.myPRs.isEmpty && !vm.loading {
+                empty("tray", "No open PRs of yours.")
             } else {
-                List(vm.visibleFeedback) { f in
-                    Button { selected = f.pr } label: { feedbackRow(f) }
-                        .listRowSeparator(.hidden)
-                        .buttonStyle(.hoverRow)
-                        .contextMenu {
-                            Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
+                List {
+                    ForEach(vm.visibleFeedback) { f in
+                        Button { selected = f.pr } label: { feedbackRow(f) }
+                            .listRowSeparator(.hidden)
+                            .buttonStyle(.hoverRow)
+                            .contextMenu {
+                                Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
+                            }
+                    }
+                    if !vm.otherMyPRs.isEmpty {
+                        sectionHeader("Nothing new", count: vm.otherMyPRs.count)
+                            .padding(.top, vm.visibleFeedback.isEmpty ? 0 : 10)
+                            .listRowSeparator(.hidden)
+                        ForEach(vm.otherMyPRs) { f in
+                            Button { selected = f.pr } label: { feedbackRow(f, quiet: true) }
+                                .listRowSeparator(.hidden)
+                                .buttonStyle(.hoverRow)
                         }
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -275,7 +288,8 @@ struct ContentView: View {
         }
     }
 
-    private func feedbackRow(_ f: FeedbackPR) -> some View {
+    /// `quiet`: nothing new to show (or dismissed), so the line says when it was opened instead.
+    private func feedbackRow(_ f: FeedbackPR, quiet: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 numberedTitle(f.pr.number, f.pr.title)
@@ -284,7 +298,12 @@ struct ContentView: View {
                 StatusBadge(feedback: f)
                 DecisionBadge(decision: f.decision)
             }
-            metaLine(f.pr.repository.nameWithOwner, f.latestBy, " \(age(f.latestAt)) · \(f.summary)")
+            if quiet {
+                metaLine(f.pr.repository.nameWithOwner, "",
+                         f.pr.createdAt.map { "opened \(age($0))" } ?? "updated \(age(f.pr.updatedAt))")
+            } else {
+                metaLine(f.pr.repository.nameWithOwner, f.latestBy, " \(age(f.latestAt)) · \(f.summary)")
+            }
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())

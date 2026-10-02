@@ -361,13 +361,20 @@ final class ReviewViewModel: ObservableObject {
     func dismissMention(_ m: Mention) { dismiss("mention:" + m.url, until: m.updatedAt) }
 
     /// Your PRs with feedback you have not dismissed (or newer than what you dismissed).
+    /// Quiet PRs have no `latestAt`, so they're never in it.
     var visibleFeedback: [FeedbackPR] {
         myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
     }
 
+    /// The rest of your open PRs: quiet or dismissed, most recently updated first.
+    var otherMyPRs: [FeedbackPR] {
+        let shown = Set(visibleFeedback.map(\.pr.url))
+        return myPRs.filter { !shown.contains($0.pr.url) }.sorted { $0.pr.updatedAt > $1.pr.updatedAt }
+    }
+
     func feedback(for pr: PR) -> FeedbackPR? { visibleFeedback.first { $0.pr.url == pr.url } }
 
-    /// True for your own PRs (with feedback, dismissed or not).
+    /// True for your own open PRs.
     func isMine(_ pr: PR) -> Bool { myPRs.contains { $0.pr.url == pr.url } }
 
     func dismissFeedback(_ f: FeedbackPR) { dismiss(f.pr.url, until: f.latestAt) }

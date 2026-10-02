@@ -812,7 +812,7 @@ enum Backend {
       viewer { login }
       search(query: $q, type: ISSUE, first: 30) {
         nodes { ... on PullRequest {
-          number title url isDraft updatedAt headRefOid reviewDecision
+          number title url isDraft createdAt updatedAt headRefOid reviewDecision
           repository { nameWithOwner } author { login }
           mergeable
           commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
@@ -827,7 +827,7 @@ enum Backend {
     }
     """
 
-    /// Your open PRs where a reviewer (not a bot) left something you have not answered:
+    /// All your open PRs, with what a reviewer (not a bot) left that you have not answered:
     /// an unresolved thread whose last comment is theirs, or a review or comment
     /// newer than your last commit or comment. One read-only GraphQL query.
     static func fetchMyPRs(skipping skipped: Set<String> = []) async throws -> [FeedbackPR] {
@@ -842,7 +842,8 @@ enum Backend {
         return try parseMyPRs(Data(out.utf8))
     }
 
-    /// The `myPRsQuery` response → my PRs with unanswered feedback. Pure, for tests.
+    /// The `myPRsQuery` response → all my open PRs, those with unanswered feedback (or a blocker,
+    /// or ready to merge) first; the rest are quiet (`isQuiet`). Pure, for tests.
     static func parseMyPRs(_ json: Data) throws -> [FeedbackPR] {
         let data = try JSONDecoder().decode(GQL<MyPRsData>.self, from: json).data
         let me = data.viewer.login
@@ -887,14 +888,16 @@ enum Backend {
             let head = n.commits.items.last?.commit
             let pr = PR(number: n.number, title: n.title, url: n.url, isDraft: n.isDraft,
                         updatedAt: n.updatedAt, repository: n.repository,
-                        author: n.author ?? PR.Author(login: me), headRefOid: n.headRefOid)
+                        author: n.author ?? PR.Author(login: me), headRefOid: n.headRefOid,
+                        createdAt: n.createdAt)
             var f = FeedbackPR(pr: pr, decision: n.reviewDecision, threads: threads, reviews: reviews,
                                comments: comments, latestAt: latestAt, latestBy: latestBy,
                                checks: head?.statusCheckRollup?.state, mergeable: n.mergeable)
 
-            // No unanswered feedback: still list it if something blocks it, or it can be merged.
+            // No unanswered feedback: news only if something blocks it, or it can be merged.
+            // Otherwise it's quiet (no `latestAt`): listed, but never notifies or counts.
             if threads + reviews + comments == 0 {
-                guard f.hasConflict || f.checksFailing || f.readyToMerge else { return nil }
+                guard f.hasConflict || f.checksFailing || f.readyToMerge else { return f }
                 // Stable timestamps, so dismissing holds and notifications fire once per state:
                 // the latest approval for "ready", the head commit for a blocker.
                 let approval = n.reviews.items
@@ -919,6 +922,7 @@ enum Backend {
             let title: String
             let url: String
             let isDraft: Bool
+            let createdAt: String?
             let updatedAt: String
             let headRefOid: String?
             let reviewDecision: String?

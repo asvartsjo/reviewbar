@@ -421,7 +421,8 @@ struct FeedbackPR: Identifiable, Hashable {
     let reviews: Int
     /// Conversation comments since your last push or comment.
     let comments: Int
-    let latestAt: String   // ISO 8601
+    /// ISO 8601; empty when the PR is quiet.
+    let latestAt: String
     let latestBy: String
     /// Combined CI state of the head commit: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED or nil.
     var checks: String? = nil
@@ -433,6 +434,10 @@ struct FeedbackPR: Identifiable, Hashable {
         FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
                    latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable)
     }
+
+    /// Nothing new: no unanswered feedback, no blocker, not ready to merge. Listed in My PRs,
+    /// but never notifies or counts, and can't be dismissed.
+    var isQuiet: Bool { latestAt.isEmpty }
 
     var checksFailing: Bool { checks == "FAILURE" || checks == "ERROR" }
     var hasConflict: Bool { mergeable == "CONFLICTING" }

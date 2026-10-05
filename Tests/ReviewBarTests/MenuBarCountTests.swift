@@ -25,6 +25,13 @@ struct MenuBarCountTests {
         #expect(MenuBarCount.count(yourTurn: turn, feedback: [url(3)], mentions: [mention(4)], counting: .init()) == 4)
     }
 
+    /// Each Claude session waiting on you counts on its own, and can be left out.
+    @Test func crewSessionsCountApart() {
+        #expect(MenuBarCount.count(yourTurn: [], feedback: [url(3)], mentions: [], crew: ["s1", "s2"], counting: .init()) == 3)
+        var noCrew = MenuBarCount.Parts(); noCrew.crew = false
+        #expect(MenuBarCount.count(yourTurn: [], feedback: [url(3)], mentions: [], crew: ["s1"], counting: noCrew) == 1)
+    }
+
     @Test func eachPartCanBeLeftOut() {
         // A different number of PRs per part, so a part counted under the wrong toggle shows.
         let turn = [yourTurn(1, requested: true), yourTurn(2, requested: true), yourTurn(3, requested: false)]

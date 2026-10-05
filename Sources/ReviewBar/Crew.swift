@@ -82,6 +82,27 @@ enum Crew {
     }
 }
 
+extension Crew {
+    /// Sessions waiting on me now that weren't at the last poll (`before`: the ids that were). The
+    /// first poll only sets the baseline (`before` nil), so launching never notifies. Pure, for tests.
+    static func newlyWaiting(_ now: [CrewItem], before: Set<String>?) -> [CrewItem] {
+        guard let before else { return [] }
+        return now.filter { $0.session.needsMe && !before.contains($0.id) }
+    }
+
+    /// "since 09:42" today, "since 2 Oct" before that. It's the process start, which resets when
+    /// agent view restarts a session (after a reboot or sleep), so it never claims more than that.
+    /// Pure, for tests.
+    static func since(_ started: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let f = DateFormatter()
+        f.calendar = calendar
+        f.timeZone = calendar.timeZone
+        f.locale = Locale(identifier: "en_GB")
+        f.dateFormat = calendar.isDate(started, inSameDayAs: now) ? "HH:mm" : "d MMM"
+        return "since \(f.string(from: started))"
+    }
+}
+
 extension Backend {
     /// Where `claude` lives, looked up once through the login shell. The crew poll then runs it
     /// directly: a login shell costs about 0.6 s, too much every 15 s.

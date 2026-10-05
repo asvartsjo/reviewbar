@@ -28,6 +28,8 @@ final class ReviewViewModel: ObservableObject {
     private var crewTimer: Timer?
     /// Claude sessions in my watched repos (Crew), waiting on me first.
     @Published private(set) var crew: [CrewItem] = []
+    /// Ids of the sessions that were waiting on me at the last poll; nil until the first one.
+    private var crewWaiting: Set<String>?
     private var lastRefresh: Date?
     private var refreshAgain = false
     /// What the previous successful refresh saw, per list; nil until the first one (the baseline).
@@ -420,7 +422,7 @@ final class ReviewViewModel: ObservableObject {
     var badgeCount: Int {
         MenuBarCount.count(yourTurn: reviewing.filter { $0.group == .yours && !isMuted($0) },
                            feedback: visibleFeedback.map(\.pr.url), mentions: visibleMentions,
-                           counting: .current)
+                           crew: crew.filter(\.session.needsMe).map(\.id), counting: .current)
     }
 
     func state(for pr: PR) -> ReviewState { reviews[pr.reviewKey] ?? .idle }
@@ -738,8 +740,19 @@ final class ReviewViewModel: ObservableObject {
     /// refresh. Claude Code only; a failed read keeps the last list.
     func refreshCrew() async {
         guard Agent.current == .claude else { crew = []; return }
-        let fresh = DemoData.isOn ? DemoData.crew() : await Backend.crew(repos: RepoList.load(), myPRs: myPRs)
-        if let fresh, fresh != crew { crew = fresh }
+        guard let fresh = DemoData.isOn ? DemoData.crew() : await Backend.crew(repos: RepoList.load(), myPRs: myPRs)
+        else { return }
+        for item in Crew.newlyWaiting(fresh, before: crewWaiting) { Notifier.crew(item, pr: pr(for: item)) }
+        crewWaiting = Set(fresh.filter(\.session.needsMe).map(\.id))
+        if fresh != crew { crew = fresh }
+    }
+
+    /// The crew session on this PR, one waiting on me first; nil when none.
+    func crewItem(for pr: PR) -> CrewItem? {
+        let mine = crew.filter {
+            $0.prNumber == pr.number && $0.repo.lowercased() == pr.repository.nameWithOwner.lowercased()
+        }
+        return mine.first { $0.session.needsMe } ?? mine.first
     }
 
     /// The PR a crew session works on, if the app lists it.

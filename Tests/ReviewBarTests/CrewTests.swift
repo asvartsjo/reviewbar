@@ -83,4 +83,20 @@ struct CrewTests {
                                session("asks", clone, needsMe: true, started: 2)], to: checkouts)
         #expect(items.map(\.session.id) == ["asks", "new", "old"])
     }
+
+    @Test func notifiesOnlyWhenASessionStartsWaiting() {
+        let asks = CrewItem(session: session("a", clone, needsMe: true), repo: "Teachiq/gauss", prNumber: nil)
+        let busy = CrewItem(session: session("b", clone), repo: "Teachiq/gauss", prNumber: nil)
+        #expect(Crew.newlyWaiting([asks, busy], before: nil).isEmpty)          // first poll: baseline
+        #expect(Crew.newlyWaiting([asks, busy], before: []).map(\.id) == ["a"])
+        #expect(Crew.newlyWaiting([asks, busy], before: ["a"]).isEmpty)        // still the same question
+    }
+
+    @Test func sinceSaysTheTimeTodayAndTheDateBefore() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Europe/Stockholm")!
+        let now = ISO8601DateFormatter().date(from: "2026-10-05T12:00:00Z")!
+        #expect(Crew.since(ISO8601DateFormatter().date(from: "2026-10-05T07:42:00Z")!, now: now, calendar: cal) == "since 09:42")
+        #expect(Crew.since(ISO8601DateFormatter().date(from: "2026-10-02T09:16:00Z")!, now: now, calendar: cal) == "since 2 Oct")
+    }
 }

@@ -209,6 +209,7 @@ struct ContentView: View {
                     if r.pr.isDraft { draftBadge }
                     Spacer(minLength: 4)
                     HStack(spacing: 5) {
+                        if let item = vm.crewItem(for: r.pr) { CrewBadge(item: item) }
                         if r.isRequested { openAge(r.pr) }
                         savedReviewIcon(r.pr)
                         ChecksIcon(state: r.checks, labelled: true)
@@ -331,7 +332,7 @@ struct ContentView: View {
             (Text(verbatim: "\(item.repo) · ").foregroundStyle(.secondary)
                 + Text(item.session.needsMe ? "needs you" : "working")
                     .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
-                + Text(verbatim: " · \(item.session.background ? "agent view" : "terminal") · started \(age(Self.isoParser.string(from: item.session.startedAt)))")
+                + Text(verbatim: " · \(item.session.background ? "agent view" : "terminal") · \(Crew.since(item.session.startedAt))")
                     .foregroundStyle(.secondary))
                 .font(.caption).lineLimit(1)
         }
@@ -368,6 +369,7 @@ struct ContentView: View {
                 numberedTitle(f.pr.number, f.pr.title)
                 if f.pr.isDraft { draftBadge }
                 Spacer(minLength: 4)
+                if let item = vm.crewItem(for: f.pr) { CrewBadge(item: item) }
                 StatusBadge(feedback: f)
                 DecisionBadge(decision: f.decision)
             }
@@ -791,6 +793,7 @@ struct SettingsView: View {
     @AppStorage(MenuBarCount.reviewedKey) private var countReviewed = true
     @AppStorage(MenuBarCount.myPRsKey) private var countMyPRs = true
     @AppStorage(MenuBarCount.mentionsKey) private var countMentions = true
+    @AppStorage(MenuBarCount.crewKey) private var countCrew = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
@@ -805,6 +808,7 @@ struct SettingsView: View {
     @AppStorage(NotifySettings.resolvedKey) private var notifyAllResolved = true
     @AppStorage(NotifySettings.verdictsKey) private var notifyVerdicts = true
     @AppStorage(NotifySettings.mentionsKey) private var notifyMentions = true
+    @AppStorage(NotifySettings.crewKey) private var notifyCrew = true
     @ViewState private var notificationsAllowed: UNAuthorizationStatus?
     @ViewState private var openAtLogin = LoginItem.isAvailable && LoginItem.status == .enabled
     @ViewState private var loginProblem: String?
@@ -1119,6 +1123,7 @@ struct SettingsView: View {
             Toggle("Other reviewers approve or request changes", isOn: $notifyVerdicts)
             Toggle("Feedback on your PRs", isOn: $notifyFeedback)
             Toggle("@mentions of you or your teams", isOn: $notifyMentions)
+            Toggle("A Claude session needs you (Claude Code only)", isOn: $notifyCrew)
             notificationHint
 
             Divider()
@@ -1129,9 +1134,10 @@ struct SettingsView: View {
                 Toggle("New commits or replies on PRs you reviewed", isOn: $countReviewed)
                 Toggle("Feedback on your PRs", isOn: $countMyPRs)
                 Toggle("Mentions", isOn: $countMentions)
+                Toggle("Claude sessions that need you", isOn: $countCrew)
             }
             .padding(.leading, 12)
-            Text(countRequests || countReviewed || countMyPRs || countMentions
+            Text(countRequests || countReviewed || countMyPRs || countMentions || countCrew
                  ? "Each PR counts once, even when it's in more than one of these. PRs muted in Reviewing don't count "
                    + "as requests or activity, but a mention still counts."
                  : "Nothing is counted, so the menu bar shows only the icon.")
@@ -1330,6 +1336,19 @@ struct ChecksIcon: View {
 
     @ViewBuilder private func icon(_ symbol: String, _ text: String) -> some View {
         if labelled { Label(text, systemImage: symbol) } else { Image(systemName: symbol).help(text) }
+    }
+}
+
+/// A Claude session on this PR: waiting on you (orange) or at work.
+struct CrewBadge: View {
+    let item: CrewItem
+
+    var body: some View {
+        Label(item.session.needsMe ? "Claude needs you" : "Claude working",
+              systemImage: item.session.needsMe ? "questionmark.bubble.fill" : "ellipsis.bubble")
+            .font(.caption)
+            .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
+            .help(item.session.background ? "An agent view session (see Crew in My PRs)" : "A Claude session in a terminal window")
     }
 }
 

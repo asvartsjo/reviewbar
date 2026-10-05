@@ -122,4 +122,35 @@ struct CrewTests {
         #expect(Crew.openSession(onPR: 4962, repo: "Teachiq/gauss", crew: crew,
                                  launchedAt: now.addingTimeInterval(-90), now: now) == nil)
     }
+
+    /// Shaped like the real tree: a VS Code extension session, an iTerm2 one, and one with no known app.
+    private let processes = """
+        1     0 /sbin/launchd
+     1241     1 /Applications/Visual Studio Code.app/Contents/MacOS/Code
+    12558  1241 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)
+    16378 12558 /Users/me/.vscode/extensions/anthropic.claude-code-2.1.287-darwin-arm64/resources/native-binary/claude
+     1246     1 /Applications/iTerm.app/Contents/MacOS/iTerm2
+     1324  1246 /Users/me/Library/Application Support/iTerm2/iTermServer-3.7.3
+    61660  1324 /bin/zsh
+    61679 61660 claude
+      900     1 /usr/sbin/sshd
+      901   900 claude
+      700   701 claude
+      701   700 /bin/zsh
+    """
+
+    @Test func readsTheProcessTableWithSpacesInPaths() {
+        let t = Crew.parseProcessTable(processes)
+        #expect(t[12558]?.ppid == 1241)
+        #expect(t[12558]?.comm.hasSuffix("Code Helper (Plugin)") == true)
+    }
+
+    @Test func findsTheAppASessionRunsIn() {
+        let t = Crew.parseProcessTable(processes)
+        #expect(Crew.host(of: 16378, in: t) == .vscode)
+        #expect(Crew.host(of: 61679, in: t) == .iterm)
+        #expect(Crew.host(of: 901, in: t) == .other)
+        #expect(Crew.host(of: 700, in: t) == .other)   // a parent loop ends, it doesn't hang
+        #expect(Crew.host(of: 999, in: t) == .other)
+    }
 }

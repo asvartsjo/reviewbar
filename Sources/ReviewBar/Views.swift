@@ -272,6 +272,10 @@ struct ContentView: View {
                     if !vm.allCrew.isEmpty {
                         sectionHeader("Crew", count: vm.crew.count)
                             .listRowSeparator(.hidden)
+                        if let notice = vm.terminalNotice {
+                            Text(notice).font(.caption).foregroundStyle(.secondary)
+                                .listRowSeparator(.hidden)
+                        }
                         ForEach(vm.crew) { item in
                             crewRow(item)
                                 .listRowSeparator(.hidden)
@@ -352,7 +356,7 @@ struct ContentView: View {
             (Text(verbatim: "\(pr == nil ? item.repo : item.session.name) · ").foregroundStyle(.secondary)
                 + Text(item.session.needsMe ? "needs you" : item.session.working ? "working" : "idle")
                     .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
-                + Text(verbatim: " · \(item.session.background ? "agent view" : "terminal") · \(Crew.since(item.session.startedAt))")
+                + Text(verbatim: " · \(item.session.background ? "agent view" : item.session.host?.name ?? "terminal") · \(Crew.since(item.session.startedAt))")
                     .foregroundStyle(.secondary))
                 .font(.caption).lineLimit(1)
         }
@@ -379,7 +383,7 @@ struct ContentView: View {
     /// Terminal sessions only: an agent view session's row already opens it.
     private func showButton(_ item: CrewItem) -> some View {
         Button("Show session", systemImage: "macwindow") { vm.show(item) }
-            .help("Bring its tab to the front (iTerm2 and Terminal)")
+            .help("Bring its window to the front (iTerm2, Terminal or VS Code)")
     }
 
     private func stopButton(_ item: CrewItem) -> some View {

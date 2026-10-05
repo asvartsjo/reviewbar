@@ -15,6 +15,8 @@ struct CrewSession: Equatable, Identifiable {
     let startedAt: Date
     /// The process, for stopping a terminal session (which has no agent view `id`).
     var pid: Int? = nil
+    /// The app a terminal session runs in, from its parent processes; nil for agent view ones.
+    var host: Crew.Host? = nil
 
     /// Neither waiting on me nor working: at its prompt, or a status this version doesn't know.
     var idle: Bool { !needsMe && !working }
@@ -92,6 +94,45 @@ enum Crew {
 }
 
 extension Crew {
+    /// Where a terminal session lives: what Show session can bring to the front, and what its row says.
+    enum Host: Equatable {
+        case iterm, terminal, vscode, other
+
+        var name: String {
+            switch self {
+            case .iterm: "iTerm2"
+            case .terminal: "Terminal"
+            case .vscode: "VS Code"
+            case .other: "terminal"
+            }
+        }
+    }
+
+    /// `ps -axo pid=,ppid=,comm=` → pid → (parent, executable path). Paths may contain spaces.
+    /// Pure, for tests.
+    static func parseProcessTable(_ ps: String) -> [Int: (ppid: Int, comm: String)] {
+        var table: [Int: (ppid: Int, comm: String)] = [:]
+        for line in ps.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+            guard parts.count == 3, let pid = Int(parts[0]), let ppid = Int(parts[1]) else { continue }
+            table[pid] = (ppid, String(parts[2]))
+        }
+        return table
+    }
+
+    /// The first known app among `pid`'s parents (at most 20 up, so a loop can't hang it). Pure, for tests.
+    static func host(of pid: Int, in table: [Int: (ppid: Int, comm: String)]) -> Host {
+        var current = table[pid]?.ppid
+        for _ in 0..<20 {
+            guard let p = current, p > 1, let entry = table[p] else { break }
+            if entry.comm.contains("/iTerm.app/") { return .iterm }
+            if entry.comm.contains("/Terminal.app/") { return .terminal }
+            if entry.comm.contains("/Visual Studio Code.app/") { return .vscode }
+            current = entry.ppid
+        }
+        return .other
+    }
+
     /// Sessions waiting on me now that weren't at the last poll (`before`: the ids that were). The
     /// first poll only sets the baseline (`before` nil), so launching never notifies. Pure, for tests.
     static func newlyWaiting(_ now: [CrewItem], before: Set<String>?) -> [CrewItem] {
@@ -166,10 +207,11 @@ extension Backend {
             }
             checkouts += Crew.checkouts(repo: repo, repoFolder: folder, listed: listed, myPRs: myPRs)
         }
+        let table = Crew.parseProcessTable(await run("/bin/ps", ["-axo", "pid=,ppid=,comm="]) ?? "")
         let real = sessions.map {
             CrewSession(id: $0.id, name: $0.name, cwd: URL(fileURLWithPath: $0.cwd).resolvingSymlinksInPath().path,
                         background: $0.background, needsMe: $0.needsMe, working: $0.working, startedAt: $0.startedAt,
-                        pid: $0.pid)
+                        pid: $0.pid, host: $0.background ? nil : $0.pid.map { Crew.host(of: $0, in: table) })
         }
         return Crew.link(real, to: checkouts)
     }
@@ -219,9 +261,13 @@ extension Backend {
         return kill(pid_t(pid), SIGTERM) == 0
     }
 
-    /// Brings a terminal session's tab to the front: its tty (from `ps`) matched against the tabs
-    /// of iTerm2 and Terminal, whichever are running. False when it isn't found there.
+    /// Brings a terminal session's window to the front: in iTerm2 or Terminal its tab, found by its
+    /// tty (from `ps`); in VS Code the window of its folder (the Claude panel inside can't be picked).
+    /// False when it isn't found.
     static func reveal(_ session: CrewSession) async -> Bool {
+        if session.host == .vscode {
+            return await run("/usr/bin/open", ["-b", "com.microsoft.VSCode", session.cwd]) != nil
+        }
         guard let pid = session.pid,
               let tty = await run("/bin/ps", ["-o", "tty=", "-p", String(pid)])?
                   .trimmingCharacters(in: .whitespacesAndNewlines) else { return false }

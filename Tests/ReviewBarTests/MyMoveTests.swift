@@ -97,7 +97,7 @@ struct MyGroupTests {
         let s = MyGroup.sections([mine(1, draft: true, updated: "2026-09-01T00:00:00Z", threads: 1, latestAt: "2026-09-01T00:00:00Z"),
                                   mine(2, draft: true, updated: "2026-09-20T00:00:00Z"),
                                   mine(3, updated: "2026-08-01T00:00:00Z")], dismissed: [:], now: now)
-        #expect(numbers(s) == [.oldDrafts: [1], .yours: [2], .waiting: [3]])
+        #expect(numbers(s) == [.parked: [1], .yours: [2], .waiting: [3]])
     }
 
     /// GitHub bumps `updatedAt` on labels and bulk edits; the last commit says when work stopped.
@@ -105,7 +105,13 @@ struct MyGroupTests {
         let s = MyGroup.sections([mine(1, draft: true, updated: "2026-10-04T00:00:00Z", lastCommit: "2026-07-16T00:00:00Z"),
                                   mine(2, draft: true, updated: "2026-07-16T00:00:00Z", lastCommit: "2026-10-01T00:00:00Z")],
                                  dismissed: [:], now: now)
-        #expect(numbers(s) == [.oldDrafts: [1], .yours: [2]])
+        #expect(numbers(s) == [.parked: [1], .yours: [2]])
+    }
+
+    @Test func parkedByHandWhateverItsMoveOrDates() {
+        let urgent = mine(1, threads: 1, latestAt: "2026-10-04T10:00:00Z", mergeable: "CONFLICTING")
+        let s = MyGroup.sections([urgent, mine(2)], dismissed: [:], parked: [urgent.pr.url], now: now)
+        #expect(numbers(s) == [.parked: [1], .waiting: [2]])
     }
 
     @Test func yourMoveMostUrgentThenWaitingLongest() {

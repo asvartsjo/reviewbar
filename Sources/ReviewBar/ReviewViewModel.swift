@@ -363,13 +363,36 @@ final class ReviewViewModel: ObservableObject {
     /// Your PRs with feedback you have not dismissed (or newer than what you dismissed).
     /// Quiet PRs have no `latestAt`, so they're never in it.
     var visibleFeedback: [FeedbackPR] {
-        myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
+        myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") && !parked.contains($0.pr.url) }
     }
 
     func feedback(for pr: PR) -> FeedbackPR? { visibleFeedback.first { $0.pr.url == pr.url } }
 
-    /// My PRs by whose move it is: Your move, Waiting on others, Old drafts.
-    var mySections: [(group: MyGroup, prs: [FeedbackPR])] { MyGroup.sections(myPRs, dismissed: dismissed) }
+    /// My PRs by whose move it is: Your move, Waiting on others, Parked.
+    var mySections: [(group: MyGroup, prs: [FeedbackPR])] {
+        MyGroup.sections(myPRs, dismissed: dismissed, parked: parked)
+    }
+
+    private static let parkedKey = "myPRsParked"
+    /// My PRs parked by hand: listed under Parked, never notify or count, until unparked.
+    @Published private var parked = Set(UserDefaults.standard.stringArray(forKey: parkedKey) ?? [])
+
+    func isParked(_ f: FeedbackPR) -> Bool { parked.contains(f.pr.url) }
+
+    func park(_ f: FeedbackPR) {
+        parked.insert(f.pr.url)
+        saveParked()
+    }
+
+    func unpark(_ f: FeedbackPR) {
+        parked.remove(f.pr.url)
+        saveParked()
+    }
+
+    private func saveParked() {
+        guard !DemoData.isOn else { return }
+        UserDefaults.standard.set(Array(parked), forKey: Self.parkedKey)
+    }
 
     var yourMoveCount: Int { mySections.first { $0.group == .yours }?.prs.count ?? 0 }
 

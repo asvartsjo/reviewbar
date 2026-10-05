@@ -18,7 +18,7 @@ struct ContentView: View {
     @ViewState private var selected: PR?
     @ViewState private var tab: Tab = .reviewing
     @ViewState private var showMuted = false
-    @ViewState private var showOldDrafts = false
+    @ViewState private var showParked = false
     @AppStorage(AsWindow.key) private var asWindow = false
 
     var body: some View {
@@ -257,7 +257,7 @@ struct ContentView: View {
 
     // MARK: my PRs
 
-    /// Your open PRs by whose move it is, Old drafts folded.
+    /// Your open PRs by whose move it is, Parked folded.
     private var mineList: some View {
         Group {
             if vm.myPRs.isEmpty && !vm.loading {
@@ -269,28 +269,32 @@ struct ContentView: View {
                         .listRowSeparator(.hidden)
                     ForEach(sections, id: \.group) { s in
                         Group {
-                            if s.group == .oldDrafts {
-                                Button { showOldDrafts.toggle() } label: {
-                                    sectionHeader(s.group.title, count: s.prs.count, folded: !showOldDrafts)
+                            if s.group == .parked {
+                                Button { showParked.toggle() } label: {
+                                    sectionHeader(s.group.title, count: s.prs.count, folded: !showParked)
                                 }
                                 .buttonStyle(.hoverRow)
-                                .help(showOldDrafts ? "Hide drafts with no commit for \(MyGroup.oldDraftDays)+ days"
-                                                    : "Show drafts with no commit for \(MyGroup.oldDraftDays)+ days")
+                                .help("\(showParked ? "Hide" : "Show") PRs you parked, and drafts with no commit for \(MyGroup.oldDraftDays)+ days")
                             } else {
                                 sectionHeader(s.group.title, count: s.prs.count)
                             }
                         }
                         .padding(.top, 6)
                         .listRowSeparator(.hidden)
-                        ForEach(s.group == .oldDrafts && !showOldDrafts ? [] : s.prs) { f in
+                        ForEach(s.group == .parked && !showParked ? [] : s.prs) { f in
                             let new = vm.visibleFeedback.contains(f)
-                            Button { selected = f.pr } label: { feedbackRow(f, quiet: !new, hint: s.group != .oldDrafts) }
+                            Button { selected = f.pr } label: { feedbackRow(f, quiet: !new, hint: s.group != .parked) }
                                 .listRowSeparator(.hidden)
                                 .buttonStyle(.hoverRow)
-                                .opacity(s.group == .oldDrafts ? 0.55 : 1)
+                                .opacity(s.group == .parked ? 0.55 : 1)
                                 .contextMenu {
                                     if new {
                                         Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
+                                    }
+                                    if vm.isParked(f) {
+                                        Button("Unpark", systemImage: "tray.and.arrow.up") { vm.unpark(f) }
+                                    } else if s.group != .parked {
+                                        Button("Park", systemImage: "tray.and.arrow.down") { vm.park(f) }
                                     }
                                 }
                         }
@@ -302,7 +306,7 @@ struct ContentView: View {
         }
     }
 
-    /// "3 wait on you · 5 on others", old drafts left out.
+    /// "3 wait on you · 5 on others", parked PRs left out.
     private func moveSummary(_ sections: [(group: MyGroup, prs: [FeedbackPR])]) -> some View {
         func count(_ g: MyGroup) -> Int { sections.first { $0.group == g }?.prs.count ?? 0 }
         return Text(verbatim: "\(count(.yours)) wait on you · \(count(.waiting)) on others")

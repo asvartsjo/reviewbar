@@ -1630,16 +1630,21 @@ enum Backend {
 
 extension Backend {
     /// Removes the worktrees ReviewBar made (`Worktree.ours`) for PRs that are merged or closed,
-    /// in every repo with a local clone, when `Worktree.removeScript` finds nothing to lose. Best effort:
-    /// anything that fails is left for the next run.
+    /// in every repo with a local clone, when `Worktree.removeScript` finds nothing to lose and no
+    /// process is working in it (`Worktree.inUse`). Best effort: anything that fails or is skipped is
+    /// left for the next run, and nothing is removed when the working directories can't be read.
     static func removeClosedWorktrees(repos: [String]) async {
+        guard let lsof = try? await sh("lsof -a -d cwd -Fn 2>/dev/null || true") else { return }
+        let cwds = TerminalApp.Worktree.parseCwds(lsof)
+        guard !cwds.isEmpty else { return }
         for repo in repos {
             guard let folder = RepoList.folder(for: repo),
                   let list = try? await sh("git -C \(q(folder)) worktree list --porcelain") else { continue }
             let ours = TerminalApp.Worktree.ours(TerminalApp.Worktree.parseList(list), repo: repo, repoFolder: folder)
             guard !ours.isEmpty, let states = await prStates(repo: repo, numbers: ours.map(\.number))
             else { continue }
-            for worktree in ours {
+            let busy = TerminalApp.Worktree.inUse(ours, cwds: cwds)
+            for worktree in ours where !busy.contains(worktree.path) {
                 guard let pr = states[worktree.number], pr.state != "OPEN" else { continue }
                 _ = try? await sh(worktree.removeScript(finalHead: pr.headRefOid))
             }

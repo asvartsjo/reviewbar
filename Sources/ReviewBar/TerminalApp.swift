@@ -180,6 +180,23 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             }
         }
 
+        /// The working directories in `lsof -a -d cwd -Fn` output: its `n<path>` lines. Pure, for tests.
+        static func parseCwds(_ lsof: String) -> Set<String> {
+            Set(lsof.split(separator: "\n").filter { $0.hasPrefix("n") }.map { String($0.dropFirst()) })
+        }
+
+        /// The worktrees a process (a terminal tab, a Claude session, a dev server) is working in,
+        /// in the folder itself or below it. Removing one would leave that process in a deleted
+        /// folder. Pure, for tests.
+        static func inUse(_ worktrees: [Worktree], cwds: Set<String>) -> Set<String> {
+            func real(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+            let dirs = cwds.map(real)
+            return Set(worktrees.map(\.path).filter { path in
+                let wt = real(path)
+                return dirs.contains { $0 == wt || $0.hasPrefix(wt + "/") }
+            })
+        }
+
         /// Shell lines that remove this worktree and its ref only if nothing would be lost:
         /// `git status` is empty (ignored files such as a copied `vendor/` don't count; untracked
         /// ones do, whatever `status.showUntrackedFiles` says), and HEAD and every commit made in

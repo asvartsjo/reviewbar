@@ -83,6 +83,13 @@ struct CrewTests {
         #expect(Set(items.map(\.repo)) == ["Teachiq/gauss"])
     }
 
+    @Test func theTabCountsOnlySessionsWaitingOnMe() {
+        let items = Crew.link([session("old", clone), session("asks", clone, needsMe: true),
+                               session("asks too", clone, needsMe: true)], to: checkouts)
+        #expect(Crew.waitingCount(items) == 2)
+        #expect(Crew.waitingCount([]) == 0)
+    }
+
     @Test func waitingOnMeFirstThenNewest() {
         let items = Crew.link([session("old", clone, started: 1), session("new", clone, started: 3),
                                session("asks", clone, needsMe: true, started: 2)], to: checkouts)

@@ -42,6 +42,9 @@ struct CrewItem: Equatable, Identifiable {
 enum Crew {
     static let pollInterval: TimeInterval = 15
 
+    /// How many of these sessions wait on me: the number on the Crew tab. Pure, for tests.
+    static func waitingCount(_ items: [CrewItem]) -> Int { items.filter(\.session.needsMe).count }
+
     /// `claude agents --json` → every session with a folder, idle ones too (Crew shows only the
     /// active ones; the second-session check needs them all). Only background sessions have an `id`
     /// (what `claude attach` takes); terminal ones have `sessionId` and `pid`. Fields or values it

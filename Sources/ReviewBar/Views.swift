@@ -630,6 +630,10 @@ struct DetailView: View {
         case .failed(let msg):
             Text(msg).foregroundStyle(.red)
         default:
+            if !vm.isMine(pr), let older = vm.olderReview(for: pr) {
+                DisclosureGroup("Your earlier review of \(older.pr.versionLabel): \(ReviewPage.label(older))") { MarkdownView(text: older.text) }
+                    .font(.caption)
+            }
             if !vm.isMine(pr) {
                 Text("Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
                     .foregroundStyle(.secondary)

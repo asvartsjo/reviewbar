@@ -31,7 +31,7 @@ final class ReviewViewModel: ObservableObject {
     /// The sessions Crew shows and counts: waiting on me or working.
     var crew: [CrewItem] { allCrew.filter { !$0.session.idle } }
     /// Sessions waiting on me, for the Crew tab's count.
-    var crewNeedingMeCount: Int { crew.filter(\.session.needsMe).count }
+    var crewNeedingMeCount: Int { Crew.waitingCount(allCrew) }
     /// Idle sessions, folded under Crew: one can live on with no visible window.
     var idleCrew: [CrewItem] { allCrew.filter(\.session.idle) }
     /// PR url → when ReviewBar last opened a session on it, for the second-session check.
@@ -438,6 +438,11 @@ final class ReviewViewModel: ObservableObject {
     /// True if an older review of this PR exists (the PR has new activity since).
     func hasOlderReview(_ pr: PR) -> Bool {
         saved.contains { $0.pr.url == pr.url && $0.id != pr.reviewKey }
+    }
+
+    /// The newest review of an earlier version of this PR, whether or not it recorded its commit.
+    func olderReview(for pr: PR) -> SavedReview? {
+        saved.first { $0.pr.url == pr.url && $0.id != pr.reviewKey }
     }
 
     /// The newest earlier review of this PR that recorded its commit, when the PR has moved on

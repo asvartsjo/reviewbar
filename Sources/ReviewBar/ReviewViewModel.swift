@@ -371,6 +371,8 @@ final class ReviewViewModel: ObservableObject {
     /// My PRs by whose move it is: Your move, Waiting on others, Old drafts.
     var mySections: [(group: MyGroup, prs: [FeedbackPR])] { MyGroup.sections(myPRs, dismissed: dismissed) }
 
+    var yourMoveCount: Int { mySections.first { $0.group == .yours }?.prs.count ?? 0 }
+
     /// True for your own open PRs.
     func isMine(_ pr: PR) -> Bool { myPRs.contains { $0.pr.url == pr.url } }
 

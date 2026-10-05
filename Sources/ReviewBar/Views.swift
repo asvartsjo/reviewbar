@@ -274,8 +274,8 @@ struct ContentView: View {
                                     sectionHeader(s.group.title, count: s.prs.count, folded: !showOldDrafts)
                                 }
                                 .buttonStyle(.hoverRow)
-                                .help(showOldDrafts ? "Hide drafts untouched for \(MyGroup.oldDraftDays)+ days"
-                                                    : "Show drafts untouched for \(MyGroup.oldDraftDays)+ days")
+                                .help(showOldDrafts ? "Hide drafts with no commit for \(MyGroup.oldDraftDays)+ days"
+                                                    : "Show drafts with no commit for \(MyGroup.oldDraftDays)+ days")
                             } else {
                                 sectionHeader(s.group.title, count: s.prs.count)
                             }
@@ -284,7 +284,7 @@ struct ContentView: View {
                         .listRowSeparator(.hidden)
                         ForEach(s.group == .oldDrafts && !showOldDrafts ? [] : s.prs) { f in
                             let new = vm.visibleFeedback.contains(f)
-                            Button { selected = f.pr } label: { feedbackRow(f, quiet: !new) }
+                            Button { selected = f.pr } label: { feedbackRow(f, quiet: !new, hint: s.group != .oldDrafts) }
                                 .listRowSeparator(.hidden)
                                 .buttonStyle(.hoverRow)
                                 .opacity(s.group == .oldDrafts ? 0.55 : 1)
@@ -310,7 +310,7 @@ struct ContentView: View {
     }
 
     /// `quiet`: nothing new to show (or dismissed), so the line says when it was opened instead.
-    private func feedbackRow(_ f: FeedbackPR, quiet: Bool = false) -> some View {
+    private func feedbackRow(_ f: FeedbackPR, quiet: Bool = false, hint: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 numberedTitle(f.pr.number, f.pr.title)
@@ -321,7 +321,7 @@ struct ContentView: View {
             }
             if quiet {
                 metaLine(f.pr.repository.nameWithOwner, "",
-                         (f.moveHint.map { "\($0) · " } ?? "")
+                         ((hint ? f.moveHint : nil).map { "\($0) · " } ?? "")
                             + (f.pr.createdAt.map { "opened \(age($0))" } ?? "updated \(age(f.pr.updatedAt))"))
             } else {
                 metaLine(f.pr.repository.nameWithOwner, f.latestBy, " \(age(f.latestAt)) · \(f.summary)")
@@ -400,7 +400,7 @@ struct ContentView: View {
     private func title(_ t: Tab) -> String {
         switch t {
         case .reviewing where vm.yourTurnCount > 0: return "\(t.rawValue) (\(vm.yourTurnCount))"
-        case .mine where !vm.visibleFeedback.isEmpty: return "\(t.rawValue) (\(vm.visibleFeedback.count))"
+        case .mine where vm.yourMoveCount > 0: return "\(t.rawValue) (\(vm.yourMoveCount))"
         case .mentions where !vm.visibleMentions.isEmpty: return "\(t.rawValue) (\(vm.visibleMentions.count))"
         default: return t.rawValue
         }

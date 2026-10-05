@@ -59,12 +59,13 @@ struct MyGroupTests {
     private let now = ISO8601DateFormatter().date(from: "2026-10-05T12:00:00Z")!
 
     private func mine(_ n: Int, draft: Bool = false, updated: String = "2026-10-04T00:00:00Z",
-                      threads: Int = 0, latestAt: String = "", checks: String? = "SUCCESS",
-                      mergeable: String? = "MERGEABLE") -> FeedbackPR {
+                      lastCommit: String? = nil, threads: Int = 0, latestAt: String = "",
+                      checks: String? = "SUCCESS", mergeable: String? = "MERGEABLE") -> FeedbackPR {
         let pr = PR(number: n, title: "PR \(n)", url: "https://github.com/o/r/pull/\(n)", isDraft: draft,
                     updatedAt: updated, repository: .init(nameWithOwner: "o/r"), author: .init(login: "me"))
         return FeedbackPR(pr: pr, decision: "REVIEW_REQUIRED", threads: threads, reviews: 0, comments: 0,
-                          latestAt: latestAt, latestBy: "", checks: checks, mergeable: mergeable)
+                          latestAt: latestAt, latestBy: "", checks: checks, mergeable: mergeable,
+                          lastCommitAt: lastCommit)
     }
 
     private func numbers(_ s: [(group: MyGroup, prs: [FeedbackPR])]) -> [MyGroup: [Int]] {
@@ -89,6 +90,14 @@ struct MyGroupTests {
                                   mine(2, draft: true, updated: "2026-09-20T00:00:00Z"),
                                   mine(3, updated: "2026-08-01T00:00:00Z")], dismissed: [:], now: now)
         #expect(numbers(s) == [.oldDrafts: [1], .yours: [2], .waiting: [3]])
+    }
+
+    /// GitHub bumps `updatedAt` on labels and bulk edits; the last commit says when work stopped.
+    @Test func oldDraftGoesByItsLastCommitNotUpdatedAt() {
+        let s = MyGroup.sections([mine(1, draft: true, updated: "2026-10-04T00:00:00Z", lastCommit: "2026-07-16T00:00:00Z"),
+                                  mine(2, draft: true, updated: "2026-07-16T00:00:00Z", lastCommit: "2026-10-01T00:00:00Z")],
+                                 dismissed: [:], now: now)
+        #expect(numbers(s) == [.oldDrafts: [1], .yours: [2]])
     }
 
     @Test func yourMoveMostUrgentThenWaitingLongest() {

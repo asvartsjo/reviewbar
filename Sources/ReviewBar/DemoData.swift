@@ -98,7 +98,7 @@ enum DemoData {
                            isDraft: true, updatedAt: ago(days: 45), repository: .init(nameWithOwner: "acme/storefront"),
                            author: .init(login: "you"), headRefOid: oid("290a"), createdAt: ago(days: 60)),
                     decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
-                    latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE")]
+                    latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE", lastCommitAt: ago(days: 45))]
     }
 
     static func mentions() -> [Mention] {

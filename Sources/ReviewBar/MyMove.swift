@@ -65,7 +65,7 @@ enum MyGroup: Int, CaseIterable, Comparable {
 
     static func < (a: MyGroup, b: MyGroup) -> Bool { a.rawValue < b.rawValue }
 
-    /// A draft nobody touched for this long is parked on purpose, whatever its move.
+    /// A draft with no commit for this long is parked on purpose, whatever its move.
     static let oldDraftDays = 30
 
     /// My open PRs split into sections, empty ones left out. A PR dismissed until new feedback
@@ -76,7 +76,7 @@ enum MyGroup: Int, CaseIterable, Comparable {
         let parser = ISO8601DateFormatter()
         let cutoff = now.addingTimeInterval(-Double(oldDraftDays) * 86_400)
         func group(_ f: FeedbackPR) -> MyGroup {
-            if f.pr.isDraft, let updated = parser.date(from: f.pr.updatedAt), updated < cutoff { return .oldDrafts }
+            if f.pr.isDraft, let last = parser.date(from: f.lastCommitAt ?? f.pr.updatedAt), last < cutoff { return .oldDrafts }
             if !f.latestAt.isEmpty, f.latestAt <= (dismissed[f.pr.url] ?? "") { return .waiting }
             return f.move.isYours ? .yours : .waiting
         }

@@ -147,6 +147,7 @@ struct FeedbackParsingTests {
         #expect(prs.map(\.threads) == [0])
         #expect(prs.map(\.isQuiet) == [true])
         #expect(prs.map(\.branch) == ["atanas/fix"])
+        #expect(prs.map(\.lastCommitAt) == ["2026-09-10T00:00:00Z"])
         #expect(prs.map(\.move) == [.yours(.feedback)])
     }
 

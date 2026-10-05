@@ -463,7 +463,7 @@ struct ContentView: View {
         case .reviewing where vm.yourTurnCount > 0: return "\(t.rawValue) (\(vm.yourTurnCount))"
         case .mine where vm.yourMoveCount > 0: return "\(t.rawValue) (\(vm.yourMoveCount))"
         case .mentions where !vm.visibleMentions.isEmpty: return "\(t.rawValue) (\(vm.visibleMentions.count))"
-        case .crew where vm.crewNeedingMeCount > 0: return "\(t.rawValue) (\(vm.crewNeedingMeCount))"
+        case .crew where !vm.crew.isEmpty: return "\(t.rawValue) (\(vm.crew.count))"
         default: return t.rawValue
         }
     }

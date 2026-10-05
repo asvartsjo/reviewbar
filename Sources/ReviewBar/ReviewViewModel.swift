@@ -30,8 +30,6 @@ final class ReviewViewModel: ObservableObject {
     @Published private(set) var allCrew: [CrewItem] = []
     /// The sessions Crew shows and counts: waiting on me or working.
     var crew: [CrewItem] { allCrew.filter { !$0.session.idle } }
-    /// Sessions waiting on me, for the Crew tab's count.
-    var crewNeedingMeCount: Int { Crew.waitingCount(allCrew) }
     /// Idle sessions, folded under Crew: one can live on with no visible window.
     var idleCrew: [CrewItem] { allCrew.filter(\.session.idle) }
     /// PR url → when ReviewBar last opened a session on it, for the second-session check.

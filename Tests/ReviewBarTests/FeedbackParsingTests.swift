@@ -72,13 +72,14 @@ struct FeedbackParsingTests {
 
     private func myPRsJSON(lastCommit: String = "2026-09-10T00:00:00Z", decision: String = "REVIEW_REQUIRED",
                            reviews: [String] = [], comments: [String] = [], threads: [String] = [],
-                           checks: String? = nil, mergeable: String? = nil) -> Data {
+                           checks: String? = nil, mergeable: String? = nil, branch: String? = nil) -> Data {
+        let head = branch.map { "\"\($0)\"" } ?? "null"
         let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
         let merge = mergeable.map { "\"\($0)\"" } ?? "null"
         return Data("""
         {"data": {"viewer": {"login": "me"}, "search": {"nodes": [
           {"number": 7, "title": "Mine", "url": "https://github.com/o/r/pull/7", "isDraft": false,
-           "createdAt": "2026-09-09T00:00:00Z", "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "reviewDecision": "\(decision)",
+           "createdAt": "2026-09-09T00:00:00Z", "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "headRefName": \(head), "reviewDecision": "\(decision)",
            "mergeable": \(merge),
            "repository": {"nameWithOwner": "o/r"}, "author": {"login": "me"},
            "commits": {"nodes": [{"commit": {"committedDate": "\(lastCommit)", "statusCheckRollup": \(rollup)}}]},
@@ -133,6 +134,20 @@ struct FeedbackParsingTests {
             threads: [myThread(last: comment("lint", "2026-09-11T09:00:00Z", bot: true))]))
         #expect(prs.map(\.isQuiet) == [true])
         #expect(prs.map(\.hasFeedback) == [false])
+    }
+
+    /// A bot's open thread counts only for the move, never as feedback that notifies or counts.
+    @Test func botThreadsAreCountedApart() throws {
+        let prs = try Backend.parseMyPRs(myPRsJSON(
+            threads: [myThread(last: comment("coderabbitai", "2026-09-11T09:00:00Z", bot: true)),
+                      myThread(resolved: true, last: comment("coderabbitai", "2026-09-11T09:00:00Z", bot: true)),
+                      myThread(last: comment("me", "2026-09-11T10:00:00Z"))],
+            branch: "atanas/fix"))
+        #expect(prs.map(\.botThreads) == [1])
+        #expect(prs.map(\.threads) == [0])
+        #expect(prs.map(\.isQuiet) == [true])
+        #expect(prs.map(\.branch) == ["atanas/fix"])
+        #expect(prs.map(\.move) == [.yours(.feedback)])
     }
 
     /// A COMMENTED review with no summary only wraps thread comments, which are counted as threads.

@@ -812,7 +812,7 @@ enum Backend {
       viewer { login }
       search(query: $q, type: ISSUE, first: 30) {
         nodes { ... on PullRequest {
-          number title url isDraft createdAt updatedAt headRefOid reviewDecision
+          number title url isDraft createdAt updatedAt headRefOid headRefName reviewDecision
           repository { nameWithOwner } author { login }
           mergeable
           commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
@@ -864,9 +864,11 @@ enum Backend {
                 if at > latestAt { latestAt = at; latestBy = who?.login ?? "" }
             }
 
-            var threads = 0
+            var threads = 0, botThreads = 0
             for t in n.reviewThreads.items where !t.isResolved {
-                guard let last = t.comments.items.last, isReviewer(last.author) else { continue }
+                guard let last = t.comments.items.last else { continue }
+                if last.author?.isBot == true { botThreads += 1; continue }
+                guard isReviewer(last.author) else { continue }
                 threads += 1
                 seen(last.createdAt, last.author)
             }
@@ -895,7 +897,8 @@ enum Backend {
                                checks: head?.statusCheckRollup?.state, mergeable: n.mergeable,
                                hasFeedback: n.reviews.items.contains { isReviewer($0.author) }
                                    || n.comments.items.contains { isReviewer($0.author) }
-                                   || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) })
+                                   || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) },
+                               branch: n.headRefName, botThreads: botThreads)
 
             // No unanswered feedback: news only if something blocks it, or it can be merged.
             // Otherwise it's quiet (no `latestAt`): listed, but never notifies or counts.
@@ -928,6 +931,7 @@ enum Backend {
             let createdAt: String?
             let updatedAt: String
             let headRefOid: String?
+            let headRefName: String?
             let reviewDecision: String?
             let mergeable: String?
             let repository: PR.Repo

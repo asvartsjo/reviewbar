@@ -430,12 +430,17 @@ struct FeedbackPR: Identifiable, Hashable {
     var mergeable: String? = nil
     /// A reviewer (not a bot) left a review, comment or thread, answered or not.
     var hasFeedback = false
+    /// The PR's head branch name.
+    var branch: String? = nil
+    /// Unresolved review threads whose last comment is a bot's (CodeRabbit). Only `move` reads it:
+    /// bots never notify or count.
+    var botThreads = 0
     var id: String { pr.url }
 
     func with(latestAt: String, latestBy: String) -> FeedbackPR {
         FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
                    latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable,
-                   hasFeedback: hasFeedback)
+                   hasFeedback: hasFeedback, branch: branch, botThreads: botThreads)
     }
 
     /// Nothing new: no unanswered feedback, no blocker, not ready to merge. Listed in My PRs,

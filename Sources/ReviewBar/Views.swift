@@ -700,6 +700,9 @@ struct DetailView: View {
         if let notice = vm.terminalNotice {
             Text(notice).font(.caption).foregroundStyle(.secondary)
         }
+        if let e = vm.error {
+            Text(e).font(.caption).foregroundStyle(.red)
+        }
     }
 
     @ViewState private var confirmDraft = false

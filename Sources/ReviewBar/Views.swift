@@ -19,6 +19,7 @@ struct ContentView: View {
     @ViewState private var tab: Tab = .reviewing
     @ViewState private var showMuted = false
     @ViewState private var showParked = false
+    @ViewState private var showIdleCrew = false
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     private var terminal: TerminalApp { TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed) }
     @AppStorage(AsWindow.key) private var asWindow = false
@@ -268,12 +269,29 @@ struct ContentView: View {
             } else {
                 let sections = vm.mySections
                 List {
-                    if !vm.crew.isEmpty {
+                    if !vm.allCrew.isEmpty {
                         sectionHeader("Crew", count: vm.crew.count)
                             .listRowSeparator(.hidden)
                         ForEach(vm.crew) { item in
                             crewRow(item)
                                 .listRowSeparator(.hidden)
+                        }
+                        if !vm.idleCrew.isEmpty {
+                            Button { showIdleCrew.toggle() } label: {
+                                HStack(spacing: 4) {
+                                    Text(verbatim: "Idle \(vm.idleCrew.count)")
+                                    Image(systemName: showIdleCrew ? "chevron.down" : "chevron.right").font(.caption2.bold())
+                                }
+                                .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.hoverRow)
+                            .help("\(showIdleCrew ? "Hide" : "Show") sessions at their prompt, some may have no visible window")
+                            .listRowSeparator(.hidden)
+                            ForEach(showIdleCrew ? vm.idleCrew : []) { item in
+                                crewRow(item)
+                                    .opacity(0.55)
+                                    .listRowSeparator(.hidden)
+                            }
                         }
                         sectionHeader("My PRs", count: sections.reduce(0) { $0 + $1.prs.count })
                             .padding(.top, 10)
@@ -332,7 +350,7 @@ struct ContentView: View {
                 Text(verbatim: item.session.name).font(.body.weight(.medium)).lineLimit(1)
             }
             (Text(verbatim: "\(pr == nil ? item.repo : item.session.name) · ").foregroundStyle(.secondary)
-                + Text(item.session.needsMe ? "needs you" : "working")
+                + Text(item.session.needsMe ? "needs you" : item.session.working ? "working" : "idle")
                     .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
                 + Text(verbatim: " · \(item.session.background ? "agent view" : "terminal") · \(Crew.since(item.session.startedAt))")
                     .foregroundStyle(.secondary))
@@ -344,17 +362,22 @@ struct ContentView: View {
             Button { vm.attach(item) } label: { row }
                 .buttonStyle(.hoverRow)
                 .help("Open the session (\(terminal.label("claude attach")))")
-                .contextMenu {
-                    Button("Stop session", systemImage: "stop.circle") { vm.stop(item) }
-                        .help("claude stop: the conversation is kept, and claude attach resumes it")
-                }
+                .contextMenu { stopButton(item) }
         } else if let pr {
             Button { selected = pr } label: { row }
                 .buttonStyle(.hoverRow)
-                .help("Its terminal window is already open. Click for the PR.")
+                .help("A terminal session. Click for the PR.")
+                .contextMenu { stopButton(item) }
         } else {
-            row.help("Its terminal window is already open.")
+            row.help("A terminal session.")
+                .contextMenu { stopButton(item) }
         }
+    }
+
+    private func stopButton(_ item: CrewItem) -> some View {
+        Button("Stop session", systemImage: "stop.circle") { vm.stop(item) }
+            .help(item.session.background ? "claude stop: the conversation is kept, and claude attach resumes it"
+                                          : "Ends its claude process: the conversation is kept, and claude --resume reopens it")
     }
 
     /// "3 wait on you · 5 on others", parked PRs left out.

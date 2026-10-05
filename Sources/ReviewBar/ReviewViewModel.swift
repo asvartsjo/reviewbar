@@ -30,6 +30,8 @@ final class ReviewViewModel: ObservableObject {
     @Published private(set) var allCrew: [CrewItem] = []
     /// The sessions Crew shows and counts: waiting on me or working.
     var crew: [CrewItem] { allCrew.filter { !$0.session.idle } }
+    /// Idle sessions, folded under Crew: one can live on with no visible window.
+    var idleCrew: [CrewItem] { allCrew.filter(\.session.idle) }
     /// PR url → when ReviewBar last opened a session on it, for the second-session check.
     private var launchedAt: [String: Date] = [:]
     /// Ids of the sessions that were waiting on me at the last poll; nil until the first one.
@@ -741,16 +743,17 @@ final class ReviewViewModel: ObservableObject {
     }
 
     /// A native alert, so it also shows when a notification's Verify fixes starts the session with
-    /// the panel closed. Cancel is the default.
-    private func confirmSecondSession(_ pr: PR, _ reason: String) -> Bool {
+    /// the panel closed. Cancel is the default; Show session (third) only when a session is listed.
+    private func askSecondSession(_ pr: PR, _ reason: String, canShow: Bool) -> NSApplication.ModalResponse {
         let alert = NSAlert()
         alert.messageText = "A Claude session is already open on #\(pr.number)"
         alert.informativeText = reason + "\n\nTwo sessions in one checkout can overwrite each other's edits "
             + "and draft duplicate replies."
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Open anyway")
+        if canShow { alert.addButton(withTitle: "Show session") }
         NSApp.activate(ignoringOtherApps: true)
-        return alert.runModal() == .alertSecondButtonReturn
+        return alert.runModal()
     }
 
     /// Reads the crew again: local and cheap, so it runs every `Crew.pollInterval` and after each
@@ -779,14 +782,39 @@ final class ReviewViewModel: ObservableObject {
         return myPRs.first { match($0.pr) }?.pr ?? reviewing.first { match($0.pr) }?.pr
     }
 
-    /// Stops a background session (`claude stop`); its conversation is kept, so it can be resumed.
+    /// Stops a session (`Backend.stop`); its conversation is kept, so it can be resumed. A terminal
+    /// session at work is asked about first: ending it mid-task can leave half-made edits.
     func stop(_ item: CrewItem) {
         guard !DemoData.isOn else { return }
+        if !item.session.background, item.session.working {
+            let alert = NSAlert()
+            alert.messageText = "Stop \(item.session.name)? It's working."
+            alert.informativeText = "Its conversation is kept (claude --resume), but an edit it's making may be left half done."
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Stop")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
         Task {
             if !(await Backend.stop(item.session)) {
                 error = "Couldn't stop \(item.session.name). Try `claude stop \(item.session.id)` in a terminal."
             }
             await refreshCrew()
+        }
+    }
+
+    /// Brings a session to the front: a background one with `claude attach`, a terminal one by
+    /// selecting its tab in iTerm2 or Terminal. Other terminals can't be searched, so it says where.
+    func show(_ item: CrewItem) {
+        guard !DemoData.isOn else { return }
+        if item.session.background { return attach(item) }
+        terminalNotice = nil
+        Task {
+            if !(await Backend.reveal(item.session)) {
+                let home = (item.session.cwd as NSString).abbreviatingWithTildeInPath
+                terminalNotice = "Couldn't find \(item.session.name)'s window (only iTerm2 and Terminal tabs can be "
+                    + "found). It runs in \(home)\(item.session.pid.map { ", pid \($0)" } ?? "")."
+            }
         }
     }
 
@@ -823,11 +851,20 @@ final class ReviewViewModel: ObservableObject {
         launchedAt[pr.url] = Date()
         Task {
             await refreshCrew()
-            if let open = Crew.openSession(onPR: pr.number, repo: pr.repository.nameWithOwner, crew: allCrew,
-                                           launchedAt: previous),
-               !confirmSecondSession(pr, open) {
-                launchedAt[pr.url] = previous
-                return
+            let repo = pr.repository.nameWithOwner
+            if let open = Crew.openSession(onPR: pr.number, repo: repo, crew: allCrew, launchedAt: previous) {
+                let session = Crew.session(onPR: pr.number, repo: repo, crew: allCrew)
+                switch askSecondSession(pr, open, canShow: session != nil) {
+                case .alertSecondButtonReturn:
+                    break
+                case .alertThirdButtonReturn:
+                    launchedAt[pr.url] = previous
+                    if let session { show(session) }
+                    return
+                default:
+                    launchedAt[pr.url] = previous
+                    return
+                }
             }
             let opening = "Opening a session in \(TerminalApp.chosen.name)…"
             if TerminalApp.chosen != .copy { terminalNotice = opening }

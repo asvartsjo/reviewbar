@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// One Claude Code session on this machine, from `claude agents --json`.
 struct CrewSession: Equatable, Identifiable {
@@ -12,6 +13,8 @@ struct CrewSession: Equatable, Identifiable {
     /// Busy: a terminal session's `busy`, or a background one's `working`.
     let working: Bool
     let startedAt: Date
+    /// The process, for stopping a terminal session (which has no agent view `id`).
+    var pid: Int? = nil
 
     /// Neither waiting on me nor working: at its prompt, or a status this version doesn't know.
     var idle: Bool { !needsMe && !working }
@@ -37,8 +40,8 @@ enum Crew {
     static func parseSessions(_ data: Data) -> [CrewSession] {
         guard let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return rows.compactMap { row in
-            let pid = (row["pid"] as? Int).map(String.init)
-            guard let id = row["id"] as? String ?? row["sessionId"] as? String ?? pid,
+            let pid = row["pid"] as? Int
+            guard let id = row["id"] as? String ?? row["sessionId"] as? String ?? pid.map(String.init),
                   let cwd = row["cwd"] as? String else { return nil }
             let background = row["kind"] as? String == "background"
             let status = row["status"] as? String, state = row["state"] as? String
@@ -46,7 +49,7 @@ enum Crew {
             let working = background ? state == "working" : status == "busy"
             let started = (row["startedAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) } ?? .distantPast
             return CrewSession(id: id, name: row["name"] as? String ?? id, cwd: cwd, background: background,
-                               needsMe: needsMe, working: working, startedAt: started)
+                               needsMe: needsMe, working: working, startedAt: started, pid: row["pid"] as? Int)
         }
     }
 
@@ -99,11 +102,16 @@ extension Crew {
     /// A launch less than this long ago counts as an open session: it may not be listed yet.
     static let launchGrace: TimeInterval = 60
 
+    /// The first crew session on this PR, in any state. Pure, for tests.
+    static func session(onPR number: Int, repo: String, crew: [CrewItem]) -> CrewItem? {
+        crew.first { $0.prNumber == number && $0.repo.lowercased() == repo.lowercased() }
+    }
+
     /// Why opening another session on this PR needs a second thought, or nil when nothing is open:
     /// a session on it (any state), or a launch from ReviewBar in the last `launchGrace`. Pure, for tests.
     static func openSession(onPR number: Int, repo: String, crew: [CrewItem], launchedAt: Date?,
                             now: Date = Date()) -> String? {
-        if let s = crew.first(where: { $0.prNumber == number && $0.repo.lowercased() == repo.lowercased() })?.session {
+        if let s = session(onPR: number, repo: repo, crew: crew)?.session {
             let state = s.needsMe ? "waiting on you" : s.working ? "working" : "idle at its prompt"
             let home = (s.cwd as NSString).abbreviatingWithTildeInPath
             return "\(s.background ? "An agent view" : "A terminal") session (\(s.name)) is \(state) in \(home)."
@@ -160,7 +168,8 @@ extension Backend {
         }
         let real = sessions.map {
             CrewSession(id: $0.id, name: $0.name, cwd: URL(fileURLWithPath: $0.cwd).resolvingSymlinksInPath().path,
-                        background: $0.background, needsMe: $0.needsMe, working: $0.working, startedAt: $0.startedAt)
+                        background: $0.background, needsMe: $0.needsMe, working: $0.working, startedAt: $0.startedAt,
+                        pid: $0.pid)
         }
         return Crew.link(real, to: checkouts)
     }
@@ -194,11 +203,34 @@ extension Backend {
         }
     }
 
-    /// `claude stop` for a background session: it stops, its conversation is kept, and
-    /// `claude attach` resumes it. False when it couldn't be stopped.
+    /// Stops a session; its conversation is kept either way. A background one with `claude stop`
+    /// (`claude attach` resumes it); a terminal one by ending its `claude` process (`claude --resume`
+    /// reopens it), which also covers one whose window is gone but whose process lives on. The pid is
+    /// checked to still be `claude` first, so a reused pid is never signalled. False when it couldn't.
     static func stop(_ session: CrewSession) async -> Bool {
-        guard session.background, let claude = await claudePath.get() else { return false }
-        return await run(claude, ["stop", session.id]) != nil
+        if session.background {
+            guard let claude = await claudePath.get() else { return false }
+            return await run(claude, ["stop", session.id]) != nil
+        }
+        guard let pid = session.pid,
+              let name = await run("/bin/ps", ["-o", "comm=", "-p", String(pid)]),
+              (name.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).lastPathComponent == "claude"
+        else { return false }
+        return kill(pid_t(pid), SIGTERM) == 0
+    }
+
+    /// Brings a terminal session's tab to the front: its tty (from `ps`) matched against the tabs
+    /// of iTerm2 and Terminal, whichever are running. False when it isn't found there.
+    static func reveal(_ session: CrewSession) async -> Bool {
+        guard let pid = session.pid,
+              let tty = await run("/bin/ps", ["-o", "tty=", "-p", String(pid)])?
+                  .trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        for app in [TerminalApp.iterm, .terminal] {
+            guard let id = app.bundleID, !NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty,
+                  let script = app.revealScript(tty: tty) else { continue }
+            if await run("/usr/bin/osascript", ["-e", script])?.contains("found") == true { return true }
+        }
+        return false
     }
 
     /// Runs an executable directly (no shell) and returns its output, or nil if it fails.

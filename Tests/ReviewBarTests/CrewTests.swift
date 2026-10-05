@@ -32,6 +32,7 @@ struct CrewTests {
         #expect(s.map(\.idle) == [false, true, false, false, false, true, false])   // "dreaming" counts as idle
         #expect(s.map(\.background) == [false, false, false, true, true, false, false])
         #expect(s[0].startedAt == Date(timeIntervalSince1970: 1_790_939_000))
+        #expect(s.map(\.pid) == [1, 2, 3, 4, 5, 6, 8])   // a terminal session is stopped by its pid
     }
 
     @Test func unreadableOutputIsNoCrew() {

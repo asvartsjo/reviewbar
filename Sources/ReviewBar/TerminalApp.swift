@@ -225,6 +225,50 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         }
     }
 
+    /// AppleScript that selects the tab on `tty` ("ttys005") and prints "found"; nil for terminals
+    /// that can't be searched by tty, or a tty that isn't one. Pure, for tests.
+    func revealScript(tty: String) -> String? {
+        guard tty.range(of: #"^ttys[0-9]+$"#, options: .regularExpression) != nil else { return nil }
+        let dev = "\"/dev/\(tty)\""
+        switch self {
+        case .iterm:
+            return """
+                tell application "iTerm"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            repeat with s in sessions of t
+                                if tty of s is \(dev) then
+                                    tell w to select
+                                    tell t to select
+                                    tell s to select
+                                    activate
+                                    return "found"
+                                end if
+                            end repeat
+                        end repeat
+                    end repeat
+                end tell
+                """
+        case .terminal:
+            return """
+                tell application "Terminal"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            if tty of t is \(dev) then
+                                set selected of t to true
+                                set index of w to 1
+                                activate
+                                return "found"
+                            end if
+                        end repeat
+                    end repeat
+                end tell
+                """
+        default:
+            return nil
+        }
+    }
+
     enum Launch: Equatable {
         /// Run this executable with these arguments.
         case process(String, [String])

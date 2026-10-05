@@ -5,12 +5,13 @@ import Testing
 struct MyMoveTests {
     private func mine(draft: Bool = false, decision: String? = "REVIEW_REQUIRED", threads: Int = 0,
                       reviews: Int = 0, comments: Int = 0, botThreads: Int = 0,
-                      checks: String? = "SUCCESS", mergeable: String? = "MERGEABLE") -> FeedbackPR {
+                      checks: String? = "SUCCESS", mergeable: String? = "MERGEABLE", requested: Bool = true) -> FeedbackPR {
         let pr = PR(number: 7, title: "Mine", url: "https://github.com/o/r/pull/7", isDraft: draft,
                     updatedAt: "2026-09-11T00:00:00Z", repository: .init(nameWithOwner: "o/r"),
                     author: .init(login: "me"))
         return FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
-                          latestAt: "", latestBy: "", checks: checks, mergeable: mergeable, botThreads: botThreads)
+                          latestAt: "", latestBy: "", checks: checks, mergeable: mergeable, botThreads: botThreads,
+                          reviewersRequested: requested)
     }
 
     @Test func oneCasePerRule() {
@@ -54,7 +55,17 @@ struct MyMoveTests {
         #expect(mine(threads: 1, checks: "FAILURE").move == .yours(.checksFailing))
         #expect(mine(threads: 1, checks: "PENDING").move == .yours(.feedback))
         #expect(mine(draft: true, threads: 1).move == .yours(.feedback))
-        #expect(mine(draft: true, checks: "PENDING").move == .waiting(.ci))
+        #expect(mine(draft: true, checks: "PENDING").move == .yours(.readyForReview))
+    }
+
+    /// Nobody asked and nobody reviewed: my move. Asking someone sends it to waiting.
+    @Test func noReviewerRequested() {
+        #expect(mine(requested: false).move == .yours(.needsReviewer))
+        #expect(mine(checks: "PENDING", requested: false).move == .yours(.needsReviewer))
+        #expect(mine(draft: true, requested: false).move == .yours(.readyForReview))
+        #expect(mine(requested: true).move == .waiting(.reviewers))
+        #expect(mine(decision: "APPROVED", requested: false).move == .yours(.merge))
+        #expect(mine(requested: false).move.isYours)
     }
 
     @Test func isYours() {

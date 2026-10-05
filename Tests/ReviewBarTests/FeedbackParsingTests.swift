@@ -81,6 +81,7 @@ struct FeedbackParsingTests {
           {"number": 7, "title": "Mine", "url": "https://github.com/o/r/pull/7", "isDraft": false,
            "createdAt": "2026-09-09T00:00:00Z", "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "headRefName": \(head), "reviewDecision": "\(decision)",
            "mergeable": \(merge),
+           "reviewRequests": {"totalCount": 1},
            "repository": {"nameWithOwner": "o/r"}, "author": {"login": "me"},
            "commits": {"nodes": [{"commit": {"committedDate": "\(lastCommit)", "statusCheckRollup": \(rollup)}}]},
            "reviews": {"nodes": [\(reviews.joined(separator: ","))]},

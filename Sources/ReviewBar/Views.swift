@@ -4,10 +4,10 @@ import ServiceManagement
 import UserNotifications
 
 private enum Tab: String, CaseIterable {
+    case crew = "Crew"
     case reviewing = "Reviewing"
     case mine = "My PRs"
     case mentions = "Mentions"
-    case crew = "Crew"
 }
 
 struct ContentView: View {
@@ -375,6 +375,9 @@ struct ContentView: View {
                 if f.pr.isDraft { draftBadge }
                 Spacer(minLength: 4)
                 if let item = vm.crewItem(for: f.pr) { CrewBadge(item: item) }
+                if f.move == .yours(.needsReviewer) {
+                    Label("Needs a reviewer", systemImage: "person.badge.plus").font(.caption).foregroundStyle(.orange)
+                }
                 StatusBadge(feedback: f)
                 DecisionBadge(decision: f.decision)
             }

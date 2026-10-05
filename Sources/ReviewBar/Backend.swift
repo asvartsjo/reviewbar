@@ -815,6 +815,7 @@ enum Backend {
           number title url isDraft createdAt updatedAt headRefOid headRefName reviewDecision
           repository { nameWithOwner } author { login }
           mergeable
+          reviewRequests(first: 1) { totalCount }
           commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
           reviews(last: 20) { nodes { author { login __typename } state body submittedAt } }
           comments(last: 20) { nodes { author { login __typename } createdAt } }
@@ -899,7 +900,8 @@ enum Backend {
                                hasFeedback: n.reviews.items.contains { isReviewer($0.author) }
                                    || n.comments.items.contains { isReviewer($0.author) }
                                    || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) },
-                               branch: n.headRefName, lastCommitAt: head?.committedDate, approvals: approvals, botThreads: botThreads)
+                               branch: n.headRefName, lastCommitAt: head?.committedDate, approvals: approvals, botThreads: botThreads,
+                               reviewersRequested: n.reviewRequests.totalCount > 0)
 
             // No unanswered feedback: news only if something blocks it, or it can be merged.
             // Otherwise it's quiet (no `latestAt`): listed, but never notifies or counts.
@@ -935,6 +937,7 @@ enum Backend {
             let headRefName: String?
             let reviewDecision: String?
             let mergeable: String?
+            let reviewRequests: Count
             let repository: PR.Repo
             let author: PR.Author?
             let commits: Nodes<CommitNode>
@@ -942,6 +945,7 @@ enum Backend {
             let comments: Nodes<Comment>
             let reviewThreads: Nodes<ReviewThread>
         }
+        struct Count: Decodable { let totalCount: Int }
         struct CommitNode: Decodable {
             let commit: Commit
             struct Commit: Decodable {

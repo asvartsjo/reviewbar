@@ -14,6 +14,8 @@ enum MyMove: Equatable {
         /// A draft with nothing else to do: time to mark it ready?
         case readyForReview
         case merge
+        /// Ready for review, but nobody was asked to review it.
+        case needsReviewer
     }
 
     enum On: Equatable { case ci, reviewers }
@@ -25,14 +27,17 @@ extension FeedbackPR {
     /// The first rule that matches wins. Two choices differ from the skill's table:
     /// - A change request I've already answered (pushed since, no open threads) waits on the reviewer
     ///   to re-review; one newer than my last push counts as `reviews` and so as feedback.
+    /// - No reviewer requested and nobody has reviewed: my move (ask someone), not waiting on others.
+    /// - A draft is mine even while CI runs: nobody can review it yet, so it never waits on others.
     /// - Approved with no CI at all is ready to merge. `readyToMerge` needs green checks and stays
     ///   that way, since notifications use it.
     var move: MyMove {
         if hasConflict { return .yours(.conflict) }
         if checksFailing { return .yours(.checksFailing) }
         if threads + (reviews - approvals) + comments + botThreads > 0 { return .yours(.feedback) }
-        if checks == "PENDING" || checks == "EXPECTED" { return .waiting(.ci) }
         if pr.isDraft { return .yours(.readyForReview) }
+        if !reviewersRequested, !hasFeedback, decision != "APPROVED" { return .yours(.needsReviewer) }
+        if checks == "PENDING" || checks == "EXPECTED" { return .waiting(.ci) }
         if decision == "APPROVED", checks == nil || checks == "SUCCESS" { return .yours(.merge) }
         return .waiting(.reviewers)
     }
@@ -46,7 +51,8 @@ extension MyMove.Reason {
         case .checksFailing: 1
         case .feedback: 2
         case .merge: 3
-        case .readyForReview: 4
+        case .needsReviewer: 4
+        case .readyForReview: 5
         }
     }
 }

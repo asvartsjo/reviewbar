@@ -21,6 +21,7 @@ struct AgentTests {
         #expect(c.hasPrefix(#"cd '/wt/it'\''s' && "#))
         #expect(c.contains("--tools 'Read,Grep,Glob'"))
         #expect(!c.contains("Bash"))
+        #expect(c.contains("--safe-mode"))
         let x = Agent.codex.headlessCommand((model: "", effort: ""), codebase: "/wt")
         #expect(x.contains("--sandbox read-only --color never --cd '/wt' "))
     }

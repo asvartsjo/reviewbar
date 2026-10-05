@@ -11,7 +11,9 @@ enum Backend {
     /// Headless reviews get no tools and no MCP servers: the diff is untrusted input
     /// and the model only needs to read the prompt.
     /// Tools are added per run: none, or read-only ones inside the PR's worktree.
-    static let headlessFlags = "-p --output-format text --strict-mcp-config"
+    /// `--safe-mode` loads no CLAUDE.md, hooks, skills or plugins, from the PR's worktree or from
+    /// ~/.claude, so a PR can't instruct its own review or run a hook; auth and model still work.
+    static let headlessFlags = "-p --output-format text --strict-mcp-config --safe-mode"
 
     /// How reviews are written and worded. Editable in Settings › Review prompt; the rules,
     /// verdict line and finding format around it stay fixed.

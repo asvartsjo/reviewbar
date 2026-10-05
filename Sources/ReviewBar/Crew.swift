@@ -28,11 +28,14 @@ enum Crew {
     static let pollInterval: TimeInterval = 15
 
     /// `claude agents --json` → the sessions that are working or waiting on me; idle ones are left
-    /// out. Fields or values it doesn't know are ignored. Pure, for tests.
+    /// out. Only background sessions have an `id` (what `claude attach` takes); terminal ones have
+    /// `sessionId` and `pid`. Fields or values it doesn't know are ignored. Pure, for tests.
     static func parseSessions(_ data: Data) -> [CrewSession] {
         guard let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return rows.compactMap { row in
-            guard let id = row["id"] as? String, let cwd = row["cwd"] as? String else { return nil }
+            let pid = (row["pid"] as? Int).map(String.init)
+            guard let id = row["id"] as? String ?? row["sessionId"] as? String ?? pid,
+                  let cwd = row["cwd"] as? String else { return nil }
             let background = row["kind"] as? String == "background"
             let status = row["status"] as? String, state = row["state"] as? String
             let needsMe = background ? state == "blocked" : status == "waiting"

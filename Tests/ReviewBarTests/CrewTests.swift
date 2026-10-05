@@ -3,30 +3,32 @@ import Testing
 @testable import ReviewBar
 
 struct CrewTests {
-    /// Shaped like real `claude agents --json` output (Claude Code 2.1.285).
+    /// Real `claude agents --json` shapes (Claude Code 2.1.285): terminal sessions have no `id`, only
+    /// `sessionId` and `pid`, plus `waitingFor` while waiting; background ones have `id` and `state`.
     private let sample = Data("""
     [
       {"pid": 1, "cwd": "/Users/me/TEACHIQ/gauss-fix", "kind": "interactive", "startedAt": 1790939000000,
-       "sessionId": "s1", "name": "gauss-5b", "status": "waiting", "id": "aaaa1111"},
+       "sessionId": "aaaa1111", "name": "gauss-5b", "status": "waiting", "waitingFor": "input needed"},
       {"pid": 2, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "interactive", "startedAt": 1790939100000,
-       "sessionId": "s2", "name": "gauss-ef", "status": "idle", "id": "bbbb2222"},
+       "sessionId": "bbbb2222", "name": "gauss-ef", "status": "idle"},
       {"pid": 3, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "interactive", "startedAt": 1790939200000,
-       "sessionId": "s3", "name": "gauss-25", "status": "busy", "id": "cccc3333"},
+       "sessionId": "cccc3333", "name": "gauss-25", "status": "busy"},
       {"pid": 4, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "background", "startedAt": 1790939300000,
        "sessionId": "s4", "name": "pr-4977", "status": null, "state": "blocked", "id": "dddd4444"},
       {"pid": 5, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "background", "startedAt": 1790939400000,
        "sessionId": "s5", "name": "scout", "status": "busy", "state": "working", "id": "eeee5555"},
       {"pid": 6, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "interactive", "startedAt": 1790939500000,
-       "sessionId": "s6", "name": "odd", "status": "dreaming", "id": "ffff6666"},
-      {"pid": 7, "kind": "interactive", "status": "busy", "id": "no-cwd"}
+       "sessionId": "ffff6666", "name": "odd", "status": "dreaming"},
+      {"pid": 7, "kind": "interactive", "status": "busy", "sessionId": "no-cwd"},
+      {"pid": 8, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "interactive", "status": "busy"}
     ]
     """.utf8)
 
     @Test func readsWorkingAndWaitingSessionsOnly() {
         let s = Crew.parseSessions(sample)
-        #expect(s.map(\.id) == ["aaaa1111", "cccc3333", "dddd4444", "eeee5555"])
-        #expect(s.map(\.needsMe) == [true, false, true, false])
-        #expect(s.map(\.background) == [false, false, true, true])
+        #expect(s.map(\.id) == ["aaaa1111", "cccc3333", "dddd4444", "eeee5555", "8"])
+        #expect(s.map(\.needsMe) == [true, false, true, false, false])
+        #expect(s.map(\.background) == [false, false, true, true, false])
         #expect(s[0].startedAt == Date(timeIntervalSince1970: 1_790_939_000))
     }
 

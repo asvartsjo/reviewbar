@@ -32,6 +32,11 @@ final class ReviewViewModel: ObservableObject {
     var crew: [CrewItem] { allCrew.filter { !$0.session.idle } }
     /// Idle sessions, folded under Crew: one can live on with no visible window.
     var idleCrew: [CrewItem] { allCrew.filter(\.session.idle) }
+    /// Your worktrees whose PR is merged or closed, from the last `refreshCleanup`.
+    @Published private(set) var cleanup: [Cleanup.Candidate] = []
+    private var cleanupAt: Date?
+    /// Those still on disk: one removed by hand drops out before the next lookup.
+    var worktreesToGo: [Cleanup.Candidate] { cleanup.filter { FileManager.default.fileExists(atPath: $0.path) } }
     /// PR url → when ReviewBar last opened a session on it, for the second-session check.
     private var launchedAt: [String: Date] = [:]
     /// Ids of the sessions that were waiting on me at the last poll; nil until the first one.
@@ -92,6 +97,7 @@ final class ReviewViewModel: ObservableObject {
         seenFeedback = nil
         seenReviewing = nil
         seenMentions = nil
+        cleanupAt = nil
         await refresh()
     }
 
@@ -180,6 +186,7 @@ final class ReviewViewModel: ObservableObject {
         Notifier.post(alerts)
         lastRefresh = Date()
         removeClosedWorktreesDaily()
+        refreshCleanup()
         Task { await refreshCrew() }
         loading = false
         if refreshAgain {
@@ -199,6 +206,23 @@ final class ReviewViewModel: ObservableObject {
         UserDefaults.standard.set(Date(), forKey: Self.worktreeCleanupKey)
         let repos = RepoList.load()
         Task.detached(priority: .background) { await Backend.removeClosedWorktrees(repos: repos) }
+    }
+
+    static let cleanupInterval: TimeInterval = 1800
+
+    /// At most every 30 minutes: which of your worktrees can go. Never in demo mode.
+    private func refreshCleanup() {
+        guard !DemoData.isOn else { return }
+        if let last = cleanupAt, Date().timeIntervalSince(last) < Self.cleanupInterval { return }
+        cleanupAt = Date()
+        let repos = RepoList.load()
+        Task { cleanup = await Backend.cleanupCandidates(repos: repos) }
+    }
+
+    /// A Claude session runs in this worktree, so removing it would pull the folder from under it.
+    func hasSession(in candidate: Cleanup.Candidate) -> Bool {
+        let path = URL(fileURLWithPath: candidate.path).resolvingSymlinksInPath().path
+        return allCrew.contains { $0.session.cwd == path || $0.session.cwd.hasPrefix(path + "/") }
     }
 
     /// Replies for notifications and the PR detail: not dismissed (or newer than what you

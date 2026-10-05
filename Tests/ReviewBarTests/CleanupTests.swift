@@ -54,9 +54,9 @@ struct CleanupTests {
             "development": .init(number: 5, state: "MERGED", author: "atanas"), // a release PR
             "ghost": .init(number: 6, state: "MERGED", author: nil),           // deleted account
         ]
-        let found = Cleanup.candidates(repo: "o/gauss", worktrees: worktrees, viewer: "atanas",
+        let found = Cleanup.candidates(repo: "o/gauss", repoFolder: clone, worktrees: worktrees, viewer: "atanas",
                                        defaultBranch: "development", latest: latest)
         #expect(found.map(\.prNumber) == [1, 2])
-        #expect(found.first?.removeCommand == "git worktree remove '\(beside)/merged'")
+        #expect(found.first?.removeCommand == "git -C '\(clone)' worktree remove '\(beside)/merged'")
     }
 }

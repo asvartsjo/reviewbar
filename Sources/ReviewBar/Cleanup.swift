@@ -5,6 +5,8 @@ import Foundation
 enum Cleanup {
     struct Candidate: Equatable, Identifiable {
         let repo: String
+        /// The local clone, so the command works from any folder.
+        let repoFolder: String
         let path: String
         let branch: String
         let prNumber: Int
@@ -13,7 +15,7 @@ enum Cleanup {
         var id: String { path }
 
         /// Without `--force`, so git refuses when the worktree has local changes. The branch is kept.
-        var removeCommand: String { "git worktree remove \(q(path))" }
+        var removeCommand: String { "git -C \(q(repoFolder)) worktree remove \(q(path))" }
     }
 
     /// A worktree on a branch, with `refs/heads/` dropped.
@@ -73,12 +75,13 @@ enum Cleanup {
     /// The worktrees that can go: the newest PR from its branch is mine and merged or closed. A
     /// branch with no PR, a newer open PR, someone else's PR (a fork's branch of the same name), or
     /// the default branch (release PRs come from it) never counts. Pure, for tests.
-    static func candidates(repo: String, worktrees: [BranchWorktree], viewer: String, defaultBranch: String?,
-                           latest: [String: LatestPR]) -> [Candidate] {
+    static func candidates(repo: String, repoFolder: String, worktrees: [BranchWorktree], viewer: String,
+                           defaultBranch: String?, latest: [String: LatestPR]) -> [Candidate] {
         worktrees.compactMap { w in
             guard w.branch != defaultBranch, let pr = latest[w.branch], pr.state != "OPEN",
                   pr.author?.lowercased() == viewer.lowercased() else { return nil }
-            return Candidate(repo: repo, path: w.path, branch: w.branch, prNumber: pr.number, state: pr.state)
+            return Candidate(repo: repo, repoFolder: repoFolder, path: w.path, branch: w.branch,
+                             prNumber: pr.number, state: pr.state)
         }
     }
 }
@@ -97,7 +100,7 @@ extension Backend {
             guard !worktrees.isEmpty, let query = Cleanup.query(repo: repo, branches: branches),
                   let out = try? await sh("gh api graphql -f query=\(q(query))"),
                   let parsed = Cleanup.parse(Data(out.utf8), branches: branches) else { continue }
-            found += Cleanup.candidates(repo: repo, worktrees: worktrees, viewer: parsed.viewer,
+            found += Cleanup.candidates(repo: repo, repoFolder: folder, worktrees: worktrees, viewer: parsed.viewer,
                                         defaultBranch: parsed.defaultBranch, latest: parsed.latest)
         }
         return found

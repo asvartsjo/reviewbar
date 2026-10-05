@@ -17,6 +17,13 @@ struct CrewSession: Equatable, Identifiable {
     var pid: Int? = nil
     /// The app a terminal session runs in, from its parent processes; nil for agent view ones.
     var host: Crew.Host? = nil
+    /// Claude Code's own id for the conversation, which names its transcript.
+    var sessionId: String? = nil
+    /// What it's about, from its transcript: its `/rename` name, else Claude Code's auto title.
+    var title: String? = nil
+
+    /// The row's name: the title, else the short `claude agents` name (`reviewbar-59`).
+    var displayName: String { title ?? name }
 
     /// Neither waiting on me nor working: at its prompt, or a status this version doesn't know.
     var idle: Bool { !needsMe && !working }
@@ -51,7 +58,8 @@ enum Crew {
             let working = background ? state == "working" : status == "busy"
             let started = (row["startedAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) } ?? .distantPast
             return CrewSession(id: id, name: row["name"] as? String ?? id, cwd: cwd, background: background,
-                               needsMe: needsMe, working: working, startedAt: started, pid: row["pid"] as? Int)
+                               needsMe: needsMe, working: working, startedAt: started, pid: row["pid"] as? Int,
+                               sessionId: row["sessionId"] as? String)
         }
     }
 
@@ -133,6 +141,21 @@ extension Crew {
         return .other
     }
 
+    /// The `/rename` name and the auto title in a stretch of transcript (JSONL), the last of each.
+    /// Lines that aren't title entries, or don't parse, are skipped. Pure, for tests.
+    static func titles(inTranscript text: Substring) -> (custom: String?, ai: String?) {
+        var custom: String?, ai: String?
+        for line in text.split(separator: "\n") where line.contains("-title\"") {
+            guard let e = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+            switch e["type"] as? String {
+            case "custom-title": custom = (e["customTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? custom
+            case "ai-title": ai = (e["aiTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ai
+            default: break
+            }
+        }
+        return (custom, ai)
+    }
+
     /// Sessions waiting on me now that weren't at the last poll (`before`: the ids that were). The
     /// first poll only sets the baseline (`before` nil), so launching never notifies. Pure, for tests.
     static func newlyWaiting(_ now: [CrewItem], before: Set<String>?) -> [CrewItem] {
@@ -155,7 +178,7 @@ extension Crew {
         if let s = session(onPR: number, repo: repo, crew: crew)?.session {
             let state = s.needsMe ? "waiting on you" : s.working ? "working" : "idle at its prompt"
             let home = (s.cwd as NSString).abbreviatingWithTildeInPath
-            return "\(s.background ? "An agent view" : "A terminal") session (\(s.name)) is \(state) in \(home)."
+            return "\(s.background ? "An agent view" : "A terminal") session (\(s.displayName)) is \(state) in \(home)."
         }
         if let launchedAt, now.timeIntervalSince(launchedAt) < launchGrace {
             return "You opened one less than a minute ago; it may still be starting."
@@ -191,6 +214,45 @@ extension Backend {
     }
     private static let claudePath = ClaudePath()
 
+    /// Each session's title, read from its transcript (`~/.claude/projects/*/<sessionId>.jsonl`).
+    /// Transcripts grow to megabytes and the crew polls every 15 s, so each one is read once and
+    /// then only what was appended since; one that shrank is read again from the start.
+    private actor TranscriptTitles {
+        private struct Read { var path: String; var offset: UInt64; var custom: String?; var ai: String? }
+        private var reads: [String: Read] = [:]
+        private let projects = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/projects").path
+
+        func title(of sessionId: String) -> String? {
+            guard var read = reads[sessionId] ?? find(sessionId).map({ Read(path: $0, offset: 0) }),
+                  let file = FileHandle(forReadingAtPath: read.path) else { return nil }
+            defer { try? file.close() }
+            if (try? file.seekToEnd()).map({ $0 < read.offset }) == true { read = Read(path: read.path, offset: 0) }
+            try? file.seek(toOffset: read.offset)
+            let data = (try? file.readToEnd()) ?? Data()
+            // Only whole lines: a line still being written is read next time.
+            if let end = data.lastIndex(of: UInt8(ascii: "\n")) {
+                let t = Crew.titles(inTranscript: Substring(String(decoding: data[..<end], as: UTF8.self)))
+                read.custom = t.custom ?? read.custom
+                read.ai = t.ai ?? read.ai
+                read.offset += UInt64(end - data.startIndex + 1)
+            }
+            reads[sessionId] = read
+            return read.custom ?? read.ai
+        }
+
+        /// Forgets sessions that are gone, so the cache doesn't grow.
+        func keep(_ ids: Set<String>) { reads = reads.filter { ids.contains($0.key) } }
+
+        private func find(_ sessionId: String) -> String? {
+            let fm = FileManager.default
+            return ((try? fm.contentsOfDirectory(atPath: projects)) ?? [])
+                .map { "\(projects)/\($0)/\(sessionId).jsonl" }
+                .first { fm.fileExists(atPath: $0) }
+        }
+    }
+    private static let transcriptTitles = TranscriptTitles()
+
     /// The crew in `repos`, or nil when `claude agents` can't be run or read. Local and read only.
     static func crew(repos: [String], myPRs: [FeedbackPR]) async -> [CrewItem]? {
         guard let claude = await claudePath.get(),
@@ -208,10 +270,14 @@ extension Backend {
             checkouts += Crew.checkouts(repo: repo, repoFolder: folder, listed: listed, myPRs: myPRs)
         }
         let table = Crew.parseProcessTable(await run("/bin/ps", ["-axo", "pid=,ppid=,comm="]) ?? "")
+        var titles: [String: String] = [:]
+        for id in sessions.compactMap(\.sessionId) { titles[id] = await transcriptTitles.title(of: id) }
+        await transcriptTitles.keep(Set(sessions.compactMap(\.sessionId)))
         let real = sessions.map {
             CrewSession(id: $0.id, name: $0.name, cwd: URL(fileURLWithPath: $0.cwd).resolvingSymlinksInPath().path,
                         background: $0.background, needsMe: $0.needsMe, working: $0.working, startedAt: $0.startedAt,
-                        pid: $0.pid, host: $0.background ? nil : $0.pid.map { Crew.host(of: $0, in: table) })
+                        pid: $0.pid, host: $0.background ? nil : $0.pid.map { Crew.host(of: $0, in: table) },
+                        sessionId: $0.sessionId, title: $0.sessionId.flatMap { titles[$0] })
         }
         return Crew.link(real, to: checkouts)
     }

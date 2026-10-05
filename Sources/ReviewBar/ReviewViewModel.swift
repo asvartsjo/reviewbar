@@ -788,7 +788,7 @@ final class ReviewViewModel: ObservableObject {
         guard !DemoData.isOn else { return }
         if !item.session.background, item.session.working {
             let alert = NSAlert()
-            alert.messageText = "Stop \(item.session.name)? It's working."
+            alert.messageText = "Stop \(item.session.displayName)? It's working."
             alert.informativeText = "Its conversation is kept (claude --resume), but an edit it's making may be left half done."
             alert.addButton(withTitle: "Cancel")
             alert.addButton(withTitle: "Stop")
@@ -797,7 +797,7 @@ final class ReviewViewModel: ObservableObject {
         }
         Task {
             if !(await Backend.stop(item.session)) {
-                error = "Couldn't stop \(item.session.name). Try `claude stop \(item.session.id)` in a terminal."
+                error = "Couldn't stop \(item.session.displayName). Try `claude stop \(item.session.id)` in a terminal."
             }
             await refreshCrew()
         }
@@ -812,10 +812,10 @@ final class ReviewViewModel: ObservableObject {
         Task {
             let home = (item.session.cwd as NSString).abbreviatingWithTildeInPath
             if !(await Backend.reveal(item.session)) {
-                terminalNotice = "Couldn't find \(item.session.name)'s window (iTerm2, Terminal and VS Code can be "
+                terminalNotice = "Couldn't find \(item.session.displayName)'s window (iTerm2, Terminal and VS Code can be "
                     + "found). It runs in \(home)\(item.session.pid.map { ", pid \($0)" } ?? "")."
             } else if item.session.host == .vscode {
-                terminalNotice = "Brought VS Code's window for \(home) to the front: \(item.session.name) is in its Claude Code panel."
+                terminalNotice = "Brought VS Code's window for \(home) to the front: \(item.session.displayName) is in its Claude Code panel."
             }
         }
     }

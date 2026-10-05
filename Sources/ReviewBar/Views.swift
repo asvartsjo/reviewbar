@@ -351,9 +351,9 @@ struct ContentView: View {
         let pr = vm.pr(for: item)
         let row = VStack(alignment: .leading, spacing: 2) {
             if let pr { numberedTitle(pr.number, pr.title) } else {
-                Text(verbatim: item.session.name).font(.body.weight(.medium)).lineLimit(1)
+                Text(verbatim: item.session.displayName).font(.body.weight(.medium)).lineLimit(1)
             }
-            (Text(verbatim: "\(pr == nil ? item.repo : item.session.name) · ").foregroundStyle(.secondary)
+            (Text(verbatim: "\(pr == nil && item.session.title == nil ? item.repo : item.session.name) · ").foregroundStyle(.secondary)
                 + Text(item.session.needsMe ? "needs you" : item.session.working ? "working" : "idle")
                     .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
                 + Text(verbatim: " · \(item.session.background ? "agent view" : item.session.host?.name ?? "terminal") · \(Crew.since(item.session.startedAt))")

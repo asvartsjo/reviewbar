@@ -153,4 +153,30 @@ struct CrewTests {
         #expect(Crew.host(of: 700, in: t) == .other)   // a parent loop ends, it doesn't hang
         #expect(Crew.host(of: 999, in: t) == .other)
     }
+
+    @Test func readsTheTitleFromATranscript() {
+        let transcript = """
+        {"type":"user","message":{"content":"say \\"ai-title\\" here"}}
+        {"type":"ai-title","aiTitle":"First guess","sessionId":"s"}
+        {"type":"ai-title","aiTitle":"PR workflow and first-mate repo","sessionId":"s"}
+        {"type":"custom-title","customTitle":"","sessionId":"s"}
+        {"type":"ai-title", broken
+        """
+        let t = Crew.titles(inTranscript: Substring(transcript))
+        #expect(t.ai == "PR workflow and first-mate repo")
+        #expect(t.custom == nil)   // an empty /rename doesn't count
+        let renamed = Crew.titles(inTranscript: #"{"type":"custom-title","customTitle":"Crew names"}"#)
+        #expect(renamed.custom == "Crew names")
+        #expect(Crew.titles(inTranscript: "").ai == nil)
+    }
+
+    @Test func showsTheTitleElseTheShortName() {
+        let s = Crew.parseSessions(sample)
+        #expect(s[1].sessionId == "bbbb2222")
+        #expect(s[3].sessionId == "s4")   // agent view sessions have one too, beside their `id`
+        #expect(s[1].displayName == "gauss-ef")
+        var titled = s[1]
+        titled.title = "Bearing skill usage"
+        #expect(titled.displayName == "Bearing skill usage")
+    }
 }

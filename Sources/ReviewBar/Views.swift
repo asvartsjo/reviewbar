@@ -1034,41 +1034,41 @@ struct SettingsView: View {
                 }
             }
             .font(.caption2).foregroundStyle(.secondary)
-            HStack {
-                Text("Review command")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Review command").font(.headline)
+                Text(agentRaw == Agent.codex.rawValue
+                     ? "Claude Code only. Codex reviews use the built-in prompt."
+                     : "The first message of a new review in the terminal, with {url} as the PR's link. "
+                       + "Leave it empty for the built-in review prompt.")
+                    .font(.caption2).foregroundStyle(.secondary)
                 TextField("Review command", text: $reviewCommand, prompt: Text("Built-in review prompt"))
                     .labelsHidden()
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
-            Text(agentRaw == Agent.codex.rawValue
-                 ? "Claude Code only. Codex reviews use the built-in prompt."
-                 : "The first message of a new review in the terminal, with {url} as the PR's link. "
-                   + "Leave it empty for the built-in review prompt.")
-                .font(.caption2).foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline) {
-                Text("Verify command")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Verify command").font(.headline)
+                Text(agentRaw == Agent.codex.rawValue
+                     ? "Claude Code only."
+                     : "Sent by Verify fixes (PRs where you have review threads), with {url} as the PR's link. "
+                       + "Leave it empty to hide the button.")
+                    .font(.caption2).foregroundStyle(.secondary)
                 TextField("Verify command", text: $verifyCommand, prompt: Text("No Verify fixes button"),
                           axis: .vertical)
                     .lineLimit(1...4)
                     .labelsHidden()
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
-            Text(agentRaw == Agent.codex.rawValue
-                 ? "Claude Code only."
-                 : "Sent by Verify fixes (PRs where you have review threads), with {url} as the PR's link. "
-                   + "Leave it empty to hide the button.")
-                .font(.caption2).foregroundStyle(.secondary)
-            HStack {
-                Text("My PR feedback command")
-                TextField("My PR feedback command", text: $myPRCommand, prompt: Text("Built-in Work through feedback prompt"))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Triage feedback command").font(.headline)
+                Text(agentRaw == Agent.codex.rawValue
+                     ? "Claude Code only."
+                     : "Sent by Triage feedback on your own PRs with feedback or failing CI, in your checkout of "
+                       + "the PR's branch. {url} is the PR's link. Empty: the built-in prompt.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                TextField("Triage feedback command", text: $myPRCommand, prompt: Text("Built-in Work through feedback prompt"))
                     .labelsHidden()
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
-            Text(agentRaw == Agent.codex.rawValue
-                 ? "Claude Code only."
-                 : "On your own PRs, run in your checkout of the PR's branch when there's feedback or CI is failing "
-                   + "(Triage feedback). {url} is the PR's link. Empty: the built-in prompt.")
-                .font(.caption2).foregroundStyle(.secondary)
             Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
             Text(worktreesNextToClone
                  ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. gauss-worktrees/pr-42."

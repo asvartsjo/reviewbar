@@ -43,20 +43,6 @@ extension FeedbackPR {
     }
 }
 
-extension MyMove.Reason {
-    /// Order within Your move: what blocks first, a parked draft last.
-    var urgency: Int {
-        switch self {
-        case .conflict: 0
-        case .checksFailing: 1
-        case .feedback: 2
-        case .merge: 3
-        case .needsReviewer: 4
-        case .readyForReview: 5
-        }
-    }
-}
-
 /// My PRs' sections, in display order.
 enum MyGroup: Int, CaseIterable, Comparable {
     case yours, waiting, parked
@@ -76,8 +62,7 @@ enum MyGroup: Int, CaseIterable, Comparable {
 
     /// My open PRs split into sections, empty ones left out. Parked: the ones I parked, and drafts
     /// with no commit for `oldDraftDays`. A PR dismissed until new feedback (`dismissed[url]` ≥ its
-    /// `latestAt`) waits. Your move: most urgent, then waiting longest first; the others: most
-    /// recently updated first. Pure, for tests.
+    /// `latestAt`) waits. Every section lists the most recently created PR first. Pure, for tests.
     static func sections(_ prs: [FeedbackPR], dismissed: [String: String], parked: Set<String> = [],
                          now: Date = Date()) -> [(group: MyGroup, prs: [FeedbackPR])] {
         let parser = ISO8601DateFormatter()
@@ -88,15 +73,8 @@ enum MyGroup: Int, CaseIterable, Comparable {
             if !f.latestAt.isEmpty, f.latestAt <= (dismissed[f.pr.url] ?? "") { return .waiting }
             return f.move.isYours ? .yours : .waiting
         }
-        func urgency(_ f: FeedbackPR) -> Int { if case .yours(let r) = f.move { r.urgency } else { 0 } }
-        func waitingSince(_ f: FeedbackPR) -> String { f.latestAt.isEmpty ? f.pr.updatedAt : f.latestAt }
-
         return Dictionary(grouping: prs, by: group)
-            .map { g, prs in
-                (group: g, prs: g == .yours
-                    ? prs.sorted { (urgency($0), waitingSince($0)) < (urgency($1), waitingSince($1)) }
-                    : prs.sorted { $0.pr.updatedAt > $1.pr.updatedAt })
-            }
+            .map { g, prs in (group: g, prs: prs.sorted { ($0.pr.createdAt ?? "") > ($1.pr.createdAt ?? "") }) }
             .sorted { $0.group < $1.group }
     }
 }

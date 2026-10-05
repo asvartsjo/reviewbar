@@ -872,7 +872,7 @@ enum Backend {
                 threads += 1
                 seen(last.createdAt, last.author)
             }
-            var reviews = 0
+            var reviews = 0, approvals = 0
             for r in n.reviews.items {
                 guard isReviewer(r.author), let at = r.submittedAt, at > myLast else { continue }
                 // A plain COMMENTED review with no summary only wraps thread comments, counted above.
@@ -880,6 +880,7 @@ enum Backend {
                     || (r.state == "COMMENTED" && !r.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 guard counts else { continue }
                 reviews += 1
+                if r.state == "APPROVED" { approvals += 1 }
                 seen(at, r.author)
             }
             var comments = 0
@@ -898,7 +899,7 @@ enum Backend {
                                hasFeedback: n.reviews.items.contains { isReviewer($0.author) }
                                    || n.comments.items.contains { isReviewer($0.author) }
                                    || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) },
-                               branch: n.headRefName, lastCommitAt: head?.committedDate, botThreads: botThreads)
+                               branch: n.headRefName, lastCommitAt: head?.committedDate, approvals: approvals, botThreads: botThreads)
 
             // No unanswered feedback: news only if something blocks it, or it can be merged.
             // Otherwise it's quiet (no `latestAt`): listed, but never notifies or counts.

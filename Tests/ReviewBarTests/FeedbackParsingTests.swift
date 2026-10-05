@@ -183,6 +183,17 @@ struct FeedbackParsingTests {
 
     // MARK: CI and merge state
 
+    /// An approval after my last push still notifies as news, but is counted apart so the move is merge.
+    @Test func approvalAfterLastPushIsCountedApart() throws {
+        let prs = try Backend.parseMyPRs(myPRsJSON(
+            decision: "APPROVED",
+            reviews: [review("simon", "APPROVED", "2026-09-11T09:00:00Z")],
+            checks: "SUCCESS", mergeable: "MERGEABLE"))
+        #expect(prs.map(\.reviews) == [1])
+        #expect(prs.map(\.approvals) == [1])
+        #expect(prs.map(\.move) == [.yours(.merge)])
+    }
+
     @Test func approvedGreenMergeableIsListedAsReady() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             decision: "APPROVED",

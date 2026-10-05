@@ -27,6 +27,14 @@ struct MyMoveTests {
         #expect(mine().move == .waiting(.reviewers))
     }
 
+    /// A new approval is news, not something to answer: an approved green PR is ready to merge.
+    @Test func newApprovalIsNotFeedback() {
+        var approved = mine(decision: "APPROVED", reviews: 1); approved.approvals = 1
+        #expect(approved.move == .yours(.merge))
+        var mixed = mine(decision: "APPROVED", reviews: 2); mixed.approvals = 1
+        #expect(mixed.move == .yours(.feedback))
+    }
+
     @Test func codeRabbitThreadIsMyMove() {
         #expect(mine(botThreads: 2).move == .yours(.feedback))
     }

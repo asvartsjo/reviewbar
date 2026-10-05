@@ -30,7 +30,7 @@ extension FeedbackPR {
     var move: MyMove {
         if hasConflict { return .yours(.conflict) }
         if checksFailing { return .yours(.checksFailing) }
-        if threads + reviews + comments + botThreads > 0 { return .yours(.feedback) }
+        if threads + (reviews - approvals) + comments + botThreads > 0 { return .yours(.feedback) }
         if checks == "PENDING" || checks == "EXPECTED" { return .waiting(.ci) }
         if pr.isDraft { return .yours(.readyForReview) }
         if decision == "APPROVED", checks == nil || checks == "SUCCESS" { return .yours(.merge) }

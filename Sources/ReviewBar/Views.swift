@@ -519,6 +519,8 @@ struct DetailView: View {
             Text(verbatim: "\(pr.repository.nameWithOwner) #\(pr.number) · \(pr.author.login)")
                 .font(.caption).foregroundStyle(.secondary)
 
+            statusLine
+
             if let f = vm.feedback(for: pr) {
                 HStack {
                     DecisionBadge(decision: f.decision)
@@ -581,6 +583,27 @@ struct DetailView: View {
         }
         .padding(10)
         .onAppear { if let r = vm.reviewingPR(for: pr) { vm.markSeen(r) } }
+    }
+
+    /// The badges the PR's row shows, so the detail doesn't know less than the list.
+    @ViewBuilder private var statusLine: some View {
+        let mine = vm.isMine(pr) ? vm.myPRs.first { $0.pr.url == pr.url } : nil
+        let reviewing = vm.isMine(pr) ? nil : vm.reviewingPR(for: pr)
+        let crew = vm.crewItem(for: pr)
+        if mine != nil || reviewing != nil || crew != nil {
+            HStack(spacing: 8) {
+                if let crew { CrewBadge(item: crew) }
+                if let mine {
+                    StatusBadge(feedback: mine)
+                    if mine.botThreads > 0 {
+                        Label("\(mine.botThreads) bot thread\(mine.botThreads == 1 ? "" : "s")", systemImage: "cpu")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let reviewing { ChecksIcon(state: reviewing.checks, labelled: true) }
+            }
+            .font(.caption)
+        }
     }
 
     /// Quick-model summary of the comments, or the button to make one.
@@ -653,7 +676,7 @@ struct DetailView: View {
                         .buttonStyle(.borderedProminent)
                 }
                 if action?.isMerge ?? true {
-                    Button(terminalLabel("Work through feedback"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
+                    Button(terminalLabel(vm.myPRs.contains { $0.pr.url == pr.url && $0.hasFeedback } ? "Work through feedback" : "Open"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
                         .prominent(action == nil)
                 }
             } else {
@@ -923,7 +946,7 @@ struct SettingsView: View {
                     }
                 }
                 .listStyle(.bordered(alternatesRowBackgrounds: true))
-                .frame(height: 150)
+                .frame(height: min(150, max(48, CGFloat(repos.count) * 44)))
                 .onAppear(perform: loadFolders)
             }
 
@@ -1352,7 +1375,7 @@ struct CrewBadge: View {
               systemImage: item.session.needsMe ? "questionmark.bubble.fill" : "ellipsis.bubble")
             .font(.caption)
             .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
-            .help(item.session.background ? "An agent view session (see Crew in My PRs)" : "A Claude session in a terminal window")
+            .help(item.session.background ? "An agent view session (see the Crew tab)" : "A Claude session in a terminal window")
     }
 }
 

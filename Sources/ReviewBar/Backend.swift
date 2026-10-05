@@ -1504,7 +1504,8 @@ enum Backend {
         guard let folder = RepoList.folder(for: pr.repository.nameWithOwner) else { return nil }
         let wt = TerminalApp.Worktree.forPR(pr, repoFolder: folder)
         _ = try? await sh(wt.script)
-        guard FileManager.default.fileExists(atPath: wt.path + "/.git") else { return nil }
+        guard FileManager.default.fileExists(atPath: wt.path + "/.git"),
+              (try? await sh(wt.atPRHeadScript)) != nil else { return nil }
         return wt.path
     }
 

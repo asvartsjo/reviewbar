@@ -126,6 +126,13 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             """
         }
 
+        /// Shell test that passes only when the worktree's HEAD is the PR head last fetched into `ref`.
+        /// `script` leaves a worktree with local changes or commits where it is, so afterwards it may
+        /// hold other code than the PR. Pure, for tests.
+        var atPRHeadScript: String {
+            #"[[ "$(git -C \#(q(path)) rev-parse HEAD)" == "$(git -C \#(q(repoFolder)) rev-parse \#(ref))" ]]"#
+        }
+
         static let nextToCloneKey = "worktreesNextToClone"
 
         /// Worktrees live under Application Support, never inside your clone. With `nextToClone`

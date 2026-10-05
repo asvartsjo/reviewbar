@@ -7,7 +7,7 @@ private enum Tab: String, CaseIterable {
     case reviewing = "Reviewing"
     case mine = "My PRs"
     case mentions = "Mentions"
-    case saved = "Saved"
+    case crew = "Crew"
 }
 
 struct ContentView: View {
@@ -44,14 +44,14 @@ struct ContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
 
-                if let e = vm.error, tab != .saved {
+                if let e = vm.error {
                     Text(e).font(.caption).foregroundStyle(.red).padding(.horizontal, 10)
                 }
                 switch tab {
                 case .reviewing: reviewingList
                 case .mine: mineList
                 case .mentions: mentionsList
-                case .saved: savedList
+                case .crew: crewList
                 }
             }
         }
@@ -269,38 +269,6 @@ struct ContentView: View {
             } else {
                 let sections = vm.mySections
                 List {
-                    if !vm.allCrew.isEmpty {
-                        sectionHeader("Crew", count: vm.crew.count)
-                            .listRowSeparator(.hidden)
-                        if let notice = vm.terminalNotice {
-                            Text(notice).font(.caption).foregroundStyle(.secondary)
-                                .listRowSeparator(.hidden)
-                        }
-                        ForEach(vm.crew) { item in
-                            crewRow(item)
-                                .listRowSeparator(.hidden)
-                        }
-                        if !vm.idleCrew.isEmpty {
-                            Button { showIdleCrew.toggle() } label: {
-                                HStack(spacing: 4) {
-                                    Text(verbatim: "Idle \(vm.idleCrew.count)")
-                                    Image(systemName: showIdleCrew ? "chevron.down" : "chevron.right").font(.caption2.bold())
-                                }
-                                .font(.caption).foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.hoverRow)
-                            .help("\(showIdleCrew ? "Hide" : "Show") sessions at their prompt, some may have no visible window")
-                            .listRowSeparator(.hidden)
-                            ForEach(showIdleCrew ? vm.idleCrew : []) { item in
-                                crewRow(item)
-                                    .opacity(0.55)
-                                    .listRowSeparator(.hidden)
-                            }
-                        }
-                        sectionHeader("My PRs", count: sections.reduce(0) { $0 + $1.prs.count })
-                            .padding(.top, 10)
-                            .listRowSeparator(.hidden)
-                    }
                     moveSummary(sections)
                         .listRowSeparator(.hidden)
                     ForEach(sections, id: \.group) { s in
@@ -422,48 +390,47 @@ struct ContentView: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: saved
+    // MARK: crew
 
-    private var savedList: some View {
-        VStack(spacing: 0) {
-            if vm.saved.isEmpty {
-                empty("tray", "No saved reviews yet.")
+    /// Claude sessions in your watched repos, waiting on you first, idle ones folded.
+    private var crewList: some View {
+        Group {
+            if vm.allCrew.isEmpty {
+                empty("person.2", "No Claude sessions in your repos.")
             } else {
-                List(vm.saved) { s in
-                    Button { selected = s.pr } label: { savedRow(s) }
+                List {
+                    sectionHeader("Crew", count: vm.crew.count)
                         .listRowSeparator(.hidden)
-                        .buttonStyle(.hoverRow)
-                        .contextMenu {
-                            Button("Delete", systemImage: "trash", role: .destructive) { vm.delete(s) }
+                    if let notice = vm.terminalNotice {
+                        Text(notice).font(.caption).foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                    }
+                    ForEach(vm.crew) { item in
+                        crewRow(item)
+                            .listRowSeparator(.hidden)
+                    }
+                    if !vm.idleCrew.isEmpty {
+                        Button { showIdleCrew.toggle() } label: {
+                            HStack(spacing: 4) {
+                                Text(verbatim: "Idle \(vm.idleCrew.count)")
+                                Image(systemName: showIdleCrew ? "chevron.down" : "chevron.right").font(.caption2.bold())
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
                         }
+                        .buttonStyle(.hoverRow)
+                        .help("\(showIdleCrew ? "Hide" : "Show") sessions at their prompt, some may have no visible window")
+                        .listRowSeparator(.hidden)
+                        ForEach(showIdleCrew ? vm.idleCrew : []) { item in
+                            crewRow(item)
+                                .opacity(0.55)
+                                .listRowSeparator(.hidden)
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
-            Divider()
-            HStack {
-                Button("Reveal in Finder", systemImage: "folder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([Store.dir])
-                }
-                .help("Show the folder where reviews are saved")
-                Spacer()
-                Text("Right-click a row to delete").font(.caption2).foregroundStyle(.secondary)
-            }
-            .buttonStyle(.hoverBorderless)
-            .padding(8)
         }
-    }
-
-    private func savedRow(_ s: SavedReview) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            numberedTitle(s.pr.number, s.pr.title)
-            metaLine(s.pr.repository.nameWithOwner, s.pr.author.login,
-                     " · reviewed \(s.date.formatted(.relative(presentation: .named)))"
-                        + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
-                        + (s.producedBy.map { " · \($0)" } ?? ""))
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
     }
 
     // MARK: helpers
@@ -493,6 +460,7 @@ struct ContentView: View {
         case .reviewing where vm.yourTurnCount > 0: return "\(t.rawValue) (\(vm.yourTurnCount))"
         case .mine where vm.yourMoveCount > 0: return "\(t.rawValue) (\(vm.yourMoveCount))"
         case .mentions where !vm.visibleMentions.isEmpty: return "\(t.rawValue) (\(vm.visibleMentions.count))"
+        case .crew where vm.crewNeedingMeCount > 0: return "\(t.rawValue) (\(vm.crewNeedingMeCount))"
         default: return t.rawValue
         }
     }
@@ -586,7 +554,7 @@ struct DetailView: View {
                          + "checked against your earlier notes, or run a full review.")
                         .font(.caption).foregroundStyle(.orange)
                 } else {
-                    Text("This PR has new activity since your last review. The older one is under Saved.")
+                    Text("This PR has new activity since your last review.")
                         .font(.caption).foregroundStyle(.orange)
                 }
             }
@@ -835,7 +803,6 @@ struct SettingsView: View {
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
     @AppStorage(ClaudeSettings.myPRCommandKey) private var myPRCommand = ClaudeSettings.myPRCommandDefault
-    @AppStorage(ClaudeSettings.mergeCommandKey) private var mergeCommand = ClaudeSettings.mergeCommandDefault
     @AppStorage(Backend.reviewStyleKey) private var reviewStyle = Backend.reviewStyleDefault
     @AppStorage(TerminalApp.Worktree.nextToCloneKey) private var worktreesNextToClone = false
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
@@ -1090,17 +1057,10 @@ struct SettingsView: View {
                     .labelsHidden()
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
-            HStack {
-                Text("Merge command")
-                TextField("Merge command", text: $mergeCommand, prompt: Text("No Merge check button"))
-                    .labelsHidden()
-                    .disabled(agentRaw == Agent.codex.rawValue)
-            }
             Text(agentRaw == Agent.codex.rawValue
                  ? "Claude Code only."
-                 : "On your own PRs, run in your checkout of the PR's branch: the feedback command when there's "
-                   + "feedback or CI is failing (Triage feedback), the merge command when it's ready (Merge check). "
-                   + "{url} is the PR's link. Empty: the built-in prompt, or no Merge check button.")
+                 : "On your own PRs, run in your checkout of the PR's branch when there's feedback or CI is failing "
+                   + "(Triage feedback). {url} is the PR's link. Empty: the built-in prompt.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
             Text(worktreesNextToClone

@@ -749,6 +749,17 @@ final class ReviewViewModel: ObservableObject {
         return myPRs.first { match($0.pr) }?.pr ?? reviewing.first { match($0.pr) }?.pr
     }
 
+    /// Stops a background session (`claude stop`); its conversation is kept, so it can be resumed.
+    func stop(_ item: CrewItem) {
+        guard !DemoData.isOn else { return }
+        Task {
+            if !(await Backend.stop(item.session)) {
+                error = "Couldn't stop \(item.session.name). Try `claude stop \(item.session.id)` in a terminal."
+            }
+            await refreshCrew()
+        }
+    }
+
     /// `claude attach` for a background session, in the chosen terminal.
     func attach(_ item: CrewItem) {
         terminalNotice = nil

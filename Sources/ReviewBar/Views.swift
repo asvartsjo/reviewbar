@@ -341,6 +341,10 @@ struct ContentView: View {
             Button { vm.attach(item) } label: { row }
                 .buttonStyle(.hoverRow)
                 .help("Open the session (\(terminal.label("claude attach")))")
+                .contextMenu {
+                    Button("Stop session", systemImage: "stop.circle") { vm.stop(item) }
+                        .help("claude stop: the conversation is kept, and claude attach resumes it")
+                }
         } else if let pr {
             Button { selected = pr } label: { row }
                 .buttonStyle(.hoverRow)

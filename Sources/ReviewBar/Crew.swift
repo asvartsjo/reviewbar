@@ -149,6 +149,13 @@ extension Backend {
         }
     }
 
+    /// `claude stop` for a background session: it stops, its conversation is kept, and
+    /// `claude attach` resumes it. False when it couldn't be stopped.
+    static func stop(_ session: CrewSession) async -> Bool {
+        guard session.background, let claude = await claudePath.get() else { return false }
+        return await run(claude, ["stop", session.id]) != nil
+    }
+
     /// Runs an executable directly (no shell) and returns its output, or nil if it fails.
     private static func run(_ exe: String, _ args: [String]) async -> String? {
         await withCheckedContinuation { c in

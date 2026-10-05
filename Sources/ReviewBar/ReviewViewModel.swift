@@ -361,13 +361,20 @@ final class ReviewViewModel: ObservableObject {
     func dismissMention(_ m: Mention) { dismiss("mention:" + m.url, until: m.updatedAt) }
 
     /// Your PRs with feedback you have not dismissed (or newer than what you dismissed).
+    /// Quiet PRs have no `latestAt`, so they're never in it.
     var visibleFeedback: [FeedbackPR] {
         myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
     }
 
+    /// The rest of your open PRs: quiet or dismissed, most recently updated first.
+    var otherMyPRs: [FeedbackPR] {
+        let shown = Set(visibleFeedback.map(\.pr.url))
+        return myPRs.filter { !shown.contains($0.pr.url) }.sorted { $0.pr.updatedAt > $1.pr.updatedAt }
+    }
+
     func feedback(for pr: PR) -> FeedbackPR? { visibleFeedback.first { $0.pr.url == pr.url } }
 
-    /// True for your own PRs (with feedback, dismissed or not).
+    /// True for your own open PRs.
     func isMine(_ pr: PR) -> Bool { myPRs.contains { $0.pr.url == pr.url } }
 
     func dismissFeedback(_ f: FeedbackPR) { dismiss(f.pr.url, until: f.latestAt) }
@@ -614,10 +621,10 @@ final class ReviewViewModel: ObservableObject {
 
     // MARK: Quick summaries
 
-    /// Summaries are offered where there are comments to read: replies to you, your own PRs,
-    /// or a PR where others spoke after your review.
+    /// Summaries are offered where there are comments to read: replies to you, your own PRs
+    /// with feedback, or a PR where others spoke after your review.
     func canSummarise(_ pr: PR) -> Bool {
-        isMine(pr) || replies.contains { $0.pr.url == pr.url } || summarySince(pr) != nil
+        myPRs.contains { $0.pr.url == pr.url && $0.hasFeedback } || replies.contains { $0.pr.url == pr.url } || summarySince(pr) != nil
     }
 
     /// Your last review, when others spoke after it: the summary then covers what happened since.
@@ -628,7 +635,8 @@ final class ReviewViewModel: ObservableObject {
 
     /// Changes when new comments arrive, so an old summary isn't shown as current.
     private func summaryKey(_ pr: PR) -> String {
-        let latest = myPRs.first { $0.pr.url == pr.url }?.latestAt
+        // A quiet PR has no `latestAt`; `updatedAt` still moves with every comment or push.
+        let latest = myPRs.first { $0.pr.url == pr.url }.map { $0.latestAt.isEmpty ? $0.pr.updatedAt : $0.latestAt }
             ?? [replies.first { $0.pr.url == pr.url }?.latestAt, reviewingPR(for: pr)?.latestAt].compactMap { $0 }.max()
             ?? ""
         return pr.url + "#" + latest

@@ -78,7 +78,7 @@ struct FeedbackParsingTests {
         return Data("""
         {"data": {"viewer": {"login": "me"}, "search": {"nodes": [
           {"number": 7, "title": "Mine", "url": "https://github.com/o/r/pull/7", "isDraft": false,
-           "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "reviewDecision": "\(decision)",
+           "createdAt": "2026-09-09T00:00:00Z", "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "reviewDecision": "\(decision)",
            "mergeable": \(merge),
            "repository": {"nameWithOwner": "o/r"}, "author": {"login": "me"},
            "commits": {"nodes": [{"commit": {"committedDate": "\(lastCommit)", "statusCheckRollup": \(rollup)}}]},
@@ -116,13 +116,14 @@ struct FeedbackParsingTests {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             reviews: [review("alice", "CHANGES_REQUESTED", "2026-09-09T09:00:00Z")],
             comments: [comment("bob", "2026-09-08T09:00:00Z")]))
-        #expect(prs.isEmpty)
+        #expect(prs.map(\.isQuiet) == [true])
+        #expect(prs.map(\.hasFeedback) == [true])   // answered, but still worth a summary
     }
 
     @Test func myLaterCommentCountsAsAnswer() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             comments: [comment("bob", "2026-09-11T09:00:00Z"), comment("me", "2026-09-11T10:00:00Z")]))
-        #expect(prs.isEmpty)
+        #expect(prs.map(\.isQuiet) == [true])
     }
 
     @Test func botsAreIgnored() throws {
@@ -130,7 +131,8 @@ struct FeedbackParsingTests {
             reviews: [review("coverage", "COMMENTED", "2026-09-11T09:00:00Z", body: "Coverage 91%", bot: true)],
             comments: [comment("ci", "2026-09-11T09:00:00Z", bot: true)],
             threads: [myThread(last: comment("lint", "2026-09-11T09:00:00Z", bot: true))]))
-        #expect(prs.isEmpty)
+        #expect(prs.map(\.isQuiet) == [true])
+        #expect(prs.map(\.hasFeedback) == [false])
     }
 
     /// A COMMENTED review with no summary only wraps thread comments, which are counted as threads.
@@ -183,11 +185,20 @@ struct FeedbackParsingTests {
         #expect(failing.first?.latestAt == "2026-09-10T00:00:00Z")   // the head commit
         let conflict = try Backend.parseMyPRs(myPRsJSON(checks: "SUCCESS", mergeable: "CONFLICTING"))
         #expect(conflict.first?.status == "Merge conflict")
+        #expect(conflict.first?.isQuiet == false)
     }
 
-    @Test func quietPRsStayHidden() throws {
-        #expect(try Backend.parseMyPRs(myPRsJSON(checks: "SUCCESS", mergeable: "MERGEABLE")).isEmpty)
-        #expect(try Backend.parseMyPRs(myPRsJSON(checks: "PENDING", mergeable: "UNKNOWN")).isEmpty)
+    /// A PR nobody has looked at yet is still listed, but quiet: no time, so it never notifies.
+    @Test func quietPRsAreListed() throws {
+        for (checks, mergeable) in [("SUCCESS", "MERGEABLE"), ("PENDING", "UNKNOWN")] {
+            let prs = try Backend.parseMyPRs(myPRsJSON(checks: checks, mergeable: mergeable))
+            #expect(prs.count == 1)
+            #expect(prs[0].isQuiet)
+            #expect(!prs[0].hasFeedback)   // so no "Summarise feedback" box
+            #expect(prs[0].latestBy == "")
+            #expect(prs[0].pr.createdAt == "2026-09-09T00:00:00Z")
+            #expect(AlertDiff.newer(prs, seen: [:], url: \.pr.url, latestAt: \.latestAt).isEmpty)
+        }
     }
 
     @Test func feedbackRowsStillShowCountsWithStatus() throws {

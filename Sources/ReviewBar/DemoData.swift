@@ -74,14 +74,20 @@ enum DemoData {
          ReplyPR(pr: debounce, waiting: 2, latestAt: ago(hours: 2), latestBy: "sam")]
     }
 
-    /// Your own PRs (`Backend.fetchMyPRs`): a merge conflict and one ready to merge.
+    /// Your own PRs (`Backend.fetchMyPRs`): a merge conflict, one ready to merge, and a new one
+    /// nobody has looked at yet.
     static func myPRs() -> [FeedbackPR] {
         [FeedbackPR(pr: pr("acme/storefront", 300, "Settings: dark mode", by: "you", head: "300a", openedDaysAgo: 4),
                     decision: "CHANGES_REQUESTED", threads: 2, reviews: 1, comments: 1,
-                    latestAt: ago(hours: 4), latestBy: "lina", checks: "SUCCESS", mergeable: "CONFLICTING"),
+                    latestAt: ago(hours: 4), latestBy: "lina", checks: "SUCCESS", mergeable: "CONFLICTING",
+                    hasFeedback: true),
          FeedbackPR(pr: pr("acme/api", 305, "Bump Swift to 6.1", by: "you", head: "305a", openedDaysAgo: 2),
                     decision: "APPROVED", threads: 0, reviews: 1, comments: 0,
-                    latestAt: ago(days: 1), latestBy: "omar", checks: "SUCCESS", mergeable: "MERGEABLE")]
+                    latestAt: ago(days: 1), latestBy: "omar", checks: "SUCCESS", mergeable: "MERGEABLE",
+                    hasFeedback: true),
+         FeedbackPR(pr: pr("acme/api", 310, "Log slow queries", by: "you", head: "310a", openedDaysAgo: 0.02),
+                    decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
+                    latestAt: "", latestBy: "", checks: "PENDING", mergeable: "MERGEABLE")]
     }
 
     static func mentions() -> [Mention] {

@@ -18,6 +18,7 @@ struct ContentView: View {
     @ViewState private var selected: PR?
     @ViewState private var tab: Tab = .reviewing
     @ViewState private var showMuted = false
+    @ViewState private var showOldDrafts = false
     @AppStorage(AsWindow.key) private var asWindow = false
 
     var body: some View {
@@ -256,29 +257,42 @@ struct ContentView: View {
 
     // MARK: my PRs
 
-    /// PRs with new feedback first, then the rest of your open PRs.
+    /// Your open PRs by whose move it is, Old drafts folded.
     private var mineList: some View {
         Group {
             if vm.myPRs.isEmpty && !vm.loading {
                 empty("tray", "No open PRs of yours.")
             } else {
+                let sections = vm.mySections
                 List {
-                    ForEach(vm.visibleFeedback) { f in
-                        Button { selected = f.pr } label: { feedbackRow(f) }
-                            .listRowSeparator(.hidden)
-                            .buttonStyle(.hoverRow)
-                            .contextMenu {
-                                Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
+                    moveSummary(sections)
+                        .listRowSeparator(.hidden)
+                    ForEach(sections, id: \.group) { s in
+                        Group {
+                            if s.group == .oldDrafts {
+                                Button { showOldDrafts.toggle() } label: {
+                                    sectionHeader(s.group.title, count: s.prs.count, folded: !showOldDrafts)
+                                }
+                                .buttonStyle(.hoverRow)
+                                .help(showOldDrafts ? "Hide drafts untouched for \(MyGroup.oldDraftDays)+ days"
+                                                    : "Show drafts untouched for \(MyGroup.oldDraftDays)+ days")
+                            } else {
+                                sectionHeader(s.group.title, count: s.prs.count)
                             }
-                    }
-                    if !vm.otherMyPRs.isEmpty {
-                        sectionHeader("Nothing new", count: vm.otherMyPRs.count)
-                            .padding(.top, vm.visibleFeedback.isEmpty ? 0 : 10)
-                            .listRowSeparator(.hidden)
-                        ForEach(vm.otherMyPRs) { f in
-                            Button { selected = f.pr } label: { feedbackRow(f, quiet: true) }
+                        }
+                        .padding(.top, 6)
+                        .listRowSeparator(.hidden)
+                        ForEach(s.group == .oldDrafts && !showOldDrafts ? [] : s.prs) { f in
+                            let new = vm.visibleFeedback.contains(f)
+                            Button { selected = f.pr } label: { feedbackRow(f, quiet: !new) }
                                 .listRowSeparator(.hidden)
                                 .buttonStyle(.hoverRow)
+                                .opacity(s.group == .oldDrafts ? 0.55 : 1)
+                                .contextMenu {
+                                    if new {
+                                        Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
+                                    }
+                                }
                         }
                     }
                 }
@@ -286,6 +300,13 @@ struct ContentView: View {
                 .scrollContentBackground(.hidden)
             }
         }
+    }
+
+    /// "3 wait on you · 5 on others", old drafts left out.
+    private func moveSummary(_ sections: [(group: MyGroup, prs: [FeedbackPR])]) -> some View {
+        func count(_ g: MyGroup) -> Int { sections.first { $0.group == g }?.prs.count ?? 0 }
+        return Text(verbatim: "\(count(.yours)) wait on you · \(count(.waiting)) on others")
+            .font(.caption).foregroundStyle(.secondary)
     }
 
     /// `quiet`: nothing new to show (or dismissed), so the line says when it was opened instead.
@@ -300,7 +321,8 @@ struct ContentView: View {
             }
             if quiet {
                 metaLine(f.pr.repository.nameWithOwner, "",
-                         f.pr.createdAt.map { "opened \(age($0))" } ?? "updated \(age(f.pr.updatedAt))")
+                         (f.moveHint.map { "\($0) · " } ?? "")
+                            + (f.pr.createdAt.map { "opened \(age($0))" } ?? "updated \(age(f.pr.updatedAt))"))
             } else {
                 metaLine(f.pr.repository.nameWithOwner, f.latestBy, " \(age(f.latestAt)) · \(f.summary)")
             }

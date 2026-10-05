@@ -37,3 +37,72 @@ extension FeedbackPR {
         return .waiting(.reviewers)
     }
 }
+
+extension MyMove.Reason {
+    /// Order within Your move: what blocks first, a parked draft last.
+    var urgency: Int {
+        switch self {
+        case .conflict: 0
+        case .checksFailing: 1
+        case .feedback: 2
+        case .merge: 3
+        case .readyForReview: 4
+        }
+    }
+}
+
+/// My PRs' sections, in display order.
+enum MyGroup: Int, CaseIterable, Comparable {
+    case yours, waiting, oldDrafts
+
+    var title: String {
+        switch self {
+        case .yours: "Your move"
+        case .waiting: "Waiting on others"
+        case .oldDrafts: "Old drafts"
+        }
+    }
+
+    static func < (a: MyGroup, b: MyGroup) -> Bool { a.rawValue < b.rawValue }
+
+    /// A draft nobody touched for this long is parked on purpose, whatever its move.
+    static let oldDraftDays = 30
+
+    /// My open PRs split into sections, empty ones left out. A PR dismissed until new feedback
+    /// (`dismissed[url]` ≥ its `latestAt`) waits. Your move: most urgent, then waiting longest first;
+    /// the others: most recently updated first. Pure, for tests.
+    static func sections(_ prs: [FeedbackPR], dismissed: [String: String], now: Date = Date())
+        -> [(group: MyGroup, prs: [FeedbackPR])] {
+        let parser = ISO8601DateFormatter()
+        let cutoff = now.addingTimeInterval(-Double(oldDraftDays) * 86_400)
+        func group(_ f: FeedbackPR) -> MyGroup {
+            if f.pr.isDraft, let updated = parser.date(from: f.pr.updatedAt), updated < cutoff { return .oldDrafts }
+            if !f.latestAt.isEmpty, f.latestAt <= (dismissed[f.pr.url] ?? "") { return .waiting }
+            return f.move.isYours ? .yours : .waiting
+        }
+        func urgency(_ f: FeedbackPR) -> Int { if case .yours(let r) = f.move { r.urgency } else { 0 } }
+        func waitingSince(_ f: FeedbackPR) -> String { f.latestAt.isEmpty ? f.pr.updatedAt : f.latestAt }
+
+        return Dictionary(grouping: prs, by: group)
+            .map { g, prs in
+                (group: g, prs: g == .yours
+                    ? prs.sorted { (urgency($0), waitingSince($0)) < (urgency($1), waitingSince($1)) }
+                    : prs.sorted { $0.pr.updatedAt > $1.pr.updatedAt })
+            }
+            .sorted { $0.group < $1.group }
+    }
+}
+
+extension FeedbackPR {
+    /// What a row with nothing new says about its move, when the status badge doesn't already:
+    /// "2 bot threads", "ready for review?", "approved", "waiting on reviewers". Nil otherwise.
+    var moveHint: String? {
+        switch move {
+        case .yours(.feedback) where isQuiet: "\(botThreads) bot thread\(botThreads == 1 ? "" : "s")"
+        case .yours(.readyForReview): "ready for review?"
+        case .yours(.merge) where !readyToMerge: "approved"
+        case .waiting(.reviewers): "waiting on reviewers"
+        default: nil
+        }
+    }
+}

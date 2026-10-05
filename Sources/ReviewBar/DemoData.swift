@@ -87,7 +87,18 @@ enum DemoData {
                     hasFeedback: true),
          FeedbackPR(pr: pr("acme/api", 310, "Log slow queries", by: "you", head: "310a", openedDaysAgo: 0.02),
                     decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
-                    latestAt: "", latestBy: "", checks: "PENDING", mergeable: "MERGEABLE")]
+                    latestAt: "", latestBy: "", checks: "PENDING", mergeable: "MERGEABLE"),
+         FeedbackPR(pr: pr("acme/api", 312, "Export grades as CSV", by: "you", head: "312a", openedDaysAgo: 1, draft: true),
+                    decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
+                    latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE"),
+         FeedbackPR(pr: pr("acme/storefront", 314, "Retry failed webhooks", by: "you", head: "314a", openedDaysAgo: 3),
+                    decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
+                    latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE", botThreads: 2),
+         FeedbackPR(pr: PR(number: 290, title: "Spike: offline mode", url: "https://github.com/acme/storefront/pull/290",
+                           isDraft: true, updatedAt: ago(days: 45), repository: .init(nameWithOwner: "acme/storefront"),
+                           author: .init(login: "you"), headRefOid: oid("290a"), createdAt: ago(days: 60)),
+                    decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
+                    latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE")]
     }
 
     static func mentions() -> [Mention] {

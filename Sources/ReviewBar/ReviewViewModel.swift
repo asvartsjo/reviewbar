@@ -366,13 +366,10 @@ final class ReviewViewModel: ObservableObject {
         myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
     }
 
-    /// The rest of your open PRs: quiet or dismissed, most recently updated first.
-    var otherMyPRs: [FeedbackPR] {
-        let shown = Set(visibleFeedback.map(\.pr.url))
-        return myPRs.filter { !shown.contains($0.pr.url) }.sorted { $0.pr.updatedAt > $1.pr.updatedAt }
-    }
-
     func feedback(for pr: PR) -> FeedbackPR? { visibleFeedback.first { $0.pr.url == pr.url } }
+
+    /// My PRs by whose move it is: Your move, Waiting on others, Old drafts.
+    var mySections: [(group: MyGroup, prs: [FeedbackPR])] { MyGroup.sections(myPRs, dismissed: dismissed) }
 
     /// True for your own open PRs.
     func isMine(_ pr: PR) -> Bool { myPRs.contains { $0.pr.url == pr.url } }

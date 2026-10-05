@@ -25,6 +25,9 @@ final class ReviewViewModel: ObservableObject {
     @Published private var dismissed: [String: String] =
         UserDefaults.standard.dictionary(forKey: "dismissedReplies") as? [String: String] ?? [:]
     private var timer: Timer?
+    private var crewTimer: Timer?
+    /// Claude sessions in my watched repos (Crew), waiting on me first.
+    @Published private(set) var crew: [CrewItem] = []
     private var lastRefresh: Date?
     private var refreshAgain = false
     /// What the previous successful refresh saw, per list; nil until the first one (the baseline).
@@ -48,6 +51,9 @@ final class ReviewViewModel: ObservableObject {
         Task { await refresh() }
         timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
+        }
+        crewTimer = Timer.scheduledTimer(withTimeInterval: Crew.pollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refreshCrew() }
         }
         Task { await watchNotifications() }
     }
@@ -166,6 +172,7 @@ final class ReviewViewModel: ObservableObject {
         Notifier.post(alerts)
         lastRefresh = Date()
         removeClosedWorktreesDaily()
+        Task { await refreshCrew() }
         loading = false
         if refreshAgain {
             refreshAgain = false
@@ -723,6 +730,37 @@ final class ReviewViewModel: ObservableObject {
                 NSPasteboard.general.setString(action.command, forType: .string)
                 terminalNotice = "No local checkout of \(f.branch ?? "this PR's branch"), so nothing was opened. "
                     + "The command is copied: run it where you have the branch."
+            }
+        }
+    }
+
+    /// Reads the crew again: local and cheap, so it runs every `Crew.pollInterval` and after each
+    /// refresh. Claude Code only; a failed read keeps the last list.
+    func refreshCrew() async {
+        guard Agent.current == .claude else { crew = []; return }
+        let fresh = DemoData.isOn ? DemoData.crew() : await Backend.crew(repos: RepoList.load(), myPRs: myPRs)
+        if let fresh, fresh != crew { crew = fresh }
+    }
+
+    /// The PR a crew session works on, if the app lists it.
+    func pr(for item: CrewItem) -> PR? {
+        guard let n = item.prNumber else { return nil }
+        let match = { (p: PR) in p.number == n && p.repository.nameWithOwner.lowercased() == item.repo.lowercased() }
+        return myPRs.first { match($0.pr) }?.pr ?? reviewing.first { match($0.pr) }?.pr
+    }
+
+    /// `claude attach` for a background session, in the chosen terminal.
+    func attach(_ item: CrewItem) {
+        terminalNotice = nil
+        Task {
+            do {
+                if let command = try await Backend.attach(item.session) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    terminalNotice = "Command copied. Paste it into any terminal to open the session."
+                }
+            } catch {
+                self.error = error.localizedDescription
             }
         }
     }

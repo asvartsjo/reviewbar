@@ -101,6 +101,18 @@ enum DemoData {
                     latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE", lastCommitAt: ago(days: 45))]
     }
 
+    /// A terminal session on #300 asking a question, and an agent view review of #152 at work.
+    static func crew() -> [CrewItem] {
+        [CrewItem(session: CrewSession(id: "a1b2c3d4", name: "storefront-1f", cwd: "/demo/storefront-dark-mode",
+                                       background: false, needsMe: true, working: false,
+                                       startedAt: launched.addingTimeInterval(-3 * 60)),
+                  repo: "acme/storefront", prNumber: 300),
+         CrewItem(session: CrewSession(id: "e5f6a7b8", name: "pr-152", cwd: "/demo/storefront",
+                                       background: true, needsMe: false, working: true,
+                                       startedAt: launched.addingTimeInterval(-12 * 60)),
+                  repo: "acme/storefront", prNumber: 152)]
+    }
+
     static func mentions() -> [Mention] {
         [Mention(repo: "acme/api", number: 214, title: rateLimit.title, author: "omar",
                  snippet: "@you does this match what we agreed for the partner API?",

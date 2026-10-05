@@ -267,7 +267,16 @@ struct ContentView: View {
             } else {
                 let sections = vm.mySections
                 List {
+                    if !vm.crew.isEmpty {
+                        sectionHeader("Crew", count: vm.crew.count)
+                            .listRowSeparator(.hidden)
+                        ForEach(vm.crew) { item in
+                            crewRow(item)
+                                .listRowSeparator(.hidden)
+                        }
+                    }
                     moveSummary(sections)
+                        .padding(.top, vm.crew.isEmpty ? 0 : 10)
                         .listRowSeparator(.hidden)
                     ForEach(sections, id: \.group) { s in
                         Group {
@@ -308,6 +317,36 @@ struct ContentView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
+        }
+    }
+
+    /// A Claude session in one of your repos. A background one opens with `claude attach`; a terminal
+    /// one already has its window, so the row opens its PR instead, if known.
+    @ViewBuilder private func crewRow(_ item: CrewItem) -> some View {
+        let pr = vm.pr(for: item)
+        let row = VStack(alignment: .leading, spacing: 2) {
+            if let pr { numberedTitle(pr.number, pr.title) } else {
+                Text(verbatim: item.session.name).font(.body.weight(.medium)).lineLimit(1)
+            }
+            (Text(verbatim: "\(item.repo) · ").foregroundStyle(.secondary)
+                + Text(item.session.needsMe ? "needs you" : "working")
+                    .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
+                + Text(verbatim: " · \(item.session.background ? "agent view" : "terminal") · started \(age(Self.isoParser.string(from: item.session.startedAt)))")
+                    .foregroundStyle(.secondary))
+                .font(.caption).lineLimit(1)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        if item.session.background {
+            Button { vm.attach(item) } label: { row }
+                .buttonStyle(.hoverRow)
+                .help("Open the session (\(terminal.label("claude attach")))")
+        } else if let pr {
+            Button { selected = pr } label: { row }
+                .buttonStyle(.hoverRow)
+                .help("Its terminal window is already open. Click for the PR.")
+        } else {
+            row.help("Its terminal window is already open.")
         }
     }
 

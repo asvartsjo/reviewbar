@@ -817,19 +817,30 @@ final class ReviewViewModel: ObservableObject {
     /// first, so the check is never 15 seconds stale.
     private func launchTerminal(_ pr: PR, mode: Backend.TerminalMode) {
         terminalNotice = nil
+        // Recorded at the click, before anything waits: the terminal takes seconds to appear, and a
+        // second click meanwhile must find this one.
+        let previous = launchedAt[pr.url]
+        launchedAt[pr.url] = Date()
         Task {
             await refreshCrew()
             if let open = Crew.openSession(onPR: pr.number, repo: pr.repository.nameWithOwner, crew: allCrew,
-                                           launchedAt: launchedAt[pr.url]),
-               !confirmSecondSession(pr, open) { return }
-            launchedAt[pr.url] = Date()
+                                           launchedAt: previous),
+               !confirmSecondSession(pr, open) {
+                launchedAt[pr.url] = previous
+                return
+            }
+            let opening = "Opening a session in \(TerminalApp.chosen.name)…"
+            if TerminalApp.chosen != .copy { terminalNotice = opening }
             do {
                 if let command = try await Backend.openInTerminal(pr, mode: mode) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(command, forType: .string)
                     terminalNotice = "Command copied. Paste it into any terminal to start the session."
+                } else if terminalNotice == opening {
+                    terminalNotice = nil
                 }
             } catch {
+                if terminalNotice == opening { terminalNotice = nil }
                 self.error = error.localizedDescription
             }
         }

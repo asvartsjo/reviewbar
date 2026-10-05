@@ -275,9 +275,11 @@ struct ContentView: View {
                             crewRow(item)
                                 .listRowSeparator(.hidden)
                         }
+                        sectionHeader("My PRs", count: sections.reduce(0) { $0 + $1.prs.count })
+                            .padding(.top, 10)
+                            .listRowSeparator(.hidden)
                     }
                     moveSummary(sections)
-                        .padding(.top, vm.crew.isEmpty ? 0 : 10)
                         .listRowSeparator(.hidden)
                     ForEach(sections, id: \.group) { s in
                         Group {

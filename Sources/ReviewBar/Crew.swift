@@ -12,6 +12,9 @@ struct CrewSession: Equatable, Identifiable {
     /// Busy: a terminal session's `busy`, or a background one's `working`.
     let working: Bool
     let startedAt: Date
+
+    /// Neither waiting on me nor working: at its prompt, or a status this version doesn't know.
+    var idle: Bool { !needsMe && !working }
 }
 
 /// A session in one of my watched repos, with the PR it works on when its folder says so.
@@ -27,9 +30,10 @@ struct CrewItem: Equatable, Identifiable {
 enum Crew {
     static let pollInterval: TimeInterval = 15
 
-    /// `claude agents --json` → the sessions that are working or waiting on me; idle ones are left
-    /// out. Only background sessions have an `id` (what `claude attach` takes); terminal ones have
-    /// `sessionId` and `pid`. Fields or values it doesn't know are ignored. Pure, for tests.
+    /// `claude agents --json` → every session with a folder, idle ones too (Crew shows only the
+    /// active ones; the second-session check needs them all). Only background sessions have an `id`
+    /// (what `claude attach` takes); terminal ones have `sessionId` and `pid`. Fields or values it
+    /// doesn't know are ignored, and an unknown status counts as idle. Pure, for tests.
     static func parseSessions(_ data: Data) -> [CrewSession] {
         guard let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return rows.compactMap { row in
@@ -40,7 +44,6 @@ enum Crew {
             let status = row["status"] as? String, state = row["state"] as? String
             let needsMe = background ? state == "blocked" : status == "waiting"
             let working = background ? state == "working" : status == "busy"
-            guard needsMe || working else { return nil }
             let started = (row["startedAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) } ?? .distantPast
             return CrewSession(id: id, name: row["name"] as? String ?? id, cwd: cwd, background: background,
                                needsMe: needsMe, working: working, startedAt: started)
@@ -91,6 +94,24 @@ extension Crew {
     static func newlyWaiting(_ now: [CrewItem], before: Set<String>?) -> [CrewItem] {
         guard let before else { return [] }
         return now.filter { $0.session.needsMe && !before.contains($0.id) }
+    }
+
+    /// A launch less than this long ago counts as an open session: it may not be listed yet.
+    static let launchGrace: TimeInterval = 60
+
+    /// Why opening another session on this PR needs a second thought, or nil when nothing is open:
+    /// a session on it (any state), or a launch from ReviewBar in the last `launchGrace`. Pure, for tests.
+    static func openSession(onPR number: Int, repo: String, crew: [CrewItem], launchedAt: Date?,
+                            now: Date = Date()) -> String? {
+        if let s = crew.first(where: { $0.prNumber == number && $0.repo.lowercased() == repo.lowercased() })?.session {
+            let state = s.needsMe ? "waiting on you" : s.working ? "working" : "idle at its prompt"
+            let home = (s.cwd as NSString).abbreviatingWithTildeInPath
+            return "\(s.background ? "An agent view" : "A terminal") session (\(s.name)) is \(state) in \(home)."
+        }
+        if let launchedAt, now.timeIntervalSince(launchedAt) < launchGrace {
+            return "You opened one less than a minute ago; it may still be starting."
+        }
+        return nil
     }
 
     /// "since 09:42" today, "since 2 Oct" before that. It's the process start, which resets when

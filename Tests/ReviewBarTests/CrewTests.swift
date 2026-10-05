@@ -24,11 +24,13 @@ struct CrewTests {
     ]
     """.utf8)
 
-    @Test func readsWorkingAndWaitingSessionsOnly() {
+    @Test func readsEverySessionWithAFolder() {
         let s = Crew.parseSessions(sample)
-        #expect(s.map(\.id) == ["aaaa1111", "cccc3333", "dddd4444", "eeee5555", "8"])
-        #expect(s.map(\.needsMe) == [true, false, true, false, false])
-        #expect(s.map(\.background) == [false, false, true, true, false])
+        #expect(s.map(\.id) == ["aaaa1111", "bbbb2222", "cccc3333", "dddd4444", "eeee5555", "ffff6666", "8"])
+        #expect(s.map(\.needsMe) == [true, false, false, true, false, false, false])
+        #expect(s.map(\.working) == [false, false, true, false, true, false, true])
+        #expect(s.map(\.idle) == [false, true, false, false, false, true, false])   // "dreaming" counts as idle
+        #expect(s.map(\.background) == [false, false, false, true, true, false, false])
         #expect(s[0].startedAt == Date(timeIntervalSince1970: 1_790_939_000))
     }
 
@@ -100,5 +102,23 @@ struct CrewTests {
         let now = ISO8601DateFormatter().date(from: "2026-10-05T12:00:00Z")!
         #expect(Crew.since(ISO8601DateFormatter().date(from: "2026-10-05T07:42:00Z")!, now: now, calendar: cal) == "since 09:42")
         #expect(Crew.since(ISO8601DateFormatter().date(from: "2026-10-02T09:16:00Z")!, now: now, calendar: cal) == "since 2 Oct")
+    }
+
+    @Test func secondSessionCheckSeesAnyStateAndFreshLaunches() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var idle = session("gauss-7a", "/Users/me/TEACHIQ/gauss-fix")
+        idle = CrewSession(id: idle.id, name: idle.name, cwd: idle.cwd, background: false, needsMe: false,
+                           working: false, startedAt: idle.startedAt)
+        let crew = [CrewItem(session: idle, repo: "Teachiq/gauss", prNumber: 4961)]
+        let open = Crew.openSession(onPR: 4961, repo: "teachiq/gauss", crew: crew, launchedAt: nil, now: now)
+        #expect(open?.contains("idle at its prompt") == true)
+        #expect(open?.contains("gauss-7a") == true)
+        #expect(Crew.openSession(onPR: 4962, repo: "Teachiq/gauss", crew: crew, launchedAt: nil, now: now) == nil)
+        #expect(Crew.openSession(onPR: 4961, repo: "o/other", crew: crew, launchedAt: nil, now: now) == nil)
+        // A double click: the first session isn't listed yet.
+        #expect(Crew.openSession(onPR: 4962, repo: "Teachiq/gauss", crew: crew,
+                                 launchedAt: now.addingTimeInterval(-5), now: now) != nil)
+        #expect(Crew.openSession(onPR: 4962, repo: "Teachiq/gauss", crew: crew,
+                                 launchedAt: now.addingTimeInterval(-90), now: now) == nil)
     }
 }

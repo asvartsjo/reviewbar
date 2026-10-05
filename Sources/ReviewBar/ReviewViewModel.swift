@@ -26,8 +26,12 @@ final class ReviewViewModel: ObservableObject {
         UserDefaults.standard.dictionary(forKey: "dismissedReplies") as? [String: String] ?? [:]
     private var timer: Timer?
     private var crewTimer: Timer?
-    /// Claude sessions in my watched repos (Crew), waiting on me first.
-    @Published private(set) var crew: [CrewItem] = []
+    /// Every Claude session in my watched repos, idle ones too, waiting on me first.
+    @Published private(set) var allCrew: [CrewItem] = []
+    /// The sessions Crew shows and counts: waiting on me or working.
+    var crew: [CrewItem] { allCrew.filter { !$0.session.idle } }
+    /// PR url → when ReviewBar last opened a session on it, for the second-session check.
+    private var launchedAt: [String: Date] = [:]
     /// Ids of the sessions that were waiting on me at the last poll; nil until the first one.
     private var crewWaiting: Set<String>?
     private var lastRefresh: Date?
@@ -736,15 +740,28 @@ final class ReviewViewModel: ObservableObject {
         }
     }
 
+    /// A native alert, so it also shows when a notification's Verify fixes starts the session with
+    /// the panel closed. Cancel is the default.
+    private func confirmSecondSession(_ pr: PR, _ reason: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "A Claude session is already open on #\(pr.number)"
+        alert.informativeText = reason + "\n\nTwo sessions in one checkout can overwrite each other's edits "
+            + "and draft duplicate replies."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Open anyway")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
     /// Reads the crew again: local and cheap, so it runs every `Crew.pollInterval` and after each
     /// refresh. Claude Code only; a failed read keeps the last list.
     func refreshCrew() async {
-        guard Agent.current == .claude else { crew = []; return }
+        guard Agent.current == .claude else { allCrew = []; return }
         guard let fresh = DemoData.isOn ? DemoData.crew() : await Backend.crew(repos: RepoList.load(), myPRs: myPRs)
         else { return }
         for item in Crew.newlyWaiting(fresh, before: crewWaiting) { Notifier.crew(item, pr: pr(for: item)) }
         crewWaiting = Set(fresh.filter(\.session.needsMe).map(\.id))
-        if fresh != crew { crew = fresh }
+        if fresh != allCrew { allCrew = fresh }
     }
 
     /// The crew session on this PR, one waiting on me first; nil when none.
@@ -795,9 +812,17 @@ final class ReviewViewModel: ObservableObject {
         launchTerminal(pr, mode: .verify(command: command))
     }
 
+    /// Opens the session, after asking first when one is already open on this PR: two sessions in
+    /// one checkout overwrite each other's edits and draft duplicate replies. The crew is read again
+    /// first, so the check is never 15 seconds stale.
     private func launchTerminal(_ pr: PR, mode: Backend.TerminalMode) {
         terminalNotice = nil
         Task {
+            await refreshCrew()
+            if let open = Crew.openSession(onPR: pr.number, repo: pr.repository.nameWithOwner, crew: allCrew,
+                                           launchedAt: launchedAt[pr.url]),
+               !confirmSecondSession(pr, open) { return }
+            launchedAt[pr.url] = Date()
             do {
                 if let command = try await Backend.openInTerminal(pr, mode: mode) {
                     NSPasteboard.general.clearContents()

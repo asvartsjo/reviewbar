@@ -14,11 +14,13 @@ enum MyMove: Equatable {
         /// A draft with nothing else to do: time to mark it ready?
         case readyForReview
         case merge
+        /// CI still running on a ready PR: mine to watch, though there's nothing to click yet.
+        case checksRunning
         /// Ready for review, but nobody was asked to review it.
         case needsReviewer
     }
 
-    enum On: Equatable { case ci, reviewers }
+    enum On: Equatable { case reviewers }
 
     var isYours: Bool { if case .yours = self { true } else { false } }
 }
@@ -29,6 +31,7 @@ extension FeedbackPR {
     ///   to re-review; one newer than my last push counts as `reviews` and so as feedback.
     /// - No reviewer requested and nobody has reviewed: my move (ask someone), not waiting on others.
     /// - A draft is mine even while CI runs: nobody can review it yet, so it never waits on others.
+    /// - Checks running is mine too, not waiting on CI: I watch a fresh push until it goes green or red.
     /// - Approved with no CI at all is ready to merge. `readyToMerge` needs green checks and stays
     ///   that way, since notifications use it.
     var move: MyMove {
@@ -37,7 +40,7 @@ extension FeedbackPR {
         if threads + (reviews - approvals) + comments + botThreads > 0 { return .yours(.feedback) }
         if pr.isDraft { return .yours(.readyForReview) }
         if !reviewersRequested, !hasFeedback, decision != "APPROVED" { return .yours(.needsReviewer) }
-        if checks == "PENDING" || checks == "EXPECTED" { return .waiting(.ci) }
+        if checks == "PENDING" || checks == "EXPECTED" { return .yours(.checksRunning) }
         if decision == "APPROVED", checks == nil || checks == "SUCCESS" { return .yours(.merge) }
         return .waiting(.reviewers)
     }

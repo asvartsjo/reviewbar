@@ -21,8 +21,8 @@ struct MyMoveTests {
         #expect(mine(threads: 1).move == .yours(.feedback))
         #expect(mine(reviews: 1).move == .yours(.feedback))
         #expect(mine(comments: 1).move == .yours(.feedback))
-        #expect(mine(checks: "PENDING").move == .waiting(.ci))
-        #expect(mine(checks: "EXPECTED").move == .waiting(.ci))
+        #expect(mine(checks: "PENDING").move == .yours(.checksRunning))
+        #expect(mine(checks: "EXPECTED").move == .yours(.checksRunning))
         #expect(mine(draft: true).move == .yours(.readyForReview))
         #expect(mine(decision: "APPROVED").move == .yours(.merge))
         #expect(mine().move == .waiting(.reviewers))
@@ -47,7 +47,7 @@ struct MyMoveTests {
 
     @Test func approvedWithoutCIIsReadyToMerge() {
         #expect(mine(decision: "APPROVED", checks: nil).move == .yours(.merge))
-        #expect(mine(decision: "APPROVED", checks: "PENDING").move == .waiting(.ci))
+        #expect(mine(decision: "APPROVED", checks: "PENDING").move == .yours(.checksRunning))
     }
 
     @Test func firstMatchingRuleWins() {

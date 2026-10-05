@@ -75,12 +75,13 @@ enum TerminalApp: String, CaseIterable, Identifiable {
     /// Exits quietly if the prompt is already gone: Ghostty can run a launch command twice. Pure, for tests.
     /// `checkout` is the repo's local clone plus where this PR's worktree goes, if a folder is set.
     static func launcherScript(claude: String, promptFile: String, path: String,
-                               checkout: Worktree? = nil) -> String {
+                               checkout: Worktree? = nil, directory: String? = nil) -> String {
         """
         #!/bin/zsh
         \(path.isEmpty ? "" : "export PATH=\(q(path))")
         [[ -f \(q(promptFile)) ]] || exit 0
         \(checkout?.script ?? "")
+        \(directory.map { "cd \(q($0)) || exit 1" } ?? "")
         prompt="$(cat \(q(promptFile)))"
         rm -f \(q(promptFile)) "$0"
         \(claude) "$prompt"
@@ -159,18 +160,21 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         struct Listed: Equatable {
             let path: String
             let detached: Bool
+            /// The checked-out branch, such as `refs/heads/main`; nil when detached.
+            var branch: String? = nil
         }
 
         /// Parses `git worktree list --porcelain`: blocks of `worktree <path>`, `HEAD <sha>`, then
         /// `detached` or `branch <ref>`, separated by blank lines. Pure, for tests.
         static func parseList(_ porcelain: String) -> [Listed] {
             porcelain.components(separatedBy: "\n\n").compactMap { block in
-                var path: String?, detached = false
+                var path: String?, detached = false, branch: String?
                 for line in block.split(separator: "\n").map(String.init) {
                     if line.hasPrefix("worktree ") { path = String(line.dropFirst("worktree ".count)) }
                     else if line == "detached" { detached = true }
+                    else if line.hasPrefix("branch ") { branch = String(line.dropFirst("branch ".count)) }
                 }
-                return path.map { Listed(path: $0, detached: detached) }
+                return path.map { Listed(path: $0, detached: detached, branch: branch) }
             }
         }
 

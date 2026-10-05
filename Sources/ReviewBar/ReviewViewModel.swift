@@ -703,6 +703,30 @@ final class ReviewViewModel: ObservableObject {
         launchTerminal(pr, mode: mode)
     }
 
+    /// The next step on one of my PRs, from its move and my commands; Claude Code only.
+    func myPRAction(for pr: PR) -> MyPRAction? {
+        guard Agent.current == .claude, let f = myPRs.first(where: { $0.pr.url == pr.url }) else { return nil }
+        return MyPRAction.for(f, feedbackCommand: ClaudeSettings.myPRCommand(for: pr.url),
+                              mergeCommand: ClaudeSettings.mergeCommand(for: pr.url))
+    }
+
+    /// Runs `myPRAction` in the checkout of the PR's branch. With no such checkout nothing opens: the
+    /// command is copied instead, since starting it anywhere else would commit in the wrong place.
+    func runMyPRAction(_ pr: PR) {
+        guard let action = myPRAction(for: pr), let f = myPRs.first(where: { $0.pr.url == pr.url }) else { return }
+        terminalNotice = nil
+        Task {
+            if let branch = f.branch, let path = await Backend.checkout(of: branch, repo: pr.repository.nameWithOwner) {
+                launchTerminal(pr, mode: .inCheckout(command: action.command, path: path))
+            } else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(action.command, forType: .string)
+                terminalNotice = "No local checkout of \(f.branch ?? "this PR's branch"), so nothing was opened. "
+                    + "The command is copied: run it where you have the branch."
+            }
+        }
+    }
+
     /// Your Verify command (Settings › Terminal) in the PR's worktree.
     func verifyInTerminal(_ pr: PR) {
         guard let command = ClaudeSettings.verifyCommand(for: pr.url) else { return }

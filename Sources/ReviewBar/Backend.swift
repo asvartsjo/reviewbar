@@ -1253,6 +1253,8 @@ enum Backend {
         case author(summary: String?)
         /// Check someone else's PR against my review threads: the Verify command, sent as is.
         case verify(command: String)
+        /// My own command on my own PR, in the checkout of its branch (`MyPRAction`), sent as is.
+        case inCheckout(command: String, path: String)
     }
 
     /// Hands a quick-model summary to the review model as a map, never as the source of truth.
@@ -1592,8 +1594,13 @@ enum Backend {
         case .verify(let command):
             prompt = command
             isCommand = true
+        case .inCheckout(let command, _):
+            prompt = command
+            isCommand = true
         }
-        let worktree = RepoList.folder(for: pr.repository.nameWithOwner)
+        var directory: String?
+        if case .inCheckout(_, let path) = mode { directory = path }
+        let worktree = directory != nil ? nil : RepoList.folder(for: pr.repository.nameWithOwner)
             .map { TerminalApp.Worktree.forPR(pr, repoFolder: $0) }
         if let worktree, !isCommand {
             prompt += "\n\nLOCAL CHECKOUT: you are in a git worktree made for this PR (\(worktree.path)), "
@@ -1614,7 +1621,7 @@ enum Backend {
         let path = (try? await sh("print -r -- $PATH").trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
         let script = TerminalApp.launcherScript(
             claude: Agent.current.interactiveCommand(Agent.current.review),
-            promptFile: promptFile.path, path: path, checkout: worktree)
+            promptFile: promptFile.path, path: path, checkout: worktree, directory: directory)
         try script.write(to: launcher, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcher.path)
 

@@ -16,7 +16,7 @@ struct WorktreeCleanupTests {
     @Test func parsesWorktreeList() {
         let list = Worktree.parseList(porcelain([(clone, "branch refs/heads/development"),
                                                  ("/Users/me/TEACHIQ/gauss-worktrees/pr-7", "detached")]))
-        #expect(list == [.init(path: clone, detached: false),
+        #expect(list == [.init(path: clone, detached: false, branch: "refs/heads/development"),
                          .init(path: "/Users/me/TEACHIQ/gauss-worktrees/pr-7", detached: true)])
     }
 

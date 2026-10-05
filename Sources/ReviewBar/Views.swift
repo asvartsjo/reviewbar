@@ -19,6 +19,8 @@ struct ContentView: View {
     @ViewState private var tab: Tab = .reviewing
     @ViewState private var showMuted = false
     @ViewState private var showParked = false
+    @AppStorage(TerminalApp.key) private var terminalRaw = ""
+    private var terminal: TerminalApp { TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed) }
     @AppStorage(AsWindow.key) private var asWindow = false
 
     var body: some View {
@@ -290,6 +292,9 @@ struct ContentView: View {
                                 .contextMenu {
                                     if new {
                                         Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
+                                    }
+                                    if let action = vm.myPRAction(for: f.pr) {
+                                        Button(terminal.label(action.title), systemImage: TerminalApp.symbol) { vm.runMyPRAction(f.pr) }
                                     }
                                     if vm.isParked(f) {
                                         Button("Unpark", systemImage: "tray.and.arrow.up") { vm.unpark(f) }
@@ -585,15 +590,27 @@ struct DetailView: View {
     @ViewBuilder private var actions: some View {
         HStack {
             if vm.isMine(pr) {
-                Button(terminalLabel("Work through feedback"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
-                    .buttonStyle(.borderedProminent)
+                let action = vm.myPRAction(for: pr)
+                if let action {
+                    Button(terminalLabel(action.title), systemImage: TerminalApp.symbol) { vm.runMyPRAction(pr) }
+                        .buttonStyle(.borderedProminent)
+                }
+                if action?.isMerge ?? true {
+                    Button(terminalLabel("Work through feedback"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
+                        .prominent(action == nil)
+                }
             } else {
                 reviewActions
             }
         }
         if vm.isMine(pr) {
-            Text("Opens \(Agent.current.appName) with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub.")
-                .font(.caption).foregroundStyle(.secondary)
+            if let action = vm.myPRAction(for: pr) {
+                Text("\(action.title) sends “\(action.command)” to \(Agent.current.appName), in your checkout of the PR's branch. Nothing is ever posted to GitHub without your OK.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Opens \(Agent.current.appName) with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         switch vm.draftState[pr.reviewKey] ?? .idle {
         case .done(let msg): Text(msg).font(.caption).foregroundStyle(.green)
@@ -734,6 +751,8 @@ struct SettingsView: View {
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
+    @AppStorage(ClaudeSettings.myPRCommandKey) private var myPRCommand = ClaudeSettings.myPRCommandDefault
+    @AppStorage(ClaudeSettings.mergeCommandKey) private var mergeCommand = ClaudeSettings.mergeCommandDefault
     @AppStorage(Backend.reviewStyleKey) private var reviewStyle = Backend.reviewStyleDefault
     @AppStorage(TerminalApp.Worktree.nextToCloneKey) private var worktreesNextToClone = false
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
@@ -980,6 +999,24 @@ struct SettingsView: View {
                  ? "Claude Code only."
                  : "Sent by Verify fixes (PRs where you have review threads), with {url} as the PR's link. "
                    + "Leave it empty to hide the button.")
+                .font(.caption2).foregroundStyle(.secondary)
+            HStack {
+                Text("My PR feedback command")
+                TextField("My PR feedback command", text: $myPRCommand, prompt: Text("Built-in Work through feedback prompt"))
+                    .labelsHidden()
+                    .disabled(agentRaw == Agent.codex.rawValue)
+            }
+            HStack {
+                Text("Merge command")
+                TextField("Merge command", text: $mergeCommand, prompt: Text("No Merge check button"))
+                    .labelsHidden()
+                    .disabled(agentRaw == Agent.codex.rawValue)
+            }
+            Text(agentRaw == Agent.codex.rawValue
+                 ? "Claude Code only."
+                 : "On your own PRs, run in your checkout of the PR's branch: the feedback command when there's "
+                   + "feedback or CI is failing (Triage feedback), the merge command when it's ready (Merge check). "
+                   + "{url} is the PR's link. Empty: the built-in prompt, or no Merge check button.")
                 .font(.caption2).foregroundStyle(.secondary)
             Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
             Text(worktreesNextToClone

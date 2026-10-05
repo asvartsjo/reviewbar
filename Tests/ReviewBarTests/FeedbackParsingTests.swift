@@ -72,14 +72,15 @@ struct FeedbackParsingTests {
 
     private func myPRsJSON(lastCommit: String = "2026-09-10T00:00:00Z", decision: String = "REVIEW_REQUIRED",
                            reviews: [String] = [], comments: [String] = [], threads: [String] = [],
-                           checks: String? = nil, mergeable: String? = nil) -> Data {
+                           checks: String? = nil, mergeable: String? = nil, mergeState: String? = nil) -> Data {
         let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
         let merge = mergeable.map { "\"\($0)\"" } ?? "null"
+        let state = mergeState.map { "\"\($0)\"" } ?? "null"
         return Data("""
         {"data": {"viewer": {"login": "me"}, "search": {"nodes": [
           {"number": 7, "title": "Mine", "url": "https://github.com/o/r/pull/7", "isDraft": false,
            "createdAt": "2026-09-09T00:00:00Z", "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "reviewDecision": "\(decision)",
-           "mergeable": \(merge),
+           "mergeable": \(merge), "mergeStateStatus": \(state),
            "repository": {"nameWithOwner": "o/r"}, "author": {"login": "me"},
            "commits": {"nodes": [{"commit": {"committedDate": "\(lastCommit)", "statusCheckRollup": \(rollup)}}]},
            "reviews": {"nodes": [\(reviews.joined(separator: ","))]},
@@ -177,6 +178,23 @@ struct FeedbackParsingTests {
         #expect(prs[0].summary == "Ready to merge")
         #expect(prs[0].latestAt == "2026-09-09T09:00:00Z")   // the approval: stable for dismissing
         #expect(prs[0].latestBy == "alice")
+    }
+
+    @Test func approvedMergeableWithoutCIIsReady() throws {
+        let prs = try Backend.parseMyPRs(myPRsJSON(
+            decision: "APPROVED",
+            reviews: [review("alice", "APPROVED", "2026-09-09T09:00:00Z")],
+            checks: nil, mergeable: "MERGEABLE", mergeState: "CLEAN"))
+        #expect(prs[0].readyToMerge)
+        #expect(prs[0].latestAt == "2026-09-09T09:00:00Z")   // so it notifies once
+        // A required check that never ran also leaves no checks, but GitHub blocks the merge.
+        let blocked = try Backend.parseMyPRs(myPRsJSON(decision: "APPROVED", checks: nil, mergeable: "MERGEABLE",
+                                                       mergeState: "BLOCKED"))
+        #expect(!blocked[0].readyToMerge)
+        for checks in ["PENDING", "EXPECTED", "FAILURE"] {
+            let other = try Backend.parseMyPRs(myPRsJSON(decision: "APPROVED", checks: checks, mergeable: "MERGEABLE"))
+            #expect(!other[0].readyToMerge)
+        }
     }
 
     @Test func failingChecksAndConflictsAreListed() throws {

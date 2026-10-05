@@ -814,7 +814,7 @@ enum Backend {
         nodes { ... on PullRequest {
           number title url isDraft createdAt updatedAt headRefOid reviewDecision
           repository { nameWithOwner } author { login }
-          mergeable
+          mergeable mergeStateStatus
           commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
           reviews(last: 20) { nodes { author { login __typename } state body submittedAt } }
           comments(last: 20) { nodes { author { login __typename } createdAt } }
@@ -893,6 +893,7 @@ enum Backend {
             var f = FeedbackPR(pr: pr, decision: n.reviewDecision, threads: threads, reviews: reviews,
                                comments: comments, latestAt: latestAt, latestBy: latestBy,
                                checks: head?.statusCheckRollup?.state, mergeable: n.mergeable,
+                               mergeState: n.mergeStateStatus,
                                hasFeedback: n.reviews.items.contains { isReviewer($0.author) }
                                    || n.comments.items.contains { isReviewer($0.author) }
                                    || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) })
@@ -930,6 +931,7 @@ enum Backend {
             let headRefOid: String?
             let reviewDecision: String?
             let mergeable: String?
+            let mergeStateStatus: String?
             let repository: PR.Repo
             let author: PR.Author?
             let commits: Nodes<CommitNode>

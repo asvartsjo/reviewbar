@@ -428,6 +428,8 @@ struct FeedbackPR: Identifiable, Hashable {
     var checks: String? = nil
     /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub still computing).
     var mergeable: String? = nil
+    /// GitHub's `mergeStateStatus`: CLEAN when nothing blocks the merge, BLOCKED, BEHIND and so on.
+    var mergeState: String? = nil
     /// A reviewer (not a bot) left a review, comment or thread, answered or not.
     var hasFeedback = false
     var id: String { pr.url }
@@ -435,7 +437,7 @@ struct FeedbackPR: Identifiable, Hashable {
     func with(latestAt: String, latestBy: String) -> FeedbackPR {
         FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
                    latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable,
-                   hasFeedback: hasFeedback)
+                   mergeState: mergeState, hasFeedback: hasFeedback)
     }
 
     /// Nothing new: no unanswered feedback, no blocker, not ready to merge. Listed in My PRs,
@@ -444,7 +446,12 @@ struct FeedbackPR: Identifiable, Hashable {
 
     var checksFailing: Bool { checks == "FAILURE" || checks == "ERROR" }
     var hasConflict: Bool { mergeable == "CONFLICTING" }
-    var readyToMerge: Bool { decision == "APPROVED" && checks == "SUCCESS" && mergeable == "MERGEABLE" }
+    /// No checks at all (`nil`: a repo without CI) counts as green only when GitHub says nothing
+    /// blocks the merge: a required check whose workflow skipped this PR also leaves no checks.
+    var readyToMerge: Bool {
+        decision == "APPROVED" && mergeable == "MERGEABLE"
+            && (checks == "SUCCESS" || (checks == nil && mergeState == "CLEAN"))
+    }
 
     /// What blocks or unblocks the PR, most urgent first; nil when there's nothing to say.
     var status: String? {

@@ -342,7 +342,7 @@ struct ContentView: View {
     }
 
     /// A Claude session in one of your repos. A background one opens with `claude attach`; a terminal
-    /// one already has its window, so the row opens its PR instead, if known.
+    /// one opens its PR if known, else brings its tab to the front. Right-click: Show and Stop.
     @ViewBuilder private func crewRow(_ item: CrewItem) -> some View {
         let pr = vm.pr(for: item)
         let row = VStack(alignment: .leading, spacing: 2) {
@@ -367,11 +367,19 @@ struct ContentView: View {
             Button { selected = pr } label: { row }
                 .buttonStyle(.hoverRow)
                 .help("A terminal session. Click for the PR.")
-                .contextMenu { stopButton(item) }
+                .contextMenu { showButton(item); stopButton(item) }
         } else {
-            row.help("A terminal session.")
-                .contextMenu { stopButton(item) }
+            Button { vm.show(item) } label: { row }
+                .buttonStyle(.hoverRow)
+                .help("A terminal session. Click to bring its tab to the front.")
+                .contextMenu { showButton(item); stopButton(item) }
         }
+    }
+
+    /// Terminal sessions only: an agent view session's row already opens it.
+    private func showButton(_ item: CrewItem) -> some View {
+        Button("Show session", systemImage: "macwindow") { vm.show(item) }
+            .help("Bring its tab to the front (iTerm2 and Terminal)")
     }
 
     private func stopButton(_ item: CrewItem) -> some View {

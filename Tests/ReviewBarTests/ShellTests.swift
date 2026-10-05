@@ -29,6 +29,12 @@ struct ShellTests {
         #expect(e.stderr.contains("out"))
     }
 
+    /// `gh api` puts "HTTP 422" on stderr and GitHub's reason on stdout.
+    @Test func failureWithBothKeepsStderrThenStdout() async throws {
+        let e = try #require(await shellError("print -u2 'gh: HTTP 422'; print -r -- '{\"message\":\"why\"}'; exit 1"))
+        #expect(e.stderr == "gh: HTTP 422\n{\"message\":\"why\"}")
+    }
+
     /// More than a pipe buffer each way at once, as with a large prompt or diff.
     @Test func largeInputAndOutputDontDeadlock() async throws {
         let big = String(repeating: "a", count: 1_000_000)

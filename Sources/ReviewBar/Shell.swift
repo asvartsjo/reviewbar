@@ -102,11 +102,10 @@ func sh(_ command: String, input: String? = nil) async throws -> String {
         if let r = out.range(of: outputMarker + "\n") { out = String(out[r.upperBound...]) }
         if running.isCancelled { throw CancellationError() }
         guard status == 0 else {
-            // Some tools (claude among them) report errors on stdout; keep both.
-            let err = String(decoding: errBytes, as: UTF8.self)
-            let detail = err.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? String(out.suffix(2000)) : err
-            throw ShellError(code: status, stderr: detail)
+            // Some tools (claude, gh api) report the reason on stdout; keep both, stderr first.
+            let err = String(decoding: errBytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            let tail = String(out.suffix(2000)).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw ShellError(code: status, stderr: [err, tail].filter { !$0.isEmpty }.joined(separator: "\n"))
         }
         return out
     } onCancel: {

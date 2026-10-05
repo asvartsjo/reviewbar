@@ -1450,8 +1450,8 @@ enum Backend {
         do {
             _ = try await sh("gh api --method POST \(q(path)) --input -", input: json)
         } catch let e as ShellError {
-            // GitHub's reason goes to stdout, which sh() drops when gh also writes to stderr
-            // ("gh: Unprocessable Entity (HTTP 422)"), so ask GitHub instead of matching text.
+            // A 422 can mean a pending review already exists: ask GitHub instead of matching
+            // the wording of its reason.
             if await hasPendingReview(pr) { throw PendingReviewExists() }
             throw e
         }

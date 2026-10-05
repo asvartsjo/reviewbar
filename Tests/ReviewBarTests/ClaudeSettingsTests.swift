@@ -8,7 +8,7 @@ final class ClaudeSettingsTests {
     private let keys = [ClaudeSettings.reviewModelKey, ClaudeSettings.reviewEffortKey,
                         ClaudeSettings.quickModelKey, ClaudeSettings.quickEffortKey,
                         ClaudeSettings.reviewCommandKey, ClaudeSettings.verifyCommandKey,
-                        ClaudeSettings.myPRCommandKey, ClaudeSettings.mergeCommandKey]
+                        ClaudeSettings.myPRCommandKey]
     private var saved: [String: Any] = [:]
 
     init() {
@@ -71,14 +71,12 @@ final class ClaudeSettingsTests {
         #expect(ClaudeSettings.reviewCommand(for: url) == nil)
     }
 
-    @Test func myPRCommandsDefaultToMySkillsAndBlankTurnsThemOff() {
+    @Test func myPRCommandDefaultsToMySkillAndBlankTurnsItOff() {
         let url = "https://github.com/o/r/pull/7"
         #expect(ClaudeSettings.myPRCommand(for: url) == "/pr-feedback \(url)")
         #expect(ClaudeSettings.mergeCommand(for: url) == "can I merge \(url)?")
         UserDefaults.standard.set("", forKey: ClaudeSettings.myPRCommandKey)
-        UserDefaults.standard.set(" ", forKey: ClaudeSettings.mergeCommandKey)
         #expect(ClaudeSettings.myPRCommand(for: url) == nil)
-        #expect(ClaudeSettings.mergeCommand(for: url) == nil)
     }
 
     @Test func verifyCommand() throws {

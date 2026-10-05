@@ -23,7 +23,7 @@ enum ClaudeSettings {
         + "drafting any reply."
     /// My own skills by default: this build is for my workflow only (plan, Track B).
     static let myPRCommandKey = "myPRCommand", myPRCommandDefault = "/pr-feedback {url}"
-    static let mergeCommandKey = "mergeCommand", mergeCommandDefault = "can I merge {url}?"
+    static let mergeCommandDefault = "can I merge {url}?"
 
     private static func value(_ key: String, _ fallback: String, allowed: [String]) -> String {
         let v = UserDefaults.standard.string(forKey: key) ?? fallback
@@ -58,9 +58,9 @@ enum ClaudeSettings {
         command(UserDefaults.standard.string(forKey: myPRCommandKey) ?? myPRCommandDefault, url: url)
     }
 
-    /// First message of a session on one of my PRs that's ready to merge, or nil when it's empty (no button).
+    /// First message of a session on one of my PRs that's ready to merge. Fixed, not a setting.
     static func mergeCommand(for url: String) -> String? {
-        command(UserDefaults.standard.string(forKey: mergeCommandKey) ?? mergeCommandDefault, url: url)
+        command(mergeCommandDefault, url: url)
     }
 
     /// "{url}" replaced by `url`, or `url` appended when there is none. Blank means nil. Pure, for tests.

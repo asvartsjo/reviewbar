@@ -206,6 +206,23 @@ struct PRFilterTests {
         #expect(Backend.applyHeadCommits([pr(1, draft: false)], Data("oops".utf8)) == [pr(1, draft: false)])
     }
 
+    @Test func requestsGetOtherReviewersVerdicts() {
+        func review(_ who: String, _ state: String, bot: Bool = false) -> String {
+            #"{"author": {"login": "\#(who)", "__typename": "\#(bot ? "Bot" : "User")"}, "state": "\#(state)"}"#
+        }
+        let reviews = [review("alice", "COMMENTED"), review("alice", "APPROVED"),
+                       review("bob", "CHANGES_REQUESTED"), review("bob", "DISMISSED"),
+                       review("carol", "APPROVED"), review("carol", "CHANGES_REQUESTED"),
+                       review("me", "APPROVED"), review("a", "APPROVED"), review("ci", "APPROVED", bot: true)]
+        let json = #"{"data": {"viewer": {"login": "me"}, "p0": {"headRefOid": "abc", "reviews": {"nodes": ["#
+            + reviews.joined(separator: ",") + #"]}}, "p1": {"headRefOid": "def"}}}"#
+        let prs = Backend.applyHeadCommits([pr(1, draft: false), pr(2, draft: false)], Data(json.utf8))
+        let rows = Backend.merge([], requested: prs)
+        #expect(rows[0].verdicts == [.init(login: "alice", state: "APPROVED"),
+                                     .init(login: "carol", state: "CHANGES_REQUESTED")])
+        #expect(rows[1].verdicts.isEmpty)
+    }
+
     @Test func draftsKeptByDefaultAndDroppedWhenOff() {
         let prs = [pr(1, draft: false), pr(2, draft: true)]
         #expect(PRFilter.others(prs, includeDrafts: true).map(\.number) == [1, 2])

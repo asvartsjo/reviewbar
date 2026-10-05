@@ -14,6 +14,8 @@ struct PR: Identifiable, Codable, Hashable {
     var createdAt: String? = nil
     /// CI state of the head commit, filled in with `headRefOid` for review requests.
     var checks: String? = nil
+    /// Other reviewers' current verdicts, filled in with `headRefOid` for review requests.
+    var verdicts: [ReviewingPR.Verdict]? = nil
 
     struct Repo: Codable, Hashable { let nameWithOwner: String }
     struct Author: Codable, Hashable { let login: String }
@@ -98,7 +100,7 @@ struct ReviewingPR: Identifiable, Hashable {
         let at: String
     }
 
-    struct Verdict: Hashable {
+    struct Verdict: Codable, Hashable {
         let login: String
         let state: String      // APPROVED or CHANGES_REQUESTED
     }

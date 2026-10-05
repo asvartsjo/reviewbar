@@ -91,6 +91,7 @@ final class MenuBarController: NSObject {
                                          visible: buttonWindow.screen?.visibleFrame))
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        Self.clearInitialFocus(panel)
     }
 
     /// Clicking the icon brings the window to the front; only its close button closes it.
@@ -105,6 +106,13 @@ final class MenuBarController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
+        Self.clearInitialFocus(window)
+    }
+
+    /// Becoming key focuses the first control, the Refresh button, and draws a focus ring on it.
+    /// Nothing starts focused; Tab still moves into the controls.
+    private static func clearInitialFocus(_ window: NSWindow) {
+        window.makeFirstResponder(nil)
     }
 
     /// Remembers where it was and how big, across launches.

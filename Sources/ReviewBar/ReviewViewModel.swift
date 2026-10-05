@@ -36,7 +36,9 @@ final class ReviewViewModel: ObservableObject {
     @Published private(set) var cleanup: [Cleanup.Candidate] = []
     private var cleanupAt: Date?
     /// Those still on disk: one removed by hand drops out before the next lookup.
-    var worktreesToGo: [Cleanup.Candidate] { cleanup.filter { FileManager.default.fileExists(atPath: $0.path) } }
+    var worktreesToGo: [Cleanup.Candidate] {
+        DemoData.isOn ? cleanup : cleanup.filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
     /// PR url → when ReviewBar last opened a session on it, for the second-session check.
     private var launchedAt: [String: Date] = [:]
     /// Ids of the sessions that were waiting on me at the last poll; nil until the first one.
@@ -210,9 +212,9 @@ final class ReviewViewModel: ObservableObject {
 
     static let cleanupInterval: TimeInterval = 1800
 
-    /// At most every 30 minutes: which of your worktrees can go. Never in demo mode.
+    /// At most every 30 minutes: which of your worktrees can go. Demo mode shows `DemoData.cleanup`.
     private func refreshCleanup() {
-        guard !DemoData.isOn else { return }
+        guard !DemoData.isOn else { cleanup = DemoData.cleanup(); return }
         if let last = cleanupAt, Date().timeIntervalSince(last) < Self.cleanupInterval { return }
         cleanupAt = Date()
         let repos = RepoList.load()

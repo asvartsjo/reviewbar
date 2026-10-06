@@ -31,6 +31,8 @@ enum Cleanup {
         let state: String
         let author: String?
         var headRefOid: String? = nil
+        /// Opened from a fork, so its branch isn't the one checked out here.
+        var crossRepo = false
     }
 
     /// Worktrees with a branch checked out, except the clone itself. ReviewBar's `pr-<N>` worktrees
@@ -52,7 +54,7 @@ enum Cleanup {
         func lit(_ s: String) -> String { String(decoding: (try? JSONEncoder().encode(s)) ?? Data("\"\"".utf8), as: UTF8.self) }
         let prs = branches.enumerated().map { i, b in
             "b\(i): pullRequests(headRefName: \(lit(b)), first: 1, orderBy: {field: CREATED_AT, direction: DESC}) "
-                + "{ nodes { number state headRefOid author { login } } }"
+                + "{ nodes { number state headRefOid isCrossRepository author { login } } }"
         }.joined(separator: " ")
         return "query { viewer { login } repository(owner: \(lit(parts[0])), name: \(lit(parts[1]))) "
             + "{ defaultBranchRef { name } \(prs) } }"
@@ -70,20 +72,21 @@ enum Cleanup {
             guard let node = ((repo["b\(i)"] as? [String: Any])?["nodes"] as? [[String: Any]])?.first,
                   let number = node["number"] as? Int, let state = node["state"] as? String else { continue }
             latest[branch] = LatestPR(number: number, state: state, author: (node["author"] as? [String: Any])?["login"] as? String,
-                                      headRefOid: node["headRefOid"] as? String)
+                                      headRefOid: node["headRefOid"] as? String,
+                                      crossRepo: node["isCrossRepository"] as? Bool ?? false)
         }
         return (viewer, (repo["defaultBranchRef"] as? [String: Any])?["name"] as? String, latest)
     }
 
-    /// The worktrees that can go: the newest PR from its branch is mine, merged or closed, and the
-    /// worktree still sits on that PR's head commit. A branch with no PR, a newer open PR, someone
-    /// else's PR (a fork's branch of the same name), a worktree that moved on (unpushed commits, or the
-    /// branch name reused for new work), or the default branch (release PRs come from it) never
-    /// counts. Pure, for tests.
+    /// The worktrees that can go: the newest PR from its branch is mine, from this repo, merged or
+    /// closed, and the worktree still sits on that PR's head commit. A branch with no PR, a newer open
+    /// PR, someone else's PR or one from a fork (a branch of the same name elsewhere), a worktree that
+    /// moved on (unpushed commits, or the branch name reused for new work), or the default branch
+    /// (release PRs come from it) never counts. Pure, for tests.
     static func candidates(repo: String, repoFolder: String, worktrees: [BranchWorktree], viewer: String,
                            defaultBranch: String?, latest: [String: LatestPR]) -> [Candidate] {
         worktrees.compactMap { w in
-            guard w.branch != defaultBranch, let pr = latest[w.branch], pr.state != "OPEN",
+            guard w.branch != defaultBranch, let pr = latest[w.branch], pr.state != "OPEN", !pr.crossRepo,
                   pr.author?.lowercased() == viewer.lowercased(),
                   let head = w.head, head == pr.headRefOid else { return nil }
             return Candidate(repo: repo, repoFolder: repoFolder, path: w.path, branch: w.branch,

@@ -217,11 +217,15 @@ struct FeedbackParsingTests {
         #expect(prs[0].readyToMerge)
         #expect(prs[0].latestAt == "2026-09-09T09:00:00Z")   // so it notifies once
         // A required check that never ran also leaves no checks, but GitHub blocks the merge.
-        let blocked = try Backend.parseMyPRs(myPRsJSON(decision: "APPROVED", checks: nil, mergeable: "MERGEABLE",
-                                                       mergeState: "BLOCKED"))
-        #expect(!blocked[0].readyToMerge)
+        for state in ["BLOCKED", "BEHIND", "UNSTABLE", nil] {
+            let blocked = try Backend.parseMyPRs(myPRsJSON(decision: "APPROVED", checks: nil, mergeable: "MERGEABLE",
+                                                           mergeState: state))
+            #expect(!blocked[0].readyToMerge)
+        }
+        // CLEAN never overrides checks that are there.
         for checks in ["PENDING", "EXPECTED", "FAILURE"] {
-            let other = try Backend.parseMyPRs(myPRsJSON(decision: "APPROVED", checks: checks, mergeable: "MERGEABLE"))
+            let other = try Backend.parseMyPRs(myPRsJSON(decision: "APPROVED", checks: checks, mergeable: "MERGEABLE",
+                                                         mergeState: "CLEAN"))
             #expect(!other[0].readyToMerge)
         }
     }

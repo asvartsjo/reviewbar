@@ -180,11 +180,12 @@ enum Backend {
             if let hit = await mentionCache.get(cacheKey) {
                 post = hit
             } else {
-                post = newestMention(in: await mentionPosts(repo: t.repo, number: number, since: since),
-                                     me: me, team: t.reason == "team_mention", since: since)
-                await mentionCache.set(cacheKey, post)
+                let posts = await mentionPosts(repo: t.repo, number: number, since: since)
+                post = newestMention(in: posts, me: me, team: t.reason == "team_mention", since: since)
+                // No posts means even the body fetch failed: search again next refresh.
+                if !posts.isEmpty { await mentionCache.set(cacheKey, post) }
             }
-            guard let post, let at = post.at else { continue }
+            guard let post, let at = post.at, at >= since else { continue }
             let url = post.url.flatMap { $0.hasPrefix("https://github.com/") ? $0 : nil }
                 ?? "https://github.com/\(t.repo)/pull/\(number)"
             result.append(Mention(repo: t.repo, number: number, title: t.title, author: post.author ?? "Someone",
@@ -193,7 +194,8 @@ enum Backend {
         return result.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    /// Everything said on a PR or issue since `since`, plus its body. The pull endpoints fail on an issue.
+    /// Everything said on a PR or issue since `since`, plus its body. The pull endpoints fail on an issue;
+    /// a pending review has no `submitted_at` (and only you can see it), so it drops out.
     private static func mentionPosts(repo: String, number: Int, since: String) async -> [MentionPost] {
         let base = "repos/\(repo)"
         let post = #"{author: .user.login, body: .body, url: .html_url, at: "#
@@ -215,10 +217,13 @@ enum Backend {
             .max { ($0.at ?? "") < ($1.at ?? "") }
     }
 
-    /// Someone else wrote it and it @mentions you, or any team for a team mention. Pure, for tests.
+    /// Someone else wrote it and it @mentions you, or any team for a team mention. Quoted lines and
+    /// code don't count: a quote reply repeats the earlier mention. Pure, for tests.
     static func isMention(_ body: String?, author: String, me: String, team: Bool) -> Bool {
         guard author.lowercased() != me.lowercased() else { return false }
-        let text = body ?? ""
+        let text = threadText(body ?? "").replacing(/`[^`\n]*`/, with: " ")
+            .split(separator: "\n").filter { !$0.drop(while: \.isWhitespace).hasPrefix(">") }
+            .joined(separator: "\n")
         if team, text.contains(/(?:^|[^\w\/.])@[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+/) { return true }
         return text.matches(of: /(?:^|[^\w\/.])@([A-Za-z0-9-]+)/).contains { $0.1.lowercased() == me.lowercased() }
     }

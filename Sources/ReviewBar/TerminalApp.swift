@@ -180,16 +180,18 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             }
         }
 
-        /// The working directories in `lsof -a -d cwd -Fn` output: its `n<path>` lines. Pure, for tests.
+        /// The working directories in `lsof -a -d cwd -Fn` output: its `n<path>` lines. Without root,
+        /// lsof lists only your own processes, which are the ones that matter here. Pure, for tests.
         static func parseCwds(_ lsof: String) -> Set<String> {
             Set(lsof.split(separator: "\n").filter { $0.hasPrefix("n") }.map { String($0.dropFirst()) })
         }
 
         /// The worktrees a process (a terminal tab, a Claude session, a dev server) is working in,
         /// in the folder itself or below it. Removing one would leave that process in a deleted
-        /// folder. Pure, for tests.
+        /// folder. Case-insensitive like macOS volumes: git keeps the case the path was given in,
+        /// lsof reports the case on disk. Pure, for tests.
         static func inUse(_ worktrees: [Worktree], cwds: Set<String>) -> Set<String> {
-            func real(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+            func real(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().path.lowercased() }
             let dirs = cwds.map(real)
             return Set(worktrees.map(\.path).filter { path in
                 let wt = real(path)

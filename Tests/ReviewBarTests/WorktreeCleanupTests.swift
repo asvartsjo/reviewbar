@@ -54,12 +54,13 @@ struct WorktreeCleanupTests {
 
     @Test func aWorktreeIsInUseFromItsFolderOrBelow() {
         let beside = "/Users/me/TEACHIQ/gauss-worktrees"
-        let worktrees = [7, 49, 50, 51].map { Worktree.forPR($0, repo: "o/gauss", repoFolder: clone, nextToClone: true) }
+        let worktrees = [7, 49, 50, 51, 52].map { Worktree.forPR($0, repo: "o/gauss", repoFolder: clone, nextToClone: true) }
         let busy = Worktree.inUse(worktrees, cwds: ["\(beside)/pr-7",           // the folder itself
                                                     "\(beside)/pr-50/app/src",  // below it
                                                     "\(beside)/pr-4962",        // pr-49 is only a prefix
-                                                    "\(beside)/pr-51x"])
-        #expect(busy == ["\(beside)/pr-7", "\(beside)/pr-50"])
+                                                    "\(beside)/pr-51x",
+                                                    "/Users/me/teachiq/gauss-worktrees/pr-52"])  // case on disk differs
+        #expect(busy == ["\(beside)/pr-7", "\(beside)/pr-50", "\(beside)/pr-52"])
     }
 
     @Test func aWorktreeReachedThroughASymlinkIsInUse() throws {

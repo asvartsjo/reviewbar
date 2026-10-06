@@ -43,9 +43,4 @@ enum Store {
         let body = "# \(pr.title)\n\(pr.url)\nAuthor: \(pr.author.login) · reviewed \(Date())\n\n\(text)\n"
         try? body.write(to: url, atomically: true, encoding: .utf8)
     }
-
-    static func deleteMarkdown(_ pr: PR) {
-        guard !DemoData.isOn else { return }
-        try? FileManager.default.removeItem(at: markdownURL(pr))
-    }
 }

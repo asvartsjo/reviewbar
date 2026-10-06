@@ -77,6 +77,13 @@ struct TerminalAppTests {
         #expect(s.contains(#"exec "${SHELL:-/bin/zsh}" -l"#))
     }
 
+    /// My PR commands start in the checkout of the PR's branch, quoted, and stop if it's gone.
+    @Test func launcherStartsInADirectory() {
+        let s = TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "", directory: "/Users/me/it's/gauss-x")
+        #expect(s.contains(#"cd '/Users/me/it'\''s/gauss-x' || exit 1"#))
+        #expect(!TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "").contains("cd "))
+    }
+
     @Test func launcherWithoutPathSkipsExport() {
         #expect(!TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "").contains("export PATH"))
     }
@@ -135,5 +142,27 @@ struct NotificationPollTests {
     @Test func errorsAreNil() {
         #expect(Backend.parseNotificationPoll("HTTP/2.0 401 Unauthorized\r\n") == nil)
         #expect(Backend.parseNotificationPoll("") == nil)
+    }
+}
+
+struct RevealScriptTests {
+    @Test func iTermAndTerminalLookUpTheTabByTTY() throws {
+        let iterm = try #require(TerminalApp.iterm.revealScript(tty: "ttys005"))
+        #expect(iterm.contains(#"tell application "iTerm""#))
+        #expect(iterm.contains(#"if tty of s is "/dev/ttys005" then"#))
+        let terminal = try #require(TerminalApp.terminal.revealScript(tty: "ttys012"))
+        #expect(terminal.contains(#"if tty of t is "/dev/ttys012" then"#))
+    }
+
+    /// The tty goes into AppleScript, so only a plain ttysNNN gets through.
+    @Test func onlyAPlainTTYIsAccepted() {
+        for bad in ["", "??", "ttys", "ttys5\"; do shell script \"x", "/dev/ttys005", "pts/1"] {
+            #expect(TerminalApp.iterm.revealScript(tty: bad) == nil, "\(bad)")
+        }
+    }
+
+    @Test func otherTerminalsCantBeSearched() {
+        #expect(TerminalApp.ghostty.revealScript(tty: "ttys005") == nil)
+        #expect(TerminalApp.copy.revealScript(tty: "ttys005") == nil)
     }
 }

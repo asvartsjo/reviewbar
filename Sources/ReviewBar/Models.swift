@@ -430,12 +430,24 @@ struct FeedbackPR: Identifiable, Hashable {
     var mergeable: String? = nil
     /// A reviewer (not a bot) left a review, comment or thread, answered or not.
     var hasFeedback = false
+    /// The PR's head branch name.
+    var branch: String? = nil
+    /// When the head commit was made (ISO 8601). Unlike `updatedAt`, labels and bulk edits don't move it.
+    var lastCommitAt: String? = nil
+    /// How many of `reviews` are approvals: news, but nothing to answer.
+    var approvals = 0
+    /// Unresolved review threads whose last comment is a bot's (CodeRabbit). Only `move` reads it:
+    /// bots never notify or count.
+    var botThreads = 0
+    /// Someone is asked to review. Defaults to true; only `move` reads it, to spot a PR nobody was asked about.
+    var reviewersRequested = true
     var id: String { pr.url }
 
     func with(latestAt: String, latestBy: String) -> FeedbackPR {
         FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
                    latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable,
-                   hasFeedback: hasFeedback)
+                   hasFeedback: hasFeedback, branch: branch, lastCommitAt: lastCommitAt, approvals: approvals, botThreads: botThreads,
+                   reviewersRequested: reviewersRequested)
     }
 
     /// Nothing new: no unanswered feedback, no blocker, not ready to merge. Listed in My PRs,

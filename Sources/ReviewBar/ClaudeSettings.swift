@@ -21,6 +21,9 @@ enum ClaudeSettings {
         + "For each thread I started, check the commits since then and say: fixed / partly / not fixed / "
         + "author disagreed (with the reason). End with whether it's OK to approve, and ask me before "
         + "drafting any reply."
+    /// My own skills by default: this build is for my workflow only (plan, Track B).
+    static let myPRCommandKey = "myPRCommand", myPRCommandDefault = "/pr-feedback {url}"
+    static let mergeCommandDefault = "can I merge {url}?"
 
     private static func value(_ key: String, _ fallback: String, allowed: [String]) -> String {
         let v = UserDefaults.standard.string(forKey: key) ?? fallback
@@ -47,6 +50,17 @@ enum ClaudeSettings {
     /// First message of a Verify fixes session, or nil when it's empty (no button).
     static func verifyCommand(for url: String) -> String? {
         command(UserDefaults.standard.string(forKey: verifyCommandKey) ?? verifyCommandDefault, url: url)
+    }
+
+    /// First message of a session on one of my PRs with feedback or failing CI, run in the checkout of
+    /// its branch, or nil for the built-in *Work through feedback* prompt.
+    static func myPRCommand(for url: String) -> String? {
+        command(UserDefaults.standard.string(forKey: myPRCommandKey) ?? myPRCommandDefault, url: url)
+    }
+
+    /// First message of a session on one of my PRs that's ready to merge. Fixed, not a setting.
+    static func mergeCommand(for url: String) -> String? {
+        command(mergeCommandDefault, url: url)
     }
 
     /// "{url}" replaced by `url`, or `url` appended when there is none. Blank means nil. Pure, for tests.

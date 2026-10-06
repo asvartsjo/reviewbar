@@ -4,10 +4,10 @@ import ServiceManagement
 import UserNotifications
 
 private enum Tab: String, CaseIterable {
+    case crew = "Crew"
     case reviewing = "Reviewing"
     case mine = "My PRs"
     case mentions = "Mentions"
-    case saved = "Saved"
 }
 
 struct ContentView: View {
@@ -18,6 +18,10 @@ struct ContentView: View {
     @ViewState private var selected: PR?
     @ViewState private var tab: Tab = .reviewing
     @ViewState private var showMuted = false
+    @ViewState private var showParked = false
+    @ViewState private var showIdleCrew = false
+    @AppStorage(TerminalApp.key) private var terminalRaw = ""
+    private var terminal: TerminalApp { TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed) }
     @AppStorage(AsWindow.key) private var asWindow = false
 
     var body: some View {
@@ -40,14 +44,14 @@ struct ContentView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
 
-                if let e = vm.error, tab != .saved {
+                if let e = vm.error {
                     Text(e).font(.caption).foregroundStyle(.red).padding(.horizontal, 10)
                 }
                 switch tab {
                 case .reviewing: reviewingList
                 case .mine: mineList
                 case .mentions: mentionsList
-                case .saved: savedList
+                case .crew: crewList
                 }
             }
         }
@@ -206,6 +210,7 @@ struct ContentView: View {
                     if r.pr.isDraft { draftBadge }
                     Spacer(minLength: 4)
                     HStack(spacing: 5) {
+                        if let item = vm.crewItem(for: r.pr) { CrewBadge(item: item) }
                         if r.isRequested { openAge(r.pr) }
                         savedReviewIcon(r.pr)
                         ChecksIcon(state: r.checks, labelled: true)
@@ -256,29 +261,49 @@ struct ContentView: View {
 
     // MARK: my PRs
 
-    /// PRs with new feedback first, then the rest of your open PRs.
+    /// Your open PRs by whose move it is, Parked folded.
     private var mineList: some View {
         Group {
             if vm.myPRs.isEmpty && !vm.loading {
                 empty("tray", "No open PRs of yours.")
             } else {
+                let sections = vm.mySections
                 List {
-                    ForEach(vm.visibleFeedback) { f in
-                        Button { selected = f.pr } label: { feedbackRow(f) }
-                            .listRowSeparator(.hidden)
-                            .buttonStyle(.hoverRow)
-                            .contextMenu {
-                                Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
+                    moveSummary(sections)
+                        .listRowSeparator(.hidden)
+                    ForEach(sections, id: \.group) { s in
+                        Group {
+                            if s.group == .parked {
+                                Button { showParked.toggle() } label: {
+                                    sectionHeader(s.group.title, count: s.prs.count, folded: !showParked)
+                                }
+                                .buttonStyle(.hoverRow)
+                                .help("\(showParked ? "Hide" : "Show") PRs you parked, and drafts with no commit for \(MyGroup.oldDraftDays)+ days")
+                            } else {
+                                sectionHeader(s.group.title, count: s.prs.count)
                             }
-                    }
-                    if !vm.otherMyPRs.isEmpty {
-                        sectionHeader("Nothing new", count: vm.otherMyPRs.count)
-                            .padding(.top, vm.visibleFeedback.isEmpty ? 0 : 10)
-                            .listRowSeparator(.hidden)
-                        ForEach(vm.otherMyPRs) { f in
-                            Button { selected = f.pr } label: { feedbackRow(f, quiet: true) }
+                        }
+                        .padding(.top, 6)
+                        .listRowSeparator(.hidden)
+                        ForEach(s.group == .parked && !showParked ? [] : s.prs) { f in
+                            let new = vm.visibleFeedback.contains(f)
+                            Button { selected = f.pr } label: { feedbackRow(f, quiet: !new, hint: s.group != .parked) }
                                 .listRowSeparator(.hidden)
                                 .buttonStyle(.hoverRow)
+                                .opacity(s.group == .parked ? 0.55 : 1)
+                                .contextMenu {
+                                    if new {
+                                        Button("Dismiss until new feedback", systemImage: "xmark") { vm.dismissFeedback(f) }
+                                    }
+                                    if let action = vm.myPRAction(for: f.pr) {
+                                        Button(terminal.label(action.title), systemImage: TerminalApp.symbol) { vm.runMyPRAction(f.pr) }
+                                    }
+                                    if vm.isParked(f) {
+                                        Button("Unpark", systemImage: "tray.and.arrow.up") { vm.unpark(f) }
+                                    } else if s.group != .parked {
+                                        Button("Park", systemImage: "tray.and.arrow.down") { vm.park(f) }
+                                    }
+                                }
                         }
                     }
                 }
@@ -288,19 +313,78 @@ struct ContentView: View {
         }
     }
 
+    /// A Claude session in one of your repos. A background one opens with `claude attach`; a terminal
+    /// one opens its PR if known, else brings its tab to the front. Right-click: Show and Stop.
+    @ViewBuilder private func crewRow(_ item: CrewItem) -> some View {
+        let pr = vm.pr(for: item)
+        let row = VStack(alignment: .leading, spacing: 2) {
+            if let pr { numberedTitle(pr.number, pr.title) } else {
+                Text(verbatim: item.session.displayName).font(.body.weight(.medium)).lineLimit(1)
+            }
+            (Text(verbatim: "\(pr == nil && item.session.title == nil ? item.repo : item.session.name) · ").foregroundStyle(.secondary)
+                + Text(item.session.needsMe ? "needs you" : item.session.working ? "working" : "idle")
+                    .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
+                + Text(verbatim: " · \(item.session.background ? "agent view" : item.session.host?.name ?? "terminal") · \(Crew.since(item.session.startedAt))")
+                    .foregroundStyle(.secondary))
+                .font(.caption).lineLimit(1)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        if item.session.background {
+            Button { vm.attach(item) } label: { row }
+                .buttonStyle(.hoverRow)
+                .help("Open the session (\(terminal.label("claude attach")))")
+                .contextMenu { stopButton(item) }
+        } else if let pr {
+            Button { selected = pr } label: { row }
+                .buttonStyle(.hoverRow)
+                .help("A terminal session. Click for the PR.")
+                .contextMenu { showButton(item); stopButton(item) }
+        } else {
+            Button { vm.show(item) } label: { row }
+                .buttonStyle(.hoverRow)
+                .help("A terminal session. Click to bring its tab to the front.")
+                .contextMenu { showButton(item); stopButton(item) }
+        }
+    }
+
+    /// Terminal sessions only: an agent view session's row already opens it.
+    private func showButton(_ item: CrewItem) -> some View {
+        Button("Show session", systemImage: "macwindow") { vm.show(item) }
+            .help("Bring its window to the front (iTerm2, Terminal or VS Code)")
+    }
+
+    private func stopButton(_ item: CrewItem) -> some View {
+        Button("Stop session", systemImage: "stop.circle") { vm.stop(item) }
+            .help(item.session.background ? "claude stop: the conversation is kept, and claude attach resumes it"
+                                          : "Ends its claude process: the conversation is kept, and claude --resume reopens it")
+    }
+
+    /// "3 wait on you · 5 on others", parked PRs left out.
+    private func moveSummary(_ sections: [(group: MyGroup, prs: [FeedbackPR])]) -> some View {
+        func count(_ g: MyGroup) -> Int { sections.first { $0.group == g }?.prs.count ?? 0 }
+        return Text(verbatim: "\(count(.yours)) wait on you · \(count(.waiting)) on others")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+
     /// `quiet`: nothing new to show (or dismissed), so the line says when it was opened instead.
-    private func feedbackRow(_ f: FeedbackPR, quiet: Bool = false) -> some View {
+    private func feedbackRow(_ f: FeedbackPR, quiet: Bool = false, hint: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 numberedTitle(f.pr.number, f.pr.title)
                 if f.pr.isDraft { draftBadge }
                 Spacer(minLength: 4)
+                if let item = vm.crewItem(for: f.pr) { CrewBadge(item: item) }
+                if f.move == .yours(.needsReviewer) {
+                    Label("Needs a reviewer", systemImage: "person.badge.plus").font(.caption).foregroundStyle(.orange)
+                }
                 StatusBadge(feedback: f)
                 DecisionBadge(decision: f.decision)
             }
             if quiet {
                 metaLine(f.pr.repository.nameWithOwner, "",
-                         f.pr.createdAt.map { "opened \(age($0))" } ?? "updated \(age(f.pr.updatedAt))")
+                         ((hint ? f.moveHint : nil).map { "\($0) · " } ?? "")
+                            + (f.pr.createdAt.map { "opened \(age($0))" } ?? "updated \(age(f.pr.updatedAt))"))
             } else {
                 metaLine(f.pr.repository.nameWithOwner, f.latestBy, " \(age(f.latestAt)) · \(f.summary)")
             }
@@ -309,48 +393,47 @@ struct ContentView: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: saved
+    // MARK: crew
 
-    private var savedList: some View {
-        VStack(spacing: 0) {
-            if vm.saved.isEmpty {
-                empty("tray", "No saved reviews yet.")
+    /// Claude sessions in your watched repos, waiting on you first, idle ones folded.
+    private var crewList: some View {
+        Group {
+            if vm.allCrew.isEmpty {
+                empty("person.2", "No Claude sessions in your repos.")
             } else {
-                List(vm.saved) { s in
-                    Button { selected = s.pr } label: { savedRow(s) }
+                List {
+                    sectionHeader("Crew", count: vm.crew.count)
                         .listRowSeparator(.hidden)
-                        .buttonStyle(.hoverRow)
-                        .contextMenu {
-                            Button("Delete", systemImage: "trash", role: .destructive) { vm.delete(s) }
+                    if let notice = vm.terminalNotice {
+                        Text(notice).font(.caption).foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                    }
+                    ForEach(vm.crew) { item in
+                        crewRow(item)
+                            .listRowSeparator(.hidden)
+                    }
+                    if !vm.idleCrew.isEmpty {
+                        Button { showIdleCrew.toggle() } label: {
+                            HStack(spacing: 4) {
+                                Text(verbatim: "Idle \(vm.idleCrew.count)")
+                                Image(systemName: showIdleCrew ? "chevron.down" : "chevron.right").font(.caption2.bold())
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
                         }
+                        .buttonStyle(.hoverRow)
+                        .help("\(showIdleCrew ? "Hide" : "Show") sessions at their prompt, some may have no visible window")
+                        .listRowSeparator(.hidden)
+                        ForEach(showIdleCrew ? vm.idleCrew : []) { item in
+                            crewRow(item)
+                                .opacity(0.55)
+                                .listRowSeparator(.hidden)
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
-            Divider()
-            HStack {
-                Button("Reveal in Finder", systemImage: "folder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([Store.dir])
-                }
-                .help("Show the folder where reviews are saved")
-                Spacer()
-                Text("Right-click a row to delete").font(.caption2).foregroundStyle(.secondary)
-            }
-            .buttonStyle(.hoverBorderless)
-            .padding(8)
         }
-    }
-
-    private func savedRow(_ s: SavedReview) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            numberedTitle(s.pr.number, s.pr.title)
-            metaLine(s.pr.repository.nameWithOwner, s.pr.author.login,
-                     " · reviewed \(s.date.formatted(.relative(presentation: .named)))"
-                        + (s.sinceCommit.map { " · changes since \($0)" } ?? "")
-                        + (s.producedBy.map { " · \($0)" } ?? ""))
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
     }
 
     // MARK: helpers
@@ -378,8 +461,9 @@ struct ContentView: View {
     private func title(_ t: Tab) -> String {
         switch t {
         case .reviewing where vm.yourTurnCount > 0: return "\(t.rawValue) (\(vm.yourTurnCount))"
-        case .mine where !vm.visibleFeedback.isEmpty: return "\(t.rawValue) (\(vm.visibleFeedback.count))"
+        case .mine where vm.yourMoveCount > 0: return "\(t.rawValue) (\(vm.yourMoveCount))"
         case .mentions where !vm.visibleMentions.isEmpty: return "\(t.rawValue) (\(vm.visibleMentions.count))"
+        case .crew where !vm.crew.isEmpty: return "\(t.rawValue) (\(vm.crew.count))"
         default: return t.rawValue
         }
     }
@@ -435,6 +519,8 @@ struct DetailView: View {
             Text(verbatim: "\(pr.repository.nameWithOwner) #\(pr.number) · \(pr.author.login)")
                 .font(.caption).foregroundStyle(.secondary)
 
+            statusLine
+
             if let f = vm.feedback(for: pr) {
                 HStack {
                     DecisionBadge(decision: f.decision)
@@ -473,7 +559,7 @@ struct DetailView: View {
                          + "checked against your earlier notes, or run a full review.")
                         .font(.caption).foregroundStyle(.orange)
                 } else {
-                    Text("This PR has new activity since your last review. The older one is under Saved.")
+                    Text("This PR has new activity since your last review.")
                         .font(.caption).foregroundStyle(.orange)
                 }
             }
@@ -497,6 +583,27 @@ struct DetailView: View {
         }
         .padding(10)
         .onAppear { if let r = vm.reviewingPR(for: pr) { vm.markSeen(r) } }
+    }
+
+    /// The badges the PR's row shows, so the detail doesn't know less than the list.
+    @ViewBuilder private var statusLine: some View {
+        let mine = vm.isMine(pr) ? vm.myPRs.first { $0.pr.url == pr.url } : nil
+        let reviewing = vm.isMine(pr) ? nil : vm.reviewingPR(for: pr)
+        let crew = vm.crewItem(for: pr)
+        if mine != nil || reviewing != nil || crew != nil {
+            HStack(spacing: 8) {
+                if let crew { CrewBadge(item: crew) }
+                if let mine {
+                    StatusBadge(feedback: mine)
+                    if mine.botThreads > 0 {
+                        Label("\(mine.botThreads) bot thread\(mine.botThreads == 1 ? "" : "s")", systemImage: "cpu")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let reviewing { ChecksIcon(state: reviewing.checks, labelled: true) }
+            }
+            .font(.caption)
+        }
     }
 
     /// Quick-model summary of the comments, or the button to make one.
@@ -549,6 +656,10 @@ struct DetailView: View {
         case .failed(let msg):
             Text(msg).foregroundStyle(.red)
         default:
+            if !vm.isMine(pr), let older = vm.olderReview(for: pr) {
+                DisclosureGroup("Your earlier review of \(older.pr.versionLabel): \(ReviewPage.label(older))") { MarkdownView(text: older.text) }
+                    .font(.caption)
+            }
             if !vm.isMine(pr) {
                 Text("Private notes appear here and are saved locally. Nothing is ever posted to GitHub.")
                     .foregroundStyle(.secondary)
@@ -559,15 +670,27 @@ struct DetailView: View {
     @ViewBuilder private var actions: some View {
         HStack {
             if vm.isMine(pr) {
-                Button(terminalLabel("Work through feedback"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
-                    .buttonStyle(.borderedProminent)
+                let action = vm.myPRAction(for: pr)
+                if let action {
+                    Button(terminalLabel(action.title), systemImage: TerminalApp.symbol) { vm.runMyPRAction(pr) }
+                        .buttonStyle(.borderedProminent)
+                }
+                if action?.isMerge ?? true {
+                    Button(terminalLabel(vm.myPRs.contains { $0.pr.url == pr.url && $0.hasFeedback } ? "Work through feedback" : "Open"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
+                        .prominent(action == nil)
+                }
             } else {
                 reviewActions
             }
         }
         if vm.isMine(pr) {
-            Text("Opens \(Agent.current.appName) with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub.")
-                .font(.caption).foregroundStyle(.secondary)
+            if let action = vm.myPRAction(for: pr) {
+                Text("\(action.title) sends “\(action.command)” to \(Agent.current.appName), in your checkout of the PR's branch. Nothing is ever posted to GitHub without your OK.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Opens \(Agent.current.appName) with the reviews, threads and comments on this PR plus the current diff. Nothing is ever posted to GitHub.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         switch vm.draftState[pr.reviewKey] ?? .idle {
         case .done(let msg): Text(msg).font(.caption).foregroundStyle(.green)
@@ -576,6 +699,9 @@ struct DetailView: View {
         }
         if let notice = vm.terminalNotice {
             Text(notice).font(.caption).foregroundStyle(.secondary)
+        }
+        if let e = vm.error {
+            Text(e).font(.caption).foregroundStyle(.red)
         }
     }
 
@@ -705,9 +831,11 @@ struct SettingsView: View {
     @AppStorage(MenuBarCount.reviewedKey) private var countReviewed = true
     @AppStorage(MenuBarCount.myPRsKey) private var countMyPRs = true
     @AppStorage(MenuBarCount.mentionsKey) private var countMentions = true
+    @AppStorage(MenuBarCount.crewKey) private var countCrew = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
+    @AppStorage(ClaudeSettings.myPRCommandKey) private var myPRCommand = ClaudeSettings.myPRCommandDefault
     @AppStorage(Backend.reviewStyleKey) private var reviewStyle = Backend.reviewStyleDefault
     @AppStorage(TerminalApp.Worktree.nextToCloneKey) private var worktreesNextToClone = false
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
@@ -717,6 +845,7 @@ struct SettingsView: View {
     @AppStorage(NotifySettings.resolvedKey) private var notifyAllResolved = true
     @AppStorage(NotifySettings.verdictsKey) private var notifyVerdicts = true
     @AppStorage(NotifySettings.mentionsKey) private var notifyMentions = true
+    @AppStorage(NotifySettings.crewKey) private var notifyCrew = true
     @ViewState private var notificationsAllowed: UNAuthorizationStatus?
     @ViewState private var openAtLogin = LoginItem.isAvailable && LoginItem.status == .enabled
     @ViewState private var loginProblem: String?
@@ -820,7 +949,7 @@ struct SettingsView: View {
                     }
                 }
                 .listStyle(.bordered(alternatesRowBackgrounds: true))
-                .frame(height: 150)
+                .frame(height: min(150, max(48, CGFloat(repos.count) * 44)))
                 .onAppear(perform: loadFolders)
             }
 
@@ -931,30 +1060,41 @@ struct SettingsView: View {
                 }
             }
             .font(.caption2).foregroundStyle(.secondary)
-            HStack {
-                Text("Review command")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Review command").font(.headline)
+                Text(agentRaw == Agent.codex.rawValue
+                     ? "Claude Code only. Codex reviews use the built-in prompt."
+                     : "The first message of a new review in the terminal, with {url} as the PR's link. "
+                       + "Leave it empty for the built-in review prompt.")
+                    .font(.caption2).foregroundStyle(.secondary)
                 TextField("Review command", text: $reviewCommand, prompt: Text("Built-in review prompt"))
                     .labelsHidden()
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
-            Text(agentRaw == Agent.codex.rawValue
-                 ? "Claude Code only. Codex reviews use the built-in prompt."
-                 : "The first message of a new review in the terminal, with {url} as the PR's link. "
-                   + "Leave it empty for the built-in review prompt.")
-                .font(.caption2).foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline) {
-                Text("Verify command")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Verify command").font(.headline)
+                Text(agentRaw == Agent.codex.rawValue
+                     ? "Claude Code only."
+                     : "Sent by Verify fixes (PRs where you have review threads), with {url} as the PR's link. "
+                       + "Leave it empty to hide the button.")
+                    .font(.caption2).foregroundStyle(.secondary)
                 TextField("Verify command", text: $verifyCommand, prompt: Text("No Verify fixes button"),
                           axis: .vertical)
                     .lineLimit(1...4)
                     .labelsHidden()
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
-            Text(agentRaw == Agent.codex.rawValue
-                 ? "Claude Code only."
-                 : "Sent by Verify fixes (PRs where you have review threads), with {url} as the PR's link. "
-                   + "Leave it empty to hide the button.")
-                .font(.caption2).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Triage feedback command").font(.headline)
+                Text(agentRaw == Agent.codex.rawValue
+                     ? "Claude Code only."
+                     : "Sent by Triage feedback on your own PRs with feedback or failing CI, in your checkout of "
+                       + "the PR's branch. {url} is the PR's link. Empty: the built-in prompt.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                TextField("Triage feedback command", text: $myPRCommand, prompt: Text("Built-in Work through feedback prompt"))
+                    .labelsHidden()
+                    .disabled(agentRaw == Agent.codex.rawValue)
+            }
             Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
             Text(worktreesNextToClone
                  ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. gauss-worktrees/pr-42."
@@ -1013,6 +1153,7 @@ struct SettingsView: View {
             Toggle("Other reviewers approve or request changes", isOn: $notifyVerdicts)
             Toggle("Feedback on your PRs", isOn: $notifyFeedback)
             Toggle("@mentions of you or your teams", isOn: $notifyMentions)
+            Toggle("A Claude session needs you (Claude Code only)", isOn: $notifyCrew)
             notificationHint
 
             Divider()
@@ -1023,9 +1164,10 @@ struct SettingsView: View {
                 Toggle("New commits or replies on PRs you reviewed", isOn: $countReviewed)
                 Toggle("Feedback on your PRs", isOn: $countMyPRs)
                 Toggle("Mentions", isOn: $countMentions)
+                Toggle("Claude sessions that need you", isOn: $countCrew)
             }
             .padding(.leading, 12)
-            Text(countRequests || countReviewed || countMyPRs || countMentions
+            Text(countRequests || countReviewed || countMyPRs || countMentions || countCrew
                  ? "Each PR counts once, even when it's in more than one of these. PRs muted in Reviewing don't count "
                    + "as requests or activity, but a mention still counts."
                  : "Nothing is counted, so the menu bar shows only the icon.")
@@ -1224,6 +1366,19 @@ struct ChecksIcon: View {
 
     @ViewBuilder private func icon(_ symbol: String, _ text: String) -> some View {
         if labelled { Label(text, systemImage: symbol) } else { Image(systemName: symbol).help(text) }
+    }
+}
+
+/// A Claude session on this PR: waiting on you (orange) or at work.
+struct CrewBadge: View {
+    let item: CrewItem
+
+    var body: some View {
+        Label(item.session.needsMe ? "Claude needs you" : "Claude working",
+              systemImage: item.session.needsMe ? "questionmark.bubble.fill" : "ellipsis.bubble")
+            .font(.caption)
+            .foregroundStyle(item.session.needsMe ? Color.orange : Color.secondary)
+            .help(item.session.background ? "An agent view session (see the Crew tab)" : "A Claude session in a terminal window")
     }
 }
 

@@ -11,7 +11,7 @@ enum DemoData {
 
     /// Thrown by actions that would reach GitHub, an agent or a terminal: the PRs are made up.
     struct Unavailable: LocalizedError {
-        var errorDescription: String? { "Not in demo mode: these PRs are made up." }
+        var errorDescription: String? { "Not available in demo mode: these PRs are made up." }
     }
 
     /// 0 before the first refresh.
@@ -84,10 +84,33 @@ enum DemoData {
          FeedbackPR(pr: pr("acme/api", 305, "Bump Swift to 6.1", by: "you", head: "305a", openedDaysAgo: 2),
                     decision: "APPROVED", threads: 0, reviews: 1, comments: 0,
                     latestAt: ago(days: 1), latestBy: "omar", checks: "SUCCESS", mergeable: "MERGEABLE",
-                    hasFeedback: true),
+                    hasFeedback: true, approvals: 1),
          FeedbackPR(pr: pr("acme/api", 310, "Log slow queries", by: "you", head: "310a", openedDaysAgo: 0.02),
                     decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
-                    latestAt: "", latestBy: "", checks: "PENDING", mergeable: "MERGEABLE")]
+                    latestAt: "", latestBy: "", checks: "PENDING", mergeable: "MERGEABLE"),
+         FeedbackPR(pr: pr("acme/api", 312, "Export grades as CSV", by: "you", head: "312a", openedDaysAgo: 1, draft: true),
+                    decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
+                    latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE"),
+         FeedbackPR(pr: pr("acme/storefront", 314, "Retry failed webhooks", by: "you", head: "314a", openedDaysAgo: 3),
+                    decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
+                    latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE", botThreads: 2),
+         FeedbackPR(pr: PR(number: 290, title: "Spike: offline mode", url: "https://github.com/acme/storefront/pull/290",
+                           isDraft: true, updatedAt: ago(days: 45), repository: .init(nameWithOwner: "acme/storefront"),
+                           author: .init(login: "you"), headRefOid: oid("290a"), createdAt: ago(days: 60)),
+                    decision: "REVIEW_REQUIRED", threads: 0, reviews: 0, comments: 0,
+                    latestAt: "", latestBy: "", checks: "SUCCESS", mergeable: "MERGEABLE", lastCommitAt: ago(days: 45))]
+    }
+
+    /// A terminal session on #300 asking a question, and an agent view review of #152 at work.
+    static func crew() -> [CrewItem] {
+        [CrewItem(session: CrewSession(id: "a1b2c3d4", name: "storefront-1f", cwd: "/demo/storefront-dark-mode",
+                                       background: false, needsMe: true, working: false,
+                                       startedAt: launched.addingTimeInterval(-3 * 60)),
+                  repo: "acme/storefront", prNumber: 300),
+         CrewItem(session: CrewSession(id: "e5f6a7b8", name: "pr-152", cwd: "/demo/storefront",
+                                       background: true, needsMe: false, working: true,
+                                       startedAt: launched.addingTimeInterval(-12 * 60)),
+                  repo: "acme/storefront", prNumber: 152)]
     }
 
     static func mentions() -> [Mention] {

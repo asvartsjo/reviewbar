@@ -75,12 +75,13 @@ enum TerminalApp: String, CaseIterable, Identifiable {
     /// Exits quietly if the prompt is already gone: Ghostty can run a launch command twice. Pure, for tests.
     /// `checkout` is the repo's local clone plus where this PR's worktree goes, if a folder is set.
     static func launcherScript(claude: String, promptFile: String, path: String,
-                               checkout: Worktree? = nil) -> String {
+                               checkout: Worktree? = nil, directory: String? = nil) -> String {
         """
         #!/bin/zsh
         \(path.isEmpty ? "" : "export PATH=\(q(path))")
         [[ -f \(q(promptFile)) ]] || exit 0
         \(checkout?.script ?? "")
+        \(directory.map { "cd \(q($0)) || exit 1" } ?? "")
         prompt="$(cat \(q(promptFile)))"
         rm -f \(q(promptFile)) "$0"
         \(claude) "$prompt"
@@ -126,6 +127,13 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             """
         }
 
+        /// Shell test that passes only when the worktree's HEAD is the PR head last fetched into `ref`.
+        /// `script` leaves a worktree with local changes or commits where it is, so afterwards it may
+        /// hold other code than the PR. Pure, for tests.
+        var atPRHeadScript: String {
+            #"[[ "$(git -C \#(q(path)) rev-parse HEAD)" == "$(git -C \#(q(repoFolder)) rev-parse \#(ref))" ]]"#
+        }
+
         static let nextToCloneKey = "worktreesNextToClone"
 
         /// Worktrees live under Application Support, never inside your clone. With `nextToClone`
@@ -152,18 +160,21 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         struct Listed: Equatable {
             let path: String
             let detached: Bool
+            /// The checked-out branch, such as `refs/heads/main`; nil when detached.
+            var branch: String? = nil
         }
 
         /// Parses `git worktree list --porcelain`: blocks of `worktree <path>`, `HEAD <sha>`, then
         /// `detached` or `branch <ref>`, separated by blank lines. Pure, for tests.
         static func parseList(_ porcelain: String) -> [Listed] {
             porcelain.components(separatedBy: "\n\n").compactMap { block in
-                var path: String?, detached = false
+                var path: String?, detached = false, branch: String?
                 for line in block.split(separator: "\n").map(String.init) {
                     if line.hasPrefix("worktree ") { path = String(line.dropFirst("worktree ".count)) }
                     else if line == "detached" { detached = true }
+                    else if line.hasPrefix("branch ") { branch = String(line.dropFirst("branch ".count)) }
                 }
-                return path.map { Listed(path: $0, detached: detached) }
+                return path.map { Listed(path: $0, detached: detached, branch: branch) }
             }
         }
 
@@ -211,6 +222,50 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             for c in $(print -r -- "$log" | awk 'NF > 1 && $2 !~ /^(checkout|reset):$/ { print $1 }'); do \
             \(inRefs) || exit 1; done
             """
+        }
+    }
+
+    /// AppleScript that selects the tab on `tty` ("ttys005") and prints "found"; nil for terminals
+    /// that can't be searched by tty, or a tty that isn't one. Pure, for tests.
+    func revealScript(tty: String) -> String? {
+        guard tty.range(of: #"^ttys[0-9]+$"#, options: .regularExpression) != nil else { return nil }
+        let dev = "\"/dev/\(tty)\""
+        switch self {
+        case .iterm:
+            return """
+                tell application "iTerm"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            repeat with s in sessions of t
+                                if tty of s is \(dev) then
+                                    tell w to select
+                                    tell t to select
+                                    tell s to select
+                                    activate
+                                    return "found"
+                                end if
+                            end repeat
+                        end repeat
+                    end repeat
+                end tell
+                """
+        case .terminal:
+            return """
+                tell application "Terminal"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            if tty of t is \(dev) then
+                                set selected of t to true
+                                set index of w to 1
+                                activate
+                                return "found"
+                            end if
+                        end repeat
+                    end repeat
+                end tell
+                """
+        default:
+            return nil
         }
     }
 

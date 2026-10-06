@@ -37,11 +37,13 @@ enum Agent: String, CaseIterable, Identifiable {
             return (codebase.map { "cd \(q($0)) && " } ?? "")
                 + "\(Backend.claudeBin) \(Backend.headlessFlags) \(tools)\(ClaudeSettings.flags(pair))"
         case .codex:
-            // Read-only sandbox: the diff is untrusted input. The answer goes to a file so
-            // progress output on stdout never ends up in the saved review.
+            // Read-only sandbox: the diff is untrusted input. A zero AGENTS.md budget keeps the
+            // PR's own AGENTS.md out of the instructions (Codex loads it when the clone is trusted).
+            // The answer goes to a file so progress output on stdout never ends up in the review.
             return "f=$(mktemp -t reviewbar) || exit 1; "
                 + "\(CodexSettings.bin) exec --skip-git-repo-check --sandbox read-only --color never "
                 + (codebase.map { "--cd \(q($0)) " } ?? "")
+                + "-c project_doc_max_bytes=0 "
                 + "--output-last-message \"$f\"\(CodexSettings.flags(pair)) - >/dev/null "
                 + "|| { s=$?; rm -f \"$f\"; exit $s; }; cat \"$f\"; rm -f \"$f\""
         }

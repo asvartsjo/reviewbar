@@ -25,6 +25,12 @@ struct AgentTests {
         #expect(x.contains("--sandbox read-only --color never --cd '/wt' "))
     }
 
+    @Test func codexHeadlessIgnoresThePRsAgentsMd() {
+        let x = Agent.codex.headlessCommand((model: "", effort: ""), codebase: "/wt")
+        #expect(x.contains("--cd '/wt' -c project_doc_max_bytes=0 "))
+        #expect(!Agent.codex.interactiveCommand((model: "", effort: "")).contains("project_doc_max_bytes"))
+    }
+
     @Test func codexModelNamesAreShellSafe() {
         #expect(CodexSettings.isValidModel("gpt-5.5-codex"))
         #expect(CodexSettings.isValidModel(""))

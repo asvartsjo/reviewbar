@@ -269,4 +269,21 @@ struct MentionSnippetTests {
         #expect(Backend.isMention("@acme/frontend please look", author: "lina", me: "atanasfn", team: true))
         #expect(!Backend.isMention("@lina please look", author: "lina", me: "atanasfn", team: true))
     }
+
+    @Test func teamHandleIsNotAPersonalMention() {
+        #expect(!Backend.isMention("@acme/frontend please look", author: "lina", me: "atanasfn", team: false))
+    }
+
+    @Test func quotedOrCodeMentionIsNotANewOne() {
+        #expect(!Backend.isMention("> @atanasfn can you check?\n\nDone", author: "lina", me: "atanasfn", team: false))
+        #expect(!Backend.isMention("```\n@atanasfn\n```", author: "lina", me: "atanasfn", team: false))
+        #expect(!Backend.isMention("Ping `@atanasfn` in the docs", author: "lina", me: "atanasfn", team: false))
+        #expect(Backend.isMention("> old\n\n@atanasfn now this", author: "lina", me: "atanasfn", team: false))
+    }
+
+    @Test func quoteReplyKeepsTheOriginalMention() {
+        let mention = Backend.MentionPost(author: "carol", body: "@atanasfn kan du kolla?", url: "u1", at: "2026-10-05T08:00:00Z")
+        let quote = Backend.MentionPost(author: "lina", body: "> @atanasfn kan du kolla?\n\nSame here", url: "u2", at: "2026-10-06T09:00:00Z")
+        #expect(Backend.newestMention(in: [mention, quote], me: "atanasfn", team: false, since: "2026-09-29T00:00:00Z") == mention)
+    }
 }

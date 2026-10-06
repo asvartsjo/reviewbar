@@ -325,22 +325,28 @@ enum Backend {
     /// The `withHeadCommits` response (aliases p0, p1, … by index) → head commit, CI and others'
     /// verdicts per PR. Unchanged PRs when it doesn't decode. Pure, for tests.
     static func applyHeadCommits(_ prs: [PR], _ json: Data) -> [PR] {
-        guard let resp = try? JSONDecoder().decode(HeadCommits.self, from: json) else { return prs }
-        let me = (try? JSONDecoder().decode(GQL<ViewerOnly>.self, from: json))?.data.viewer.login ?? ""
+        guard let resp = try? JSONDecoder().decode(GQL<HeadCommits>.self, from: json).data else { return prs }
         return prs.enumerated().map { i, pr in
             var pr = pr
-            let node = resp.data["p\(i)"] ?? nil
+            let node = resp.prs["p\(i)"] ?? nil
             pr.headRefOid = node?.headRefOid
             pr.checks = node?.commits?.nodes.first?.commit.statusCheckRollup?.state
-            pr.verdicts = node?.reviews.map { verdicts($0.items.map { ($0.author, $0.state) }, me: me, author: pr.author.login) }
+            pr.verdicts = node?.reviews.map {
+                verdicts($0.items.map { ($0.author, $0.state) }, me: resp.viewer.login, author: pr.author.login)
+            }
             return pr
         }
     }
 
-    private struct ViewerOnly: Decodable { let viewer: Login }
-
+    /// `viewer` and the p0, p1, … aliases side by side under `data`.
     private struct HeadCommits: Decodable {
-        let data: [String: Node?]
+        let viewer: Login
+        let prs: [String: Node?]
+        private struct Viewer: Decodable { let viewer: Login }
+        init(from decoder: Decoder) throws {
+            viewer = try Viewer(from: decoder).viewer
+            prs = try [String: Node?](from: decoder)
+        }
         struct Node: Decodable {
             let headRefOid: String?
             let commits: Commits?
@@ -550,8 +556,9 @@ enum Backend {
         return marked + added
     }
 
-    /// Other people's current verdicts from a PR's reviews, oldest first: each person's last approval
-    /// or change request, gone again when it's dismissed. Never you, the author or a bot. Pure, for tests.
+    /// Other people's current verdicts from a PR's reviews (oldest first): each person's last approval
+    /// or change request, gone again when it's dismissed. Never you, the author or a bot. Both callers
+    /// fetch the last 30 reviews, so a verdict older than that is missed on a very busy PR. Pure, for tests.
     private static func verdicts(_ reviews: [(author: GitHubUser?, state: String)], me: String,
                                  author: String) -> [ReviewingPR.Verdict] {
         var latest: [String: String] = [:]

@@ -16,7 +16,7 @@ struct WorktreeCleanupTests {
     @Test func parsesWorktreeList() {
         let list = Worktree.parseList(porcelain([(clone, "branch refs/heads/development"),
                                                  ("/Users/me/TEACHIQ/gauss-worktrees/pr-7", "detached")]))
-        #expect(list == [.init(path: clone, detached: false),
+        #expect(list == [.init(path: clone, detached: false, branch: "refs/heads/development"),
                          .init(path: "/Users/me/TEACHIQ/gauss-worktrees/pr-7", detached: true)])
     }
 
@@ -77,6 +77,23 @@ struct WorktreeCleanupTests {
 
     private func head(_ folder: String) async throws -> String {
         try await sh("git -C \(q(folder)) rev-parse HEAD").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A worktree kept where it was (local edits) after the PR moved on isn't the PR's code, so a
+    /// review mustn't read it; once it's at the PR head again, it may.
+    @Test func atPRHeadOnlyWhenHEADIsTheFetchedHead() async throws {
+        let t = try await makeWorktree("print x >> .gitignore")
+        defer { try? FileManager.default.removeItem(at: t.root) }
+        let w = t.worktree
+        func atHead() async -> Bool { (try? await sh(w.atPRHeadScript)) != nil }
+        #expect(await atHead())
+
+        let git = "git -c user.name=t -c user.email=t@t -C \(q(w.repoFolder))"
+        _ = try await sh("\(git) update-ref \(w.ref) $(\(git) commit-tree -m next -p HEAD 'HEAD^{tree}')")
+        #expect(await !atHead())
+
+        _ = try await sh("git -C \(q(w.path)) checkout -q -f --detach \(w.ref)")
+        #expect(await atHead())
     }
 
     @Test func removesACleanWorktreeAndItsRef() async throws {

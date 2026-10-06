@@ -7,7 +7,8 @@ import Testing
 final class ClaudeSettingsTests {
     private let keys = [ClaudeSettings.reviewModelKey, ClaudeSettings.reviewEffortKey,
                         ClaudeSettings.quickModelKey, ClaudeSettings.quickEffortKey,
-                        ClaudeSettings.reviewCommandKey, ClaudeSettings.verifyCommandKey]
+                        ClaudeSettings.reviewCommandKey, ClaudeSettings.verifyCommandKey,
+                        ClaudeSettings.myPRCommandKey]
     private var saved: [String: Any] = [:]
 
     init() {
@@ -68,6 +69,14 @@ final class ClaudeSettingsTests {
         #expect(ClaudeSettings.command(" \n ", url: url) == nil)
         UserDefaults.standard.set("", forKey: ClaudeSettings.reviewCommandKey)
         #expect(ClaudeSettings.reviewCommand(for: url) == nil)
+    }
+
+    @Test func myPRCommandDefaultsToMySkillAndBlankTurnsItOff() {
+        let url = "https://github.com/o/r/pull/7"
+        #expect(ClaudeSettings.myPRCommand(for: url) == "/pr-feedback \(url)")
+        #expect(ClaudeSettings.mergeCommand(for: url) == "can I merge \(url)?")
+        UserDefaults.standard.set("", forKey: ClaudeSettings.myPRCommandKey)
+        #expect(ClaudeSettings.myPRCommand(for: url) == nil)
     }
 
     @Test func verifyCommand() throws {

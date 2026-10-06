@@ -812,9 +812,10 @@ enum Backend {
       viewer { login }
       search(query: $q, type: ISSUE, first: 30) {
         nodes { ... on PullRequest {
-          number title url isDraft createdAt updatedAt headRefOid reviewDecision
+          number title url isDraft createdAt updatedAt headRefOid headRefName reviewDecision
           repository { nameWithOwner } author { login }
           mergeable mergeStateStatus
+          reviewRequests(first: 1) { totalCount }
           commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
           reviews(last: 20) { nodes { author { login __typename } state body submittedAt } }
           comments(last: 20) { nodes { author { login __typename } createdAt } }
@@ -864,13 +865,15 @@ enum Backend {
                 if at > latestAt { latestAt = at; latestBy = who?.login ?? "" }
             }
 
-            var threads = 0
+            var threads = 0, botThreads = 0
             for t in n.reviewThreads.items where !t.isResolved {
-                guard let last = t.comments.items.last, isReviewer(last.author) else { continue }
+                guard let last = t.comments.items.last else { continue }
+                if last.author?.isBot == true { botThreads += 1; continue }
+                guard isReviewer(last.author) else { continue }
                 threads += 1
                 seen(last.createdAt, last.author)
             }
-            var reviews = 0
+            var reviews = 0, approvals = 0
             for r in n.reviews.items {
                 guard isReviewer(r.author), let at = r.submittedAt, at > myLast else { continue }
                 // A plain COMMENTED review with no summary only wraps thread comments, counted above.
@@ -878,6 +881,7 @@ enum Backend {
                     || (r.state == "COMMENTED" && !r.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 guard counts else { continue }
                 reviews += 1
+                if r.state == "APPROVED" { approvals += 1 }
                 seen(at, r.author)
             }
             var comments = 0
@@ -896,7 +900,9 @@ enum Backend {
                                mergeState: n.mergeStateStatus,
                                hasFeedback: n.reviews.items.contains { isReviewer($0.author) }
                                    || n.comments.items.contains { isReviewer($0.author) }
-                                   || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) })
+                                   || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) },
+                               branch: n.headRefName, lastCommitAt: head?.committedDate, approvals: approvals, botThreads: botThreads,
+                               reviewersRequested: n.reviewRequests.totalCount > 0)
 
             // No unanswered feedback: news only if something blocks it, or it can be merged.
             // Otherwise it's quiet (no `latestAt`): listed, but never notifies or counts.
@@ -929,9 +935,11 @@ enum Backend {
             let createdAt: String?
             let updatedAt: String
             let headRefOid: String?
+            let headRefName: String?
             let reviewDecision: String?
             let mergeable: String?
             let mergeStateStatus: String?
+            let reviewRequests: Count
             let repository: PR.Repo
             let author: PR.Author?
             let commits: Nodes<CommitNode>
@@ -939,6 +947,7 @@ enum Backend {
             let comments: Nodes<Comment>
             let reviewThreads: Nodes<ReviewThread>
         }
+        struct Count: Decodable { let totalCount: Int }
         struct CommitNode: Decodable {
             let commit: Commit
             struct Commit: Decodable {
@@ -1250,6 +1259,8 @@ enum Backend {
         case author(summary: String?)
         /// Check someone else's PR against my review threads: the Verify command, sent as is.
         case verify(command: String)
+        /// My own command on my own PR, in the checkout of its branch (`MyPRAction`), sent as is.
+        case inCheckout(command: String, path: String)
     }
 
     /// Hands a quick-model summary to the review model as a map, never as the source of truth.
@@ -1501,7 +1512,8 @@ enum Backend {
         guard let folder = RepoList.folder(for: pr.repository.nameWithOwner) else { return nil }
         let wt = TerminalApp.Worktree.forPR(pr, repoFolder: folder)
         _ = try? await sh(wt.script)
-        guard FileManager.default.fileExists(atPath: wt.path + "/.git") else { return nil }
+        guard FileManager.default.fileExists(atPath: wt.path + "/.git"),
+              (try? await sh(wt.atPRHeadScript)) != nil else { return nil }
         return wt.path
     }
 
@@ -1588,8 +1600,13 @@ enum Backend {
         case .verify(let command):
             prompt = command
             isCommand = true
+        case .inCheckout(let command, _):
+            prompt = command
+            isCommand = true
         }
-        let worktree = RepoList.folder(for: pr.repository.nameWithOwner)
+        var directory: String?
+        if case .inCheckout(_, let path) = mode { directory = path }
+        let worktree = directory != nil ? nil : RepoList.folder(for: pr.repository.nameWithOwner)
             .map { TerminalApp.Worktree.forPR(pr, repoFolder: $0) }
         if let worktree, !isCommand {
             prompt += "\n\nLOCAL CHECKOUT: you are in a git worktree made for this PR (\(worktree.path)), "
@@ -1610,7 +1627,7 @@ enum Backend {
         let path = (try? await sh("print -r -- $PATH").trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
         let script = TerminalApp.launcherScript(
             claude: Agent.current.interactiveCommand(Agent.current.review),
-            promptFile: promptFile.path, path: path, checkout: worktree)
+            promptFile: promptFile.path, path: path, checkout: worktree, directory: directory)
         try script.write(to: launcher, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcher.path)
 

@@ -76,6 +76,7 @@ enum AutoReview {
 enum NotifySettings {
     static let requestsKey = "notifyRequests", repliesKey = "notifyReplies", feedbackKey = "notifyFeedback"
     static let mentionsKey = "notifyMentions"
+    static let crewKey = "notifyCrew"
     static let pushedKey = "notifyPushed", resolvedKey = "notifyAllResolved", verdictsKey = "notifyVerdicts"
 
     /// On unless turned off.
@@ -126,6 +127,17 @@ enum Notifier {
         guard isAvailable, NotifySettings.isOn(NotifySettings.mentionsKey) else { return }
         send(id: "mention-\(m.url)", title: "\(m.author) mentioned you · \(m.repo) #\(m.number)",
              body: m.title + (m.snippet.isEmpty ? "" : "\n\(m.snippet)"), url: m.url)
+    }
+
+    /// "Claude needs you" when a session starts waiting on you. Agent view notifies only while it's
+    /// open, so this is the one that reaches you. Clicking opens the PR, when the session has one.
+    static func crew(_ item: CrewItem, pr: PR?) {
+        guard isAvailable, NotifySettings.isOn(NotifySettings.crewKey) else { return }
+        let s = item.session
+        let what = pr.map { "\($0.repository.nameWithOwner) #\($0.number): \($0.title)" } ?? "\(s.name) · \(item.repo)"
+        send(id: "crew-\(s.id)-\(Date().timeIntervalSince1970)", title: "Claude needs you",
+             body: "\(what)\n\(s.background ? "Agent view: click its row in ReviewBar to open it" : "In its terminal window")",
+             url: pr?.url)
     }
 
     /// "Review ready" for an automatic review, with its verdict. Clicking opens the PR.

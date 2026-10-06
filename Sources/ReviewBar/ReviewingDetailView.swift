@@ -116,8 +116,9 @@ struct ReviewingDetailBox: View {
                 if !d.openBySeverity.isEmpty {
                     heading(" · open:")
                     ForEach(d.openBySeverity, id: \.severity) { o in
-                        Text(verbatim: " \(o.count) ").font(.callout.bold())
+                        Text(verbatim: " ").font(.callout)
                         SeverityIcon(severity: o.severity)
+                        Text(verbatim: "\(o.count)").font(.callout.bold())
                     }
                 }
                 if d.blockingOpen > 0 {
@@ -129,7 +130,7 @@ struct ReviewingDetailBox: View {
             ForEach(Array(threads.enumerated()), id: \.offset) { _, t in
                 Button { if let s = t.url, let u = URL(string: s) { NSWorkspace.shared.open(u) } } label: {
                     line {
-                        if let sev = t.severity { SeverityIcon(severity: sev) }
+                        if let sev = t.severity { SeverityIcon(severity: sev).opacity(t.state == .resolved ? 0.35 : 1) }
                         (Text(verbatim: t.title)
                             + Text(verbatim: "  \(t.location)").font(.caption.monospaced()).foregroundStyle(.secondary))
                             .foregroundStyle(t.state == .resolved ? .secondary : .primary)

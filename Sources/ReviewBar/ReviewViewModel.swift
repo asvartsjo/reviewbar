@@ -25,6 +25,17 @@ final class ReviewViewModel: ObservableObject {
     @Published private var dismissed: [String: String] =
         UserDefaults.standard.dictionary(forKey: "dismissedReplies") as? [String: String] ?? [:]
     private var timer: Timer?
+    private var crewTimer: Timer?
+    /// Every Claude session in my watched repos, idle ones too, waiting on me first.
+    @Published private(set) var allCrew: [CrewItem] = []
+    /// The sessions Crew shows and counts: waiting on me or working.
+    var crew: [CrewItem] { allCrew.filter { !$0.session.idle } }
+    /// Idle sessions, folded under Crew: one can live on with no visible window.
+    var idleCrew: [CrewItem] { allCrew.filter(\.session.idle) }
+    /// PR url → when ReviewBar last opened a session on it, for the second-session check.
+    private var launchedAt: [String: Date] = [:]
+    /// Ids of the sessions that were waiting on me at the last poll; nil until the first one.
+    private var crewWaiting: Set<String>?
     private var lastRefresh: Date?
     private var refreshAgain = false
     /// What the previous successful refresh saw, per list; nil until the first one (the baseline).
@@ -48,6 +59,9 @@ final class ReviewViewModel: ObservableObject {
         Task { await refresh() }
         timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
+        }
+        crewTimer = Timer.scheduledTimer(withTimeInterval: Crew.pollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refreshCrew() }
         }
         Task { await watchNotifications() }
     }
@@ -166,6 +180,7 @@ final class ReviewViewModel: ObservableObject {
         Notifier.post(alerts)
         lastRefresh = Date()
         removeClosedWorktreesDaily()
+        Task { await refreshCrew() }
         loading = false
         if refreshAgain {
             refreshAgain = false
@@ -363,16 +378,38 @@ final class ReviewViewModel: ObservableObject {
     /// Your PRs with feedback you have not dismissed (or newer than what you dismissed).
     /// Quiet PRs have no `latestAt`, so they're never in it.
     var visibleFeedback: [FeedbackPR] {
-        myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") }
-    }
-
-    /// The rest of your open PRs: quiet or dismissed, most recently updated first.
-    var otherMyPRs: [FeedbackPR] {
-        let shown = Set(visibleFeedback.map(\.pr.url))
-        return myPRs.filter { !shown.contains($0.pr.url) }.sorted { $0.pr.updatedAt > $1.pr.updatedAt }
+        myPRs.filter { $0.latestAt > (dismissed[$0.pr.url] ?? "") && !parked.contains($0.pr.url) }
     }
 
     func feedback(for pr: PR) -> FeedbackPR? { visibleFeedback.first { $0.pr.url == pr.url } }
+
+    /// My PRs by whose move it is: Your move, Waiting on others, Parked.
+    var mySections: [(group: MyGroup, prs: [FeedbackPR])] {
+        MyGroup.sections(myPRs, dismissed: dismissed, parked: parked)
+    }
+
+    private static let parkedKey = "myPRsParked"
+    /// My PRs parked by hand: listed under Parked, never notify or count, until unparked.
+    @Published private var parked = Set(UserDefaults.standard.stringArray(forKey: parkedKey) ?? [])
+
+    func isParked(_ f: FeedbackPR) -> Bool { parked.contains(f.pr.url) }
+
+    func park(_ f: FeedbackPR) {
+        parked.insert(f.pr.url)
+        saveParked()
+    }
+
+    func unpark(_ f: FeedbackPR) {
+        parked.remove(f.pr.url)
+        saveParked()
+    }
+
+    private func saveParked() {
+        guard !DemoData.isOn else { return }
+        UserDefaults.standard.set(Array(parked), forKey: Self.parkedKey)
+    }
+
+    var yourMoveCount: Int { mySections.first { $0.group == .yours }?.prs.count ?? 0 }
 
     /// True for your own open PRs.
     func isMine(_ pr: PR) -> Bool { myPRs.contains { $0.pr.url == pr.url } }
@@ -391,7 +428,7 @@ final class ReviewViewModel: ObservableObject {
     var badgeCount: Int {
         MenuBarCount.count(yourTurn: reviewing.filter { $0.group == .yours && !isMuted($0) },
                            feedback: visibleFeedback.map(\.pr.url), mentions: visibleMentions,
-                           counting: .current)
+                           crew: crew.filter(\.session.needsMe).map(\.id), counting: .current)
     }
 
     func state(for pr: PR) -> ReviewState { reviews[pr.reviewKey] ?? .idle }
@@ -399,6 +436,11 @@ final class ReviewViewModel: ObservableObject {
     /// True if an older review of this PR exists (the PR has new activity since).
     func hasOlderReview(_ pr: PR) -> Bool {
         saved.contains { $0.pr.url == pr.url && $0.id != pr.reviewKey }
+    }
+
+    /// The newest review of an earlier version of this PR, whether or not it recorded its commit.
+    func olderReview(for pr: PR) -> SavedReview? {
+        saved.first { $0.pr.url == pr.url && $0.id != pr.reviewKey }
     }
 
     /// The newest earlier review of this PR that recorded its commit, when the PR has moved on
@@ -598,13 +640,6 @@ final class ReviewViewModel: ObservableObject {
         Store.writeMarkdown(pr, text)
     }
 
-    func delete(_ s: SavedReview) {
-        saved.removeAll { $0.id == s.id }
-        reviews[s.id] = nil
-        Store.save(saved)
-        Store.deleteMarkdown(s.pr)
-    }
-
     /// Notes for this exact version, else the newest saved review of the same PR.
     private func priorNotes(for pr: PR) -> String? {
         if case .done(let text) = state(for: pr) { return text }
@@ -681,22 +716,168 @@ final class ReviewViewModel: ObservableObject {
         launchTerminal(pr, mode: mode)
     }
 
+    /// The next step on one of my PRs, from its move and my commands; Claude Code only.
+    func myPRAction(for pr: PR) -> MyPRAction? {
+        guard Agent.current == .claude, let f = myPRs.first(where: { $0.pr.url == pr.url }) else { return nil }
+        return MyPRAction.for(f, feedbackCommand: ClaudeSettings.myPRCommand(for: pr.url),
+                              mergeCommand: ClaudeSettings.mergeCommand(for: pr.url))
+    }
+
+    /// Runs `myPRAction` in the checkout of the PR's branch. With no such checkout nothing opens: the
+    /// command is copied instead, since starting it anywhere else would commit in the wrong place.
+    func runMyPRAction(_ pr: PR) {
+        guard let action = myPRAction(for: pr), let f = myPRs.first(where: { $0.pr.url == pr.url }) else { return }
+        terminalNotice = nil
+        Task {
+            if let branch = f.branch, let path = await Backend.checkout(of: branch, repo: pr.repository.nameWithOwner) {
+                launchTerminal(pr, mode: .inCheckout(command: action.command, path: path))
+            } else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(action.command, forType: .string)
+                terminalNotice = "No local checkout of \(f.branch ?? "this PR's branch"), so nothing was opened. "
+                    + "The command is copied: run it where you have the branch."
+            }
+        }
+    }
+
+    /// A native alert, so it also shows when a notification's Verify fixes starts the session with
+    /// the panel closed. Cancel is the default; Show session (third) only when a session is listed.
+    private func askSecondSession(_ pr: PR, _ reason: String, canShow: Bool) -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.messageText = "A Claude session is already open on #\(pr.number)"
+        alert.informativeText = reason + "\n\nTwo sessions in one checkout can overwrite each other's edits "
+            + "and draft duplicate replies."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Open anyway")
+        if canShow { alert.addButton(withTitle: "Show session") }
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal()
+    }
+
+    /// Reads the crew again: local and cheap, so it runs every `Crew.pollInterval` and after each
+    /// refresh. Claude Code only; a failed read keeps the last list.
+    func refreshCrew() async {
+        guard Agent.current == .claude else { allCrew = []; return }
+        guard let fresh = DemoData.isOn ? DemoData.crew() : await Backend.crew(repos: RepoList.load(), myPRs: myPRs)
+        else { return }
+        for item in Crew.newlyWaiting(fresh, before: crewWaiting) { Notifier.crew(item, pr: pr(for: item)) }
+        crewWaiting = Set(fresh.filter(\.session.needsMe).map(\.id))
+        if fresh != allCrew { allCrew = fresh }
+    }
+
+    /// The crew session on this PR, one waiting on me first; nil when none.
+    func crewItem(for pr: PR) -> CrewItem? {
+        let mine = crew.filter {
+            $0.prNumber == pr.number && $0.repo.lowercased() == pr.repository.nameWithOwner.lowercased()
+        }
+        return mine.first { $0.session.needsMe } ?? mine.first
+    }
+
+    /// The PR a crew session works on, if the app lists it.
+    func pr(for item: CrewItem) -> PR? {
+        guard let n = item.prNumber else { return nil }
+        let match = { (p: PR) in p.number == n && p.repository.nameWithOwner.lowercased() == item.repo.lowercased() }
+        return myPRs.first { match($0.pr) }?.pr ?? reviewing.first { match($0.pr) }?.pr
+    }
+
+    /// Stops a session (`Backend.stop`); its conversation is kept, so it can be resumed. A terminal
+    /// session at work is asked about first: ending it mid-task can leave half-made edits.
+    func stop(_ item: CrewItem) {
+        guard !DemoData.isOn else { return }
+        if !item.session.background, item.session.working {
+            let alert = NSAlert()
+            alert.messageText = "Stop \(item.session.displayName)? It's working."
+            alert.informativeText = "Its conversation is kept (claude --resume), but an edit it's making may be left half done."
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Stop")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
+        Task {
+            if !(await Backend.stop(item.session)) {
+                error = "Couldn't stop \(item.session.displayName). Try `claude stop \(item.session.id)` in a terminal."
+            }
+            await refreshCrew()
+        }
+    }
+
+    /// Brings a session to the front: a background one with `claude attach`, a terminal one by
+    /// selecting its tab in iTerm2 or Terminal. Other terminals can't be searched, so it says where.
+    func show(_ item: CrewItem) {
+        guard !DemoData.isOn else { return }
+        if item.session.background { return attach(item) }
+        terminalNotice = nil
+        Task {
+            let home = (item.session.cwd as NSString).abbreviatingWithTildeInPath
+            if !(await Backend.reveal(item.session)) {
+                terminalNotice = "Couldn't find \(item.session.displayName)'s window (iTerm2, Terminal and VS Code can be "
+                    + "found). It runs in \(home)\(item.session.pid.map { ", pid \($0)" } ?? "")."
+            } else if item.session.host == .vscode {
+                terminalNotice = "Brought VS Code's window for \(home) to the front: \(item.session.displayName) is in its Claude Code panel."
+            }
+        }
+    }
+
+    /// `claude attach` for a background session, in the chosen terminal.
+    func attach(_ item: CrewItem) {
+        terminalNotice = nil
+        Task {
+            do {
+                if let command = try await Backend.attach(item.session) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    terminalNotice = "Command copied. Paste it into any terminal to open the session."
+                }
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
     /// Your Verify command (Settings › Terminal) in the PR's worktree.
     func verifyInTerminal(_ pr: PR) {
         guard let command = ClaudeSettings.verifyCommand(for: pr.url) else { return }
         launchTerminal(pr, mode: .verify(command: command))
     }
 
+    /// Opens the session, after asking first when one is already open on this PR: two sessions in
+    /// one checkout overwrite each other's edits and draft duplicate replies. The crew is read again
+    /// first, so the check is never 15 seconds stale.
     private func launchTerminal(_ pr: PR, mode: Backend.TerminalMode) {
         terminalNotice = nil
+        // Recorded at the click, before anything waits: the terminal takes seconds to appear, and a
+        // second click meanwhile must find this one.
+        let previous = launchedAt[pr.url]
+        launchedAt[pr.url] = Date()
         Task {
+            await refreshCrew()
+            let repo = pr.repository.nameWithOwner
+            if let open = Crew.openSession(onPR: pr.number, repo: repo, crew: allCrew, launchedAt: previous) {
+                let session = Crew.session(onPR: pr.number, repo: repo, crew: allCrew)
+                switch askSecondSession(pr, open, canShow: session != nil) {
+                case .alertSecondButtonReturn:
+                    break
+                case .alertThirdButtonReturn:
+                    launchedAt[pr.url] = previous
+                    if let session { show(session) }
+                    return
+                default:
+                    launchedAt[pr.url] = previous
+                    return
+                }
+            }
+            let opening = "Opening a session in \(TerminalApp.chosen.name)…"
+            if TerminalApp.chosen != .copy { terminalNotice = opening }
             do {
                 if let command = try await Backend.openInTerminal(pr, mode: mode) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(command, forType: .string)
                     terminalNotice = "Command copied. Paste it into any terminal to start the session."
+                } else if terminalNotice == opening {
+                    terminalNotice = nil
                 }
             } catch {
+                if terminalNotice == opening { terminalNotice = nil }
                 self.error = error.localizedDescription
             }
         }

@@ -103,6 +103,8 @@ func sh(_ command: String, input: String? = nil) async throws -> String {
         if running.isCancelled { throw CancellationError() }
         guard status == 0 else {
             // Some tools (claude, gh api) report the reason on stdout; keep both, stderr first.
+            // stderr is short in practice and kept whole; stdout only by its tail, for display
+            // (it can start mid-JSON, so don't parse it).
             let err = String(decoding: errBytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             let tail = String(out.suffix(2000)).trimmingCharacters(in: .whitespacesAndNewlines)
             throw ShellError(code: status, stderr: [err, tail].filter { !$0.isEmpty }.joined(separator: "\n"))

@@ -162,19 +162,22 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             let detached: Bool
             /// The checked-out branch, such as `refs/heads/main`; nil when detached.
             var branch: String? = nil
+            /// The checked-out commit.
+            var head: String? = nil
         }
 
         /// Parses `git worktree list --porcelain`: blocks of `worktree <path>`, `HEAD <sha>`, then
         /// `detached` or `branch <ref>`, separated by blank lines. Pure, for tests.
         static func parseList(_ porcelain: String) -> [Listed] {
             porcelain.components(separatedBy: "\n\n").compactMap { block in
-                var path: String?, detached = false, branch: String?
+                var path: String?, detached = false, branch: String?, head: String?
                 for line in block.split(separator: "\n").map(String.init) {
                     if line.hasPrefix("worktree ") { path = String(line.dropFirst("worktree ".count)) }
+                    else if line.hasPrefix("HEAD ") { head = String(line.dropFirst("HEAD ".count)) }
                     else if line == "detached" { detached = true }
                     else if line.hasPrefix("branch ") { branch = String(line.dropFirst("branch ".count)) }
                 }
-                return path.map { Listed(path: $0, detached: detached, branch: branch) }
+                return path.map { Listed(path: $0, detached: detached, branch: branch, head: head) }
             }
         }
 

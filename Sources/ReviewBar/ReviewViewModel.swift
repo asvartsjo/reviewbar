@@ -212,13 +212,16 @@ final class ReviewViewModel: ObservableObject {
 
     static let cleanupInterval: TimeInterval = 1800
 
-    /// At most every 30 minutes: which of your worktrees can go. Demo mode shows `DemoData.cleanup`.
+    /// At most every 30 minutes: which of your worktrees can go. A failed lookup keeps the previous
+    /// list and retries on the next refresh. Demo mode shows `DemoData.cleanup`.
     private func refreshCleanup() {
         guard !DemoData.isOn else { cleanup = DemoData.cleanup(); return }
         if let last = cleanupAt, Date().timeIntervalSince(last) < Self.cleanupInterval { return }
         cleanupAt = Date()
         let repos = RepoList.load()
-        Task { cleanup = await Backend.cleanupCandidates(repos: repos) }
+        Task {
+            if let found = await Backend.cleanupCandidates(repos: repos) { cleanup = found } else { cleanupAt = nil }
+        }
     }
 
     /// A Claude session runs in this worktree, so removing it would pull the folder from under it.

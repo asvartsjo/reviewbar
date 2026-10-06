@@ -235,4 +235,38 @@ struct MentionSnippetTests {
     @Test func snippetIsShort() {
         #expect(Backend.snippet(String(repeating: "a", count: 300)).count == 140)
     }
+
+    @Test func ownCommentIsNotAMention() {
+        #expect(!Backend.isMention("Thanks @atanasfn, fixed", author: "atanasfn", me: "AtanasFN", team: false))
+    }
+
+    @Test func latestCommentMustMentionYou() {
+        #expect(Backend.isMention("@atanasfn can you check?", author: "lina", me: "atanasfn", team: false))
+        #expect(!Backend.isMention("Re-checked, all good", author: "lina", me: "atanasfn", team: false))
+        #expect(!Backend.isMention("mail me at x@atanasfn.se", author: "lina", me: "atanasfn", team: false))
+        #expect(!Backend.isMention(nil, author: "lina", me: "atanasfn", team: false))
+    }
+
+    @Test func yourReplyDoesNotHideTheMention() {
+        let mention = Backend.MentionPost(author: "SimonNord", body: "@atanasfn kan du kolla?", url: "u1", at: "2026-10-06T08:37:35Z")
+        let reply = Backend.MentionPost(author: "atanasfn", body: "@SimonNord tack", url: "u2", at: "2026-10-06T09:00:00Z")
+        #expect(Backend.newestMention(in: [mention, reply], me: "atanasfn", team: false, since: "2026-09-29T00:00:00Z") == mention)
+    }
+
+    @Test func mentionOlderThanSinceIsGone() {
+        let old = Backend.MentionPost(author: "ronnyalex", body: "@atanasfn ?", url: "u", at: "2026-09-04T07:10:40Z")
+        let comment = Backend.MentionPost(author: "SimonNord", body: "Fixed", url: "u2", at: "2026-10-06T08:40:00Z")
+        #expect(Backend.newestMention(in: [old, comment], me: "atanasfn", team: false, since: "2026-09-29T00:00:00Z") == nil)
+    }
+
+    @Test func newestMentionWins() {
+        let a = Backend.MentionPost(author: "lina", body: "@atanasfn one", url: "a", at: "2026-10-01T10:00:00Z")
+        let b = Backend.MentionPost(author: "omar", body: "@atanasfn two", url: "b", at: "2026-10-02T10:00:00Z")
+        #expect(Backend.newestMention(in: [b, a], me: "atanasfn", team: false, since: "2026-09-29T00:00:00Z") == b)
+    }
+
+    @Test func teamMentionNeedsATeamHandle() {
+        #expect(Backend.isMention("@Teachiq/frontend please look", author: "lina", me: "atanasfn", team: true))
+        #expect(!Backend.isMention("@lina please look", author: "lina", me: "atanasfn", team: true))
+    }
 }

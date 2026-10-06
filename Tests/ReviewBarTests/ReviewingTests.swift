@@ -135,6 +135,26 @@ struct ReviewingTests {
         #expect(Backend.isForYou("Mailed someone@example.com about it", me: "me"))
     }
 
+    @Test func mentionsInCodeOrQuotesDontCount() {
+        #expect(Backend.isForYou("Moved it to a `@Published` var", me: "me"))
+        #expect(Backend.isForYou("Done:\n```swift\n@MainActor func f() {}\n```", me: "me"))
+        #expect(Backend.isForYou("> @author could you rename it?\n\nRenamed", me: "me"))
+        #expect(!Backend.isForYou("`x` fixed, @lina FYI", me: "me"))
+    }
+
+    @Test func theAuthorQuotingCodeToMeIsMyTurn() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED")],
+                             comments: [comment("author", "2026-09-12T14:00:00Z", body: "Now a `@Published` var")]))
+        #expect(r.turn == .yours(.authorReplied))
+    }
+
+    @Test func aPushAfterTheAuthorsReplyIsNewCommits() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
+                             comments: [comment("me", "2026-09-12T10:00:00Z"), comment("author", "2026-09-12T14:00:00Z")],
+                             suitesCreatedAt: ["2026-09-12T15:00:00Z"]))
+        #expect(r.turn == .yours(.newCommits))
+    }
+
     @Test func theAuthorsCommentBeforeMyReviewIsAlreadySeen() throws {
         let r = try one(node(1, reviews: [review("me", "COMMENTED")],
                              comments: [comment("author", "2026-09-09T10:00:00Z")]))

@@ -441,7 +441,7 @@ enum Backend {
           } } }
           reviews(last: 30) { nodes { author { login __typename } state submittedAt commit { oid } } }
           viewerLatestReview { state submittedAt commit { oid } }
-          comments(last: 5) { nodes { author { login __typename } createdAt body } }
+          comments(last: 20) { nodes { author { login __typename } createdAt body } }
           reviewThreads(last: 50) { nodes {
             isResolved isOutdated
             opener: comments(first: 1) { nodes { author { login __typename } createdAt } }
@@ -611,10 +611,14 @@ enum Backend {
         }
     }
 
-    /// A conversation comment written to you: it mentions you, or mentions nobody.
+    /// A conversation comment written to you: it mentions you, or mentions nobody. Code and quoted
+    /// lines don't count, so "`@Published`" or a quoted "@author could you…" mentions nobody.
     /// "@coderabbitai Fixed in …" or "@lina FYI" is to someone else. Pure, for tests.
     static func isForYou(_ body: String?, me: String) -> Bool {
-        let mentions = (body ?? "").matches(of: /(?:^|[^\w\/.])@([A-Za-z0-9-]+)/).map { $0.1.lowercased() }
+        let prose = (body ?? "").replacing(/```[\s\S]*?```|`[^`\n]*`/, with: " ")
+            .split(separator: "\n").filter { !$0.drop(while: \.isWhitespace).hasPrefix(">") }
+            .joined(separator: "\n")
+        let mentions = prose.matches(of: /(?:^|[^\w\/.])@([A-Za-z0-9-]+)/).map { $0.1.lowercased() }
         return mentions.isEmpty || mentions.contains(me.lowercased())
     }
 

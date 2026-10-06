@@ -460,6 +460,9 @@ struct FeedbackPR: Identifiable, Hashable {
     var hasConflict: Bool { mergeable == "CONFLICTING" }
     /// No checks at all (`nil`: a repo without CI) counts as green only when GitHub says nothing
     /// blocks the merge: a required check whose workflow skipped this PR also leaves no checks.
+    /// Right after a push, in a repo with CI but no required checks, GitHub reports CLEAN with no
+    /// checks for about 2 seconds before they register. A refresh landing there shows the row ready
+    /// until the next one; the notification is keyed by the approval, so it doesn't fire twice.
     var readyToMerge: Bool {
         decision == "APPROVED" && mergeable == "MERGEABLE"
             && (checks == "SUCCESS" || (checks == nil && mergeState == "CLEAN"))

@@ -137,7 +137,7 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         static let nextToCloneKey = "worktreesNextToClone"
 
         /// Worktrees live under Application Support, never inside your clone. With `nextToClone`
-        /// (Settings › Terminal) they go beside it instead: ~/code/gauss → ~/code/gauss-worktrees/pr-7.
+        /// (Settings › Terminal) they go beside it instead: ~/code/storefront → ~/code/storefront-worktrees/pr-7.
         static func forPR(_ pr: PR, repoFolder: String,
                           nextToClone: Bool = UserDefaults.standard.bool(forKey: nextToCloneKey)) -> Worktree {
             forPR(pr.number, repo: pr.repository.nameWithOwner, repoFolder: repoFolder, nextToClone: nextToClone)

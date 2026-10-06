@@ -21,8 +21,7 @@ enum ClaudeSettings {
         + "For each thread I started, check the commits since then and say: fixed / partly / not fixed / "
         + "author disagreed (with the reason). End with whether it's OK to approve, and ask me before "
         + "drafting any reply."
-    /// My own skills by default: this build is for my workflow only (plan, Track B).
-    static let myPRCommandKey = "myPRCommand", myPRCommandDefault = "/pr-feedback {url}"
+    static let myPRCommandKey = "myPRCommand", myPRCommandDefault = ""
     static let mergeCommandDefault = "can I merge {url}?"
 
     private static func value(_ key: String, _ fallback: String, allowed: [String]) -> String {

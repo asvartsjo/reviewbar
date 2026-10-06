@@ -7,7 +7,7 @@ struct WorktreeCleanupTests {
 
     // MARK: Which worktrees are ours
 
-    private let clone = "/Users/me/TEACHIQ/gauss"
+    private let clone = "/Users/me/code/storefront"
 
     private func porcelain(_ entries: [(String, String)]) -> String {
         entries.map { "worktree \($0.0)\nHEAD abc\n\($0.1)" }.joined(separator: "\n\n") + "\n"
@@ -15,14 +15,14 @@ struct WorktreeCleanupTests {
 
     @Test func parsesWorktreeList() {
         let list = Worktree.parseList(porcelain([(clone, "branch refs/heads/development"),
-                                                 ("/Users/me/TEACHIQ/gauss-worktrees/pr-7", "detached")]))
+                                                 ("/Users/me/code/storefront-worktrees/pr-7", "detached")]))
         #expect(list == [.init(path: clone, detached: false, branch: "refs/heads/development"),
-                         .init(path: "/Users/me/TEACHIQ/gauss-worktrees/pr-7", detached: true)])
+                         .init(path: "/Users/me/code/storefront-worktrees/pr-7", detached: true)])
     }
 
     @Test func onlyDetachedPRFoldersWhereReviewBarPutsThemAreOurs() {
-        let beside = "/Users/me/TEACHIQ/gauss-worktrees"
-        let support = Worktree.forPR(9, repo: "o/gauss", repoFolder: clone, nextToClone: false).path
+        let beside = "/Users/me/code/storefront-worktrees"
+        let support = Worktree.forPR(9, repo: "o/storefront", repoFolder: clone, nextToClone: false).path
         let list = Worktree.parseList(porcelain([
             (clone, "branch refs/heads/development"),
             ("\(beside)/pr-7", "detached"),                    // ours, next to the clone
@@ -33,7 +33,7 @@ struct WorktreeCleanupTests {
             ("/Users/me/elsewhere/pr-10", "detached"),         // pr-N, but not where ReviewBar puts it
             ("\(beside)/pr-x", "detached"),
         ]))
-        #expect(Worktree.ours(list, repo: "o/gauss", repoFolder: clone).map(\.number) == [7, 9])
+        #expect(Worktree.ours(list, repo: "o/storefront", repoFolder: clone).map(\.number) == [7, 9])
     }
 
     @Test func parsesPRStates() {

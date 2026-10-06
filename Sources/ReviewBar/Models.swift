@@ -299,7 +299,7 @@ struct ReviewingDetail: Equatable {
             case open, resolved
         }
 
-        /// Icons from the pr-review skill's Severity section, most severe first.
+        /// Severity icons a review comment may start with, most severe first.
         /// ReviewDoc.Severity is the app's own review format, not this one.
         enum Severity: Int, CaseIterable, Comparable {
             case severe, high, medium, low, question
@@ -314,7 +314,7 @@ struct ReviewingDetail: Equatable {
                 }
             }
 
-            /// The skill's rule: only these block a merge.
+            /// Only these block a merge.
             var isBlocking: Bool { self == .severe || self == .high }
 
             /// From a title's leading icon. Compares the first Unicode scalar, so "❓" matches
@@ -328,7 +328,7 @@ struct ReviewingDetail: Equatable {
             static func < (a: Severity, b: Severity) -> Bool { a.rawValue < b.rawValue }
         }
 
-        /// Nil for comments that don't start with one of the skill's icons.
+        /// Nil for comments that don't start with one of these icons.
         var severity: Severity? { Severity(title: snippet) }
 
         /// The snippet without its leading severity icon, which the app draws as a symbol instead.

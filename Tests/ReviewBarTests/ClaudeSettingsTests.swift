@@ -71,10 +71,12 @@ final class ClaudeSettingsTests {
         #expect(ClaudeSettings.reviewCommand(for: url) == nil)
     }
 
-    @Test func myPRCommandDefaultsToMySkillAndBlankTurnsItOff() {
+    @Test func myPRCommandIsOffByDefault() {
         let url = "https://github.com/o/r/pull/7"
-        #expect(ClaudeSettings.myPRCommand(for: url) == "/pr-feedback \(url)")
+        #expect(ClaudeSettings.myPRCommand(for: url) == nil)
         #expect(ClaudeSettings.mergeCommand(for: url) == "can I merge \(url)?")
+        UserDefaults.standard.set("/pr-feedback {url}", forKey: ClaudeSettings.myPRCommandKey)
+        #expect(ClaudeSettings.myPRCommand(for: url) == "/pr-feedback \(url)")
         UserDefaults.standard.set("", forKey: ClaudeSettings.myPRCommandKey)
         #expect(ClaudeSettings.myPRCommand(for: url) == nil)
     }

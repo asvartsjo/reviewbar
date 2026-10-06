@@ -201,8 +201,8 @@ enum Backend {
         return text.count > 140 ? String(text.prefix(139)) + "…" : text
     }
 
-    /// A review comment's first real line, bold dropped: "🟡 LOW — title" for the pr-review skill's
-    /// comments, whose Description / Consequence / Suggested fix paragraphs follow. Pure, for tests.
+    /// A review comment's first real line, bold dropped: "🟡 LOW — title" for a severity-tagged
+    /// comment, whose Description / Consequence / Suggested fix paragraphs follow. Pure, for tests.
     static func threadTitle(_ body: String) -> String {
         let first = body.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }

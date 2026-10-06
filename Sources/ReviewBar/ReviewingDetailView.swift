@@ -192,7 +192,7 @@ struct ReviewingDetailBox: View {
     }
 }
 
-/// A review thread's severity from your pr-review skill, drawn as a symbol instead of its emoji.
+/// A review thread's severity, from the icon its first comment starts with, drawn as a symbol instead of its emoji.
 struct SeverityIcon: View {
     let severity: ReviewingDetail.MyThread.Severity
 

@@ -436,7 +436,9 @@ enum Backend {
         nodes { ... on PullRequest {
           number title url isDraft updatedAt createdAt headRefOid
           repository { nameWithOwner } author { login }
-          commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
+          commits(last: 1) { nodes { commit {
+            committedDate checkSuites(first: 10) { nodes { createdAt } } statusCheckRollup { state }
+          } } }
           reviews(last: 30) { nodes { author { login __typename } state submittedAt commit { oid } } }
           viewerLatestReview { state submittedAt commit { oid } }
           comments(last: 5) { nodes { author { login __typename } createdAt body } }
@@ -533,7 +535,7 @@ enum Backend {
                                checks: head?.statusCheckRollup?.state,
                                latestAt: latestAt.isEmpty ? n.updatedAt : latestAt,
                                lastOtherAt: latestAt.isEmpty ? nil : latestAt,
-                               headCommittedAt: head?.committedDate,
+                               headPushedAt: head.flatMap { $0.checkSuites?.items.map(\.createdAt).min() ?? $0.committedDate },
                                myLastCommentAt: myCommentAt.isEmpty ? nil : myCommentAt,
                                authorLastCommentAt: authorCommentAt.isEmpty ? nil : authorCommentAt)
         }
@@ -583,8 +585,10 @@ enum Backend {
             let commit: Commit
             struct Commit: Decodable {
                 let committedDate: String?
+                let checkSuites: Nodes<Suite>?
                 let statusCheckRollup: Rollup?
             }
+            struct Suite: Decodable { let createdAt: String }
             struct Rollup: Decodable { let state: String }
         }
         struct Review: Decodable {

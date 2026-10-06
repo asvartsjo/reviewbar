@@ -33,14 +33,16 @@ struct ReviewingTests {
 
     private func node(_ number: Int, reviews: [String] = [], viewerLatest: String = "null", comments: [String] = [],
                       threads: [String] = [], checks: String? = "SUCCESS",
-                      createdAt: String = "2026-08-20T00:00:00Z", headCommittedAt: String? = nil) -> String {
+                      createdAt: String = "2026-08-20T00:00:00Z", headCommittedAt: String? = nil, suitesCreatedAt: [String] = []) -> String {
         let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
         let committed = headCommittedAt.map { #""\#($0)""# } ?? "null"
+        let suites = suitesCreatedAt.map { #"{"createdAt": "\#($0)"}"# }.joined(separator: ",")
         return """
         {"number": \(number), "title": "PR \(number)", "url": "https://github.com/o/r/pull/\(number)",
          "isDraft": false, "updatedAt": "2026-09-01T00:00:00Z", "createdAt": "\(createdAt)",
          "headRefOid": "\(head)", "repository": {"nameWithOwner": "o/r"}, "author": {"login": "author"},
-         "commits": {"nodes": [{"commit": {"committedDate": \(committed), "statusCheckRollup": \(rollup)}}]},
+         "commits": {"nodes": [{"commit": {"committedDate": \(committed), "checkSuites": {"nodes": [\(suites)]},
+                                           "statusCheckRollup": \(rollup)}}]},
          "reviews": {"nodes": [\(reviews.joined(separator: ","))]}, "viewerLatestReview": \(viewerLatest),
          "comments": {"nodes": [\(comments.joined(separator: ","))]},
          "reviewThreads": {"nodes": [\(threads.joined(separator: ","))]}}
@@ -83,6 +85,15 @@ struct ReviewingTests {
         let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
                              comments: [comment("me", "2026-09-10T12:00:00Z")],
                              headCommittedAt: "2026-09-11T10:00:00Z"))
+        #expect(r.turn == .yours(.newCommits))
+    }
+
+    @Test func aCommitPushedAfterMyCommentIsMineEvenIfMadeBefore() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
+                             comments: [comment("me", "2026-09-11T10:30:00Z")],
+                             headCommittedAt: "2026-09-11T10:00:00Z",
+                             suitesCreatedAt: ["2026-09-11T11:00:05Z", "2026-09-11T11:00:01Z"]))
+        #expect(r.headPushedAt == "2026-09-11T11:00:01Z")
         #expect(r.turn == .yours(.newCommits))
     }
 

@@ -77,8 +77,9 @@ struct ReviewingPR: Identifiable, Hashable {
     /// Like `latestAt`, but nil when nobody else has reviewed or commented (`latestAt` then
     /// falls back to the PR's `updatedAt`, which your own comments move).
     var lastOtherAt: String? = nil
-    /// When the head commit was made. GitHub no longer reports when it was pushed.
-    var headCommittedAt: String? = nil
+    /// When the head commit was pushed, as near as GitHub tells: its first CI check suite is
+    /// created on the push. Without CI, when the commit was made (GitHub no longer reports pushes).
+    var headPushedAt: String? = nil
     /// Your latest comment in the PR's conversation (outside review threads).
     var myLastCommentAt: String? = nil
     /// The author's latest comment in the PR's conversation (outside review threads).
@@ -133,11 +134,11 @@ struct ReviewingPR: Identifiable, Hashable {
     }
 
     /// You commented in the conversation after the head commit and after your last review
-    /// ("CI is green, before I approve could you…"), so you have seen the new commits. It goes
-    /// by commit time, so a commit made before your comment but pushed after it reads as seen;
-    /// the push notification still fires for it.
+    /// ("CI is green, before I approve could you…"), so you have seen the new commits. In a repo
+    /// without CI it goes by commit time, so a commit made before your comment but pushed after
+    /// it reads as seen; the push notification still fires for it.
     var commentedOnHead: Bool {
-        guard let c = myLastCommentAt, let head = headCommittedAt else { return false }
+        guard let c = myLastCommentAt, let head = headPushedAt else { return false }
         return c > head && c > (myLastReview?.at ?? "")
     }
 

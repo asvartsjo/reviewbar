@@ -436,10 +436,10 @@ enum Backend {
         nodes { ... on PullRequest {
           number title url isDraft updatedAt createdAt headRefOid
           repository { nameWithOwner } author { login }
-          commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+          commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
           reviews(last: 30) { nodes { author { login __typename } state submittedAt commit { oid } } }
           viewerLatestReview { state submittedAt commit { oid } }
-          comments(last: 5) { nodes { author { login __typename } createdAt } }
+          comments(last: 5) { nodes { author { login __typename } createdAt body } }
           reviewThreads(last: 50) { nodes {
             isResolved isOutdated
             opener: comments(first: 1) { nodes { author { login __typename } createdAt } }
@@ -498,7 +498,14 @@ enum Backend {
             }
 
             mine = submitted(n.viewerLatestReview, after: mine) ?? mine
-            for c in n.comments?.items ?? [] where isOther(c.author) { latestAt = max(latestAt, c.createdAt ?? "") }
+            var myCommentAt = "", authorCommentAt = ""
+            for c in n.comments?.items ?? [] {
+                let at = c.createdAt ?? ""
+                if c.author?.login == me { myCommentAt = max(myCommentAt, at) }
+                guard isOther(c.author) else { continue }
+                latestAt = max(latestAt, at)
+                if c.author?.login == author, isForYou(c.body, me: me) { authorCommentAt = max(authorCommentAt, at) }
+            }
 
             // `waiting` is the Replies rule (`parseReplies`), with bots left out.
             var waiting = 0, opened = 0, resolved = 0, outdated = 0
@@ -519,12 +526,16 @@ enum Backend {
                         updatedAt: n.updatedAt, repository: n.repository,
                         author: PR.Author(login: author), headRefOid: n.headRefOid)
             pr.createdAt = n.createdAt
+            let head = n.commits.items.first?.commit
             return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: mine == nil && dismissed,
                                waiting: waiting, myThreads: opened, resolved: resolved, outdated: outdated,
                                verdicts: verdicts.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) },
-                               checks: n.commits.items.first?.commit.statusCheckRollup?.state,
+                               checks: head?.statusCheckRollup?.state,
                                latestAt: latestAt.isEmpty ? n.updatedAt : latestAt,
-                               lastOtherAt: latestAt.isEmpty ? nil : latestAt)
+                               lastOtherAt: latestAt.isEmpty ? nil : latestAt,
+                               headCommittedAt: head?.committedDate,
+                               myLastCommentAt: myCommentAt.isEmpty ? nil : myCommentAt,
+                               authorLastCommentAt: authorCommentAt.isEmpty ? nil : authorCommentAt)
         }
         .sorted { $0.latestAt > $1.latestAt }
     }
@@ -570,7 +581,10 @@ enum Backend {
         }
         struct CommitNode: Decodable {
             let commit: Commit
-            struct Commit: Decodable { let statusCheckRollup: Rollup? }
+            struct Commit: Decodable {
+                let committedDate: String?
+                let statusCheckRollup: Rollup?
+            }
             struct Rollup: Decodable { let state: String }
         }
         struct Review: Decodable {
@@ -589,7 +603,15 @@ enum Backend {
         struct Comment: Decodable {
             let author: GitHubUser?
             let createdAt: String?
+            let body: String?      // conversation comments only
         }
+    }
+
+    /// A conversation comment written to you: it mentions you, or mentions nobody.
+    /// "@coderabbitai Fixed in …" or "@lina FYI" is to someone else. Pure, for tests.
+    static func isForYou(_ body: String?, me: String) -> Bool {
+        let mentions = (body ?? "").matches(of: /(?:^|[^\w\/.])@([A-Za-z0-9-]+)/).map { $0.1.lowercased() }
+        return mentions.isEmpty || mentions.contains(me.lowercased())
     }
 
     // MARK: Detail of a PR you review

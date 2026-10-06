@@ -77,6 +77,12 @@ struct ReviewingPR: Identifiable, Hashable {
     /// Like `latestAt`, but nil when nobody else has reviewed or commented (`latestAt` then
     /// falls back to the PR's `updatedAt`, which your own comments move).
     var lastOtherAt: String? = nil
+    /// When the head commit was made. GitHub no longer reports when it was pushed.
+    var headCommittedAt: String? = nil
+    /// Your latest comment in the PR's conversation (outside review threads).
+    var myLastCommentAt: String? = nil
+    /// The author's latest comment in the PR's conversation (outside review threads).
+    var authorLastCommentAt: String? = nil
     var id: String { pr.url }
 
     /// Someone else reviewed or commented after the snapshot, or the head moved. Pure, for tests.
@@ -106,11 +112,11 @@ struct ReviewingPR: Identifiable, Hashable {
     enum Turn: Equatable {
         case yours(Reason)
         case authors
-        /// You approved and nothing changed since.
+        /// You approved, and nothing changed since or you commented on what did.
         case done
     }
 
-    enum Reason: Equatable { case requested, reRequested, dismissed, newCommits, reply }
+    enum Reason: Equatable { case requested, reRequested, dismissed, newCommits, reply, authorReplied }
 
     /// Your last review was of an older commit. A review whose commit is gone counts too.
     /// Replying in a thread also creates a review on GitHub, so a reply after new commits
@@ -126,14 +132,31 @@ struct ReviewingPR: Identifiable, Hashable {
         return other > mine.at
     }
 
+    /// You commented in the conversation after the head commit and after your last review
+    /// ("CI is green, before I approve could you…"), so you have seen the new commits. It goes
+    /// by commit time, so a commit made before your comment but pushed after it reads as seen;
+    /// the push notification still fires for it.
+    var commentedOnHead: Bool {
+        guard let c = myLastCommentAt, let head = headCommittedAt else { return false }
+        return c > head && c > (myLastReview?.at ?? "")
+    }
+
+    /// The author commented in the conversation after your last review or comment.
+    var authorRepliedSinceYou: Bool {
+        guard let a = authorLastCommentAt,
+              let mine = [myLastReview?.at, myLastCommentAt].compactMap({ $0 }).max() else { return false }
+        return a > mine
+    }
+
     /// New commits or a reply in your threads since your review: something to verify.
     var verifyIsDue: Bool { hasNewCommits || waiting > 0 }
 
     var turn: Turn {
         if isRequested { return .yours(myLastReview == nil ? .requested : .reRequested) }
         if myReviewDismissed { return .yours(.dismissed) }
-        if hasNewCommits { return .yours(.newCommits) }
+        if hasNewCommits && !commentedOnHead { return .yours(.newCommits) }
         if waiting > 0 { return .yours(.reply) }
+        if authorRepliedSinceYou { return .yours(.authorReplied) }
         return myLastReview?.state == "APPROVED" ? .done : .authors
     }
 
@@ -184,6 +207,7 @@ struct ReviewingPR: Identifiable, Hashable {
         case .yours(.dismissed): "Your review was dismissed"
         case .yours(.newCommits): "New commits since your review"
         case .yours(.reply): nil   // the reply count below says it
+        case .yours(.authorReplied): "\(pr.author.login) replied"
         case .authors, .done:
             switch myLastReview?.state {
             case "APPROVED": "You approved"

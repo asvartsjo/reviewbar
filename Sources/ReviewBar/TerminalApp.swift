@@ -162,19 +162,22 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             let detached: Bool
             /// The checked-out branch, such as `refs/heads/main`; nil when detached.
             var branch: String? = nil
+            /// The checked-out commit.
+            var head: String? = nil
         }
 
         /// Parses `git worktree list --porcelain`: blocks of `worktree <path>`, `HEAD <sha>`, then
         /// `detached` or `branch <ref>`, separated by blank lines. Pure, for tests.
         static func parseList(_ porcelain: String) -> [Listed] {
             porcelain.components(separatedBy: "\n\n").compactMap { block in
-                var path: String?, detached = false, branch: String?
+                var path: String?, detached = false, branch: String?, head: String?
                 for line in block.split(separator: "\n").map(String.init) {
                     if line.hasPrefix("worktree ") { path = String(line.dropFirst("worktree ".count)) }
+                    else if line.hasPrefix("HEAD ") { head = String(line.dropFirst("HEAD ".count)) }
                     else if line == "detached" { detached = true }
                     else if line.hasPrefix("branch ") { branch = String(line.dropFirst("branch ".count)) }
                 }
-                return path.map { Listed(path: $0, detached: detached, branch: branch) }
+                return path.map { Listed(path: $0, detached: detached, branch: branch, head: head) }
             }
         }
 
@@ -189,6 +192,25 @@ enum TerminalApp: String, CaseIterable, Identifiable {
                 let candidates = [true, false].map { forPR(n, repo: repo, repoFolder: repoFolder, nextToClone: $0) }
                 return candidates.first { real($0.path) == real(w.path) }
             }
+        }
+
+        /// The working directories in `lsof -a -d cwd -Fn` output: its `n<path>` lines. Without root,
+        /// lsof lists only your own processes, which are the ones that matter here. Pure, for tests.
+        static func parseCwds(_ lsof: String) -> Set<String> {
+            Set(lsof.split(separator: "\n").filter { $0.hasPrefix("n") }.map { String($0.dropFirst()) })
+        }
+
+        /// The worktrees a process (a terminal tab, a Claude session, a dev server) is working in,
+        /// in the folder itself or below it. Removing one would leave that process in a deleted
+        /// folder. Case-insensitive like macOS volumes: git keeps the case the path was given in,
+        /// lsof reports the case on disk. Pure, for tests.
+        static func inUse(_ worktrees: [Worktree], cwds: Set<String>) -> Set<String> {
+            func real(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().path.lowercased() }
+            let dirs = cwds.map(real)
+            return Set(worktrees.map(\.path).filter { path in
+                let wt = real(path)
+                return dirs.contains { $0 == wt || $0.hasPrefix(wt + "/") }
+            })
         }
 
         /// Shell lines that remove this worktree and its ref only if nothing would be lost:

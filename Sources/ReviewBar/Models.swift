@@ -14,6 +14,8 @@ struct PR: Identifiable, Codable, Hashable {
     var createdAt: String? = nil
     /// CI state of the head commit, filled in with `headRefOid` for review requests.
     var checks: String? = nil
+    /// Other reviewers' current verdicts, filled in with `headRefOid` for review requests.
+    var verdicts: [ReviewingPR.Verdict]? = nil
 
     struct Repo: Codable, Hashable { let nameWithOwner: String }
     struct Author: Codable, Hashable { let login: String }
@@ -77,6 +79,13 @@ struct ReviewingPR: Identifiable, Hashable {
     /// Like `latestAt`, but nil when nobody else has reviewed or commented (`latestAt` then
     /// falls back to the PR's `updatedAt`, which your own comments move).
     var lastOtherAt: String? = nil
+    /// When the head commit was pushed, as near as GitHub tells: its first CI check suite is
+    /// created on the push. Without CI, when the commit was made (GitHub no longer reports pushes).
+    var headPushedAt: String? = nil
+    /// Your latest comment in the PR's conversation (outside review threads).
+    var myLastCommentAt: String? = nil
+    /// The author's latest comment in the PR's conversation (outside review threads).
+    var authorLastCommentAt: String? = nil
     var id: String { pr.url }
 
     /// Someone else reviewed or commented after the snapshot, or the head moved. Pure, for tests.
@@ -98,7 +107,7 @@ struct ReviewingPR: Identifiable, Hashable {
         let at: String
     }
 
-    struct Verdict: Hashable {
+    struct Verdict: Codable, Hashable {
         let login: String
         let state: String      // APPROVED or CHANGES_REQUESTED
     }
@@ -106,11 +115,11 @@ struct ReviewingPR: Identifiable, Hashable {
     enum Turn: Equatable {
         case yours(Reason)
         case authors
-        /// You approved and nothing changed since.
+        /// You approved, and nothing changed since or you commented on what did.
         case done
     }
 
-    enum Reason: Equatable { case requested, reRequested, dismissed, newCommits, reply }
+    enum Reason: Equatable { case requested, reRequested, dismissed, newCommits, reply, authorReplied }
 
     /// Your last review was of an older commit. A review whose commit is gone counts too.
     /// Replying in a thread also creates a review on GitHub, so a reply after new commits
@@ -126,14 +135,31 @@ struct ReviewingPR: Identifiable, Hashable {
         return other > mine.at
     }
 
+    /// You commented in the conversation after the head commit and after your last review
+    /// ("CI is green, before I approve could you…"), so you have seen the new commits. In a repo
+    /// without CI it goes by commit time, so a commit made before your comment but pushed after
+    /// it reads as seen; the push notification still fires for it.
+    var commentedOnHead: Bool {
+        guard let c = myLastCommentAt, let head = headPushedAt else { return false }
+        return c > head && c > (myLastReview?.at ?? "")
+    }
+
+    /// The author commented in the conversation after your last review or comment.
+    var authorRepliedSinceYou: Bool {
+        guard let a = authorLastCommentAt,
+              let mine = [myLastReview?.at, myLastCommentAt].compactMap({ $0 }).max() else { return false }
+        return a > mine
+    }
+
     /// New commits or a reply in your threads since your review: something to verify.
     var verifyIsDue: Bool { hasNewCommits || waiting > 0 }
 
     var turn: Turn {
         if isRequested { return .yours(myLastReview == nil ? .requested : .reRequested) }
         if myReviewDismissed { return .yours(.dismissed) }
-        if hasNewCommits { return .yours(.newCommits) }
+        if hasNewCommits && !commentedOnHead { return .yours(.newCommits) }
         if waiting > 0 { return .yours(.reply) }
+        if authorRepliedSinceYou { return .yours(.authorReplied) }
         return myLastReview?.state == "APPROVED" ? .done : .authors
     }
 
@@ -184,6 +210,7 @@ struct ReviewingPR: Identifiable, Hashable {
         case .yours(.dismissed): "Your review was dismissed"
         case .yours(.newCommits): "New commits since your review"
         case .yours(.reply): nil   // the reply count below says it
+        case .yours(.authorReplied): "\(pr.author.login) replied"
         case .authors, .done:
             switch myLastReview?.state {
             case "APPROVED": "You approved"
@@ -428,6 +455,8 @@ struct FeedbackPR: Identifiable, Hashable {
     var checks: String? = nil
     /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub still computing).
     var mergeable: String? = nil
+    /// GitHub's `mergeStateStatus`: CLEAN when nothing blocks the merge, BLOCKED, BEHIND and so on.
+    var mergeState: String? = nil
     /// A reviewer (not a bot) left a review, comment or thread, answered or not.
     var hasFeedback = false
     /// The PR's head branch name.
@@ -446,8 +475,8 @@ struct FeedbackPR: Identifiable, Hashable {
     func with(latestAt: String, latestBy: String) -> FeedbackPR {
         FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
                    latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable,
-                   hasFeedback: hasFeedback, branch: branch, lastCommitAt: lastCommitAt, approvals: approvals, botThreads: botThreads,
-                   reviewersRequested: reviewersRequested)
+                   mergeState: mergeState, hasFeedback: hasFeedback, branch: branch, lastCommitAt: lastCommitAt,
+                   approvals: approvals, botThreads: botThreads, reviewersRequested: reviewersRequested)
     }
 
     /// Nothing new: no unanswered feedback, no blocker, not ready to merge. Listed in My PRs,
@@ -456,7 +485,15 @@ struct FeedbackPR: Identifiable, Hashable {
 
     var checksFailing: Bool { checks == "FAILURE" || checks == "ERROR" }
     var hasConflict: Bool { mergeable == "CONFLICTING" }
-    var readyToMerge: Bool { decision == "APPROVED" && checks == "SUCCESS" && mergeable == "MERGEABLE" }
+    /// No checks at all (`nil`: a repo without CI) counts as green only when GitHub says nothing
+    /// blocks the merge: a required check whose workflow skipped this PR also leaves no checks.
+    /// Right after a push, in a repo with CI but no required checks, GitHub reports CLEAN with no
+    /// checks for about 2 seconds before they register. A refresh landing there shows the row ready
+    /// until the next one; the notification is keyed by the approval, so it doesn't fire twice.
+    var readyToMerge: Bool {
+        decision == "APPROVED" && mergeable == "MERGEABLE"
+            && (checks == "SUCCESS" || (checks == nil && mergeState == "CLEAN"))
+    }
 
     /// What blocks or unblocks the PR, most urgent first; nil when there's nothing to say.
     var status: String? {

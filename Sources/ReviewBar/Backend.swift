@@ -11,7 +11,31 @@ enum Backend {
     /// Headless reviews get no tools and no MCP servers: the diff is untrusted input
     /// and the model only needs to read the prompt.
     /// Tools are added per run: none, or read-only ones inside the PR's worktree.
-    static let headlessFlags = "-p --output-format text --strict-mcp-config"
+    /// No hooks run, so a hook a PR adds or edits never executes. CLAUDE.md and `.claude/rules/`
+    /// still load, from the worktree and from ~/.claude (see `projectSettingsFiles` for when not).
+    static let headlessFlags = #"-p --output-format text --strict-mcp-config --settings '{"disableAllHooks":true}'"#
+
+    /// Project settings in the review worktree can do more than hooks: `env` can point the API at
+    /// another server, and `apiKeyHelper` runs a command. When one exists the run loads user
+    /// settings only (`--setting-sources user`), which also drops the project's CLAUDE.md and rules.
+    static let projectSettingsFiles = [".claude/settings.json", ".claude/settings.local.json"]
+
+    static func hasProjectSettings(_ codebase: String) -> Bool {
+        projectSettingsFiles.contains { FileManager.default.fileExists(atPath: codebase + "/" + $0) }
+    }
+
+    /// No code spans: ReviewPage applies italics between backticks only, so they would break it.
+    static let projectSettingsNote = "*This checkout has its own Claude settings (.claude/settings.json or "
+        + "settings.local.json), so the review ran without them and without the project's CLAUDE.md and rules.*"
+
+    /// `text` with `note` as its own paragraph after the VERDICT line, or first when there is none.
+    /// Pure, for tests.
+    static func withNote(_ text: String, _ note: String) -> String {
+        let lines = text.components(separatedBy: "\n")
+        guard let first = lines.first, first.uppercased().hasPrefix("VERDICT:") else { return note + "\n\n" + text }
+        return first + "\n\n" + note + "\n\n" + lines.dropFirst().joined(separator: "\n")
+            .trimmingCharacters(in: .newlines)
+    }
 
     /// How reviews are written and worded. Editable in Settings › Review prompt; the rules,
     /// verdict line and finding format around it stay fixed.
@@ -360,8 +384,8 @@ enum Backend {
         }
     }
 
-    /// Fills in each PR's head commit with one read-only GraphQL query.
-    /// Best effort: if it fails, PRs keep `updatedAt`-based review keys.
+    /// Fills in each PR's head commit, CI and other reviewers' verdicts with one read-only GraphQL
+    /// query. Best effort: if it fails, PRs keep `updatedAt`-based review keys.
     private static func withHeadCommits(_ prs: [PR]) async -> [PR] {
         guard !prs.isEmpty else { return prs }
         let enc = JSONEncoder()
@@ -370,31 +394,47 @@ enum Backend {
             guard let data = try? enc.encode(prs[i].url), let url = String(data: data, encoding: .utf8)
             else { return nil }
             return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid "
-                + "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }"
+                + "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } "
+                + "reviews(last: 30) { nodes { author { login __typename } state } } } }"
         }
-        let query = "query { \(fields.joined(separator: " ")) }"
+        let query = "query { viewer { login } \(fields.joined(separator: " ")) }"
         guard let out = try? await sh("gh api graphql -f query=\(q(query))") else { return prs }
         return applyHeadCommits(prs, Data(out.utf8))
     }
 
-    /// The `withHeadCommits` response (aliases p0, p1, … by index) → head commit and CI per PR.
-    /// Unchanged PRs when it doesn't decode. Pure, for tests.
+    /// The `withHeadCommits` response (aliases p0, p1, … by index) → head commit, CI and others'
+    /// verdicts per PR. Unchanged PRs when it doesn't decode. Pure, for tests.
     static func applyHeadCommits(_ prs: [PR], _ json: Data) -> [PR] {
-        guard let resp = try? JSONDecoder().decode(HeadCommits.self, from: json) else { return prs }
+        guard let resp = try? JSONDecoder().decode(GQL<HeadCommits>.self, from: json).data else { return prs }
         return prs.enumerated().map { i, pr in
             var pr = pr
-            let node = resp.data["p\(i)"] ?? nil
+            let node = resp.prs["p\(i)"] ?? nil
             pr.headRefOid = node?.headRefOid
             pr.checks = node?.commits?.nodes.first?.commit.statusCheckRollup?.state
+            pr.verdicts = node?.reviews.map {
+                verdicts($0.items.map { ($0.author, $0.state) }, me: resp.viewer.login, author: pr.author.login)
+            }
             return pr
         }
     }
 
+    /// `viewer` and the p0, p1, … aliases side by side under `data`.
     private struct HeadCommits: Decodable {
-        let data: [String: Node?]
+        let viewer: Login
+        let prs: [String: Node?]
+        private struct Viewer: Decodable { let viewer: Login }
+        init(from decoder: Decoder) throws {
+            viewer = try Viewer(from: decoder).viewer
+            prs = try [String: Node?](from: decoder)
+        }
         struct Node: Decodable {
             let headRefOid: String?
             let commits: Commits?
+            let reviews: Nodes<Review>?
+        }
+        struct Review: Decodable {
+            let author: GitHubUser?
+            let state: String
         }
         struct Commits: Decodable { let nodes: [CommitNode] }
         struct CommitNode: Decodable { let commit: Commit }
@@ -492,10 +532,12 @@ enum Backend {
         nodes { ... on PullRequest {
           number title url isDraft updatedAt createdAt headRefOid
           repository { nameWithOwner } author { login }
-          commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+          commits(last: 1) { nodes { commit {
+            committedDate checkSuites(first: 10) { nodes { createdAt } } statusCheckRollup { state }
+          } } }
           reviews(last: 30) { nodes { author { login __typename } state submittedAt commit { oid } } }
           viewerLatestReview { state submittedAt commit { oid } }
-          comments(last: 5) { nodes { author { login __typename } createdAt } }
+          comments(last: 20) { nodes { author { login __typename } createdAt body } }
           reviewThreads(last: 50) { nodes {
             isResolved isOutdated
             opener: comments(first: 1) { nodes { author { login __typename } createdAt } }
@@ -537,24 +579,25 @@ enum Backend {
 
             var latestAt = ""
             var mine: ReviewingPR.MyReview?, dismissed = n.viewerLatestReview?.state == "DISMISSED"
-            var verdicts: [String: String] = [:]
             for r in n.reviews.items {
                 if r.author?.login == me {
                     mine = submitted(r, after: mine) ?? mine
                     if r.state == "DISMISSED" { dismissed = true }
                     continue
                 }
-                guard isOther(r.author), let who = r.author?.login, who != author else { continue }
+                guard isOther(r.author), r.author?.login != author else { continue }
                 latestAt = max(latestAt, r.submittedAt ?? "")
-                switch r.state {
-                case "APPROVED", "CHANGES_REQUESTED": verdicts[who] = r.state
-                case "DISMISSED": verdicts[who] = nil
-                default: break
-                }
             }
 
             mine = submitted(n.viewerLatestReview, after: mine) ?? mine
-            for c in n.comments?.items ?? [] where isOther(c.author) { latestAt = max(latestAt, c.createdAt ?? "") }
+            var myCommentAt = "", authorCommentAt = ""
+            for c in n.comments?.items ?? [] {
+                let at = c.createdAt ?? ""
+                if c.author?.login == me { myCommentAt = max(myCommentAt, at) }
+                guard isOther(c.author) else { continue }
+                latestAt = max(latestAt, at)
+                if c.author?.login == author, isForYou(c.body, me: me) { authorCommentAt = max(authorCommentAt, at) }
+            }
 
             // `waiting` is the Replies rule (`parseReplies`), with bots left out.
             var waiting = 0, opened = 0, resolved = 0, outdated = 0
@@ -575,12 +618,16 @@ enum Backend {
                         updatedAt: n.updatedAt, repository: n.repository,
                         author: PR.Author(login: author), headRefOid: n.headRefOid)
             pr.createdAt = n.createdAt
+            let head = n.commits.items.first?.commit
             return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: mine == nil && dismissed,
                                waiting: waiting, myThreads: opened, resolved: resolved, outdated: outdated,
-                               verdicts: verdicts.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) },
-                               checks: n.commits.items.first?.commit.statusCheckRollup?.state,
+                               verdicts: verdicts(n.reviews.items.map { ($0.author, $0.state) }, me: me, author: author),
+                               checks: head?.statusCheckRollup?.state,
                                latestAt: latestAt.isEmpty ? n.updatedAt : latestAt,
-                               lastOtherAt: latestAt.isEmpty ? nil : latestAt)
+                               lastOtherAt: latestAt.isEmpty ? nil : latestAt,
+                               headPushedAt: head.flatMap { $0.checkSuites?.items.map(\.createdAt).min() ?? $0.committedDate },
+                               myLastCommentAt: myCommentAt.isEmpty ? nil : myCommentAt,
+                               authorLastCommentAt: authorCommentAt.isEmpty ? nil : authorCommentAt)
         }
         .sorted { $0.latestAt > $1.latestAt }
     }
@@ -597,9 +644,26 @@ enum Backend {
         }
         let added = requested.filter { !reviewedURLs.contains($0.url) }.map {
             ReviewingPR(pr: $0, isRequested: true, myLastReview: nil, waiting: 0, myThreads: 0,
-                        resolved: 0, outdated: 0, verdicts: [], checks: $0.checks, latestAt: $0.updatedAt)
+                        resolved: 0, outdated: 0, verdicts: $0.verdicts ?? [], checks: $0.checks, latestAt: $0.updatedAt)
         }
         return marked + added
+    }
+
+    /// Other people's current verdicts from a PR's reviews (oldest first): each person's last approval
+    /// or change request, gone again when it's dismissed. Never you, the author or a bot. Both callers
+    /// fetch the last 30 reviews, so a verdict older than that is missed on a very busy PR. Pure, for tests.
+    private static func verdicts(_ reviews: [(author: GitHubUser?, state: String)], me: String,
+                                 author: String) -> [ReviewingPR.Verdict] {
+        var latest: [String: String] = [:]
+        for r in reviews {
+            guard let u = r.author, !u.isBot, u.login != me, u.login != author else { continue }
+            switch r.state {
+            case "APPROVED", "CHANGES_REQUESTED": latest[u.login] = r.state
+            case "DISMISSED": latest[u.login] = nil
+            default: break
+            }
+        }
+        return latest.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) }
     }
 
     private struct ReviewingData: Decodable {
@@ -626,7 +690,12 @@ enum Backend {
         }
         struct CommitNode: Decodable {
             let commit: Commit
-            struct Commit: Decodable { let statusCheckRollup: Rollup? }
+            struct Commit: Decodable {
+                let committedDate: String?
+                let checkSuites: Nodes<Suite>?
+                let statusCheckRollup: Rollup?
+            }
+            struct Suite: Decodable { let createdAt: String }
             struct Rollup: Decodable { let state: String }
         }
         struct Review: Decodable {
@@ -645,7 +714,19 @@ enum Backend {
         struct Comment: Decodable {
             let author: GitHubUser?
             let createdAt: String?
+            let body: String?      // conversation comments only
         }
+    }
+
+    /// A conversation comment written to you: it mentions you, or mentions nobody. Code and quoted
+    /// lines don't count, so "`@Published`" or a quoted "@author could you…" mentions nobody.
+    /// "@coderabbitai Fixed in …" or "@lina FYI" is to someone else. Pure, for tests.
+    static func isForYou(_ body: String?, me: String) -> Bool {
+        let prose = (body ?? "").replacing(/```[\s\S]*?```|`[^`\n]*`/, with: " ")
+            .split(separator: "\n").filter { !$0.drop(while: \.isWhitespace).hasPrefix(">") }
+            .joined(separator: "\n")
+        let mentions = prose.matches(of: /(?:^|[^\w\/.])@([A-Za-z0-9-]+)/).map { $0.1.lowercased() }
+        return mentions.isEmpty || mentions.contains(me.lowercased())
     }
 
     // MARK: Detail of a PR you review
@@ -870,7 +951,7 @@ enum Backend {
         nodes { ... on PullRequest {
           number title url isDraft createdAt updatedAt headRefOid headRefName reviewDecision
           repository { nameWithOwner } author { login }
-          mergeable
+          mergeable mergeStateStatus
           reviewRequests(first: 1) { totalCount }
           commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
           reviews(last: 20) { nodes { author { login __typename } state body submittedAt } }
@@ -953,6 +1034,7 @@ enum Backend {
             var f = FeedbackPR(pr: pr, decision: n.reviewDecision, threads: threads, reviews: reviews,
                                comments: comments, latestAt: latestAt, latestBy: latestBy,
                                checks: head?.statusCheckRollup?.state, mergeable: n.mergeable,
+                               mergeState: n.mergeStateStatus,
                                hasFeedback: n.reviews.items.contains { isReviewer($0.author) }
                                    || n.comments.items.contains { isReviewer($0.author) }
                                    || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) },
@@ -993,6 +1075,7 @@ enum Backend {
             let headRefName: String?
             let reviewDecision: String?
             let mergeable: String?
+            let mergeStateStatus: String?
             let reviewRequests: Count
             let repository: PR.Repo
             let author: PR.Author?
@@ -1479,19 +1562,22 @@ enum Backend {
     /// becomes a readable error instead of being saved as a review.
     static func runAgent(_ prompt: String, quick: Bool = false, codebase: String? = nil) async throws -> String {
         let agent = Agent.current
+        let userSettingsOnly = agent == .claude && codebase.map(hasProjectSettings) == true
         let text: String
         do {
-            text = try await sh(agent.headlessCommand(quick ? agent.quick : agent.review, codebase: codebase),
+            text = try await sh(agent.headlessCommand(quick ? agent.quick : agent.review, codebase: codebase,
+                                                      userSettingsOnly: userSettingsOnly),
                                 input: prompt)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch let e as ShellError {
             if let m = ClaudeErrors.usageLimitMessage(e.stderr) { throw ShellError(code: e.code, stderr: m) }
+            if agent == .claude, let m = ClaudeErrors.outdatedMessage(e.stderr) { throw ShellError(code: e.code, stderr: m) }
             throw e
         }
         if text.count < 400, let m = ClaudeErrors.usageLimitMessage(text) {
             throw ShellError(code: 1, stderr: m)
         }
-        return text
+        return userSettingsOnly ? withNote(text, projectSettingsNote) : text
     }
 
     /// Headless review with the review model (uses your logged-in Max session).
@@ -1517,8 +1603,8 @@ enum Backend {
         do {
             _ = try await sh("gh api --method POST \(q(path)) --input -", input: json)
         } catch let e as ShellError {
-            // GitHub's reason goes to stdout, which sh() drops when gh also writes to stderr
-            // ("gh: Unprocessable Entity (HTTP 422)"), so ask GitHub instead of matching text.
+            // A 422 can mean a pending review already exists: ask GitHub instead of matching
+            // the wording of its reason.
             if await hasPendingReview(pr) { throw PendingReviewExists() }
             throw e
         }
@@ -1703,16 +1789,22 @@ enum Backend {
 
 extension Backend {
     /// Removes the worktrees ReviewBar made (`Worktree.ours`) for PRs that are merged or closed,
-    /// in every repo with a local clone, when `Worktree.removeScript` finds nothing to lose. Best effort:
-    /// anything that fails is left for the next run.
+    /// in every repo with a local clone, when `Worktree.removeScript` finds nothing to lose and no
+    /// process is working in it (`Worktree.inUse`). Best effort: anything that fails or is skipped is
+    /// left for the next run. The working directories are read per repo, after the PR lookup, so a
+    /// folder entered meanwhile counts; when none is found (a failed `lsof` gives none), nothing is removed.
     static func removeClosedWorktrees(repos: [String]) async {
         for repo in repos {
             guard let folder = RepoList.folder(for: repo),
                   let list = try? await sh("git -C \(q(folder)) worktree list --porcelain") else { continue }
             let ours = TerminalApp.Worktree.ours(TerminalApp.Worktree.parseList(list), repo: repo, repoFolder: folder)
-            guard !ours.isEmpty, let states = await prStates(repo: repo, numbers: ours.map(\.number))
+            guard !ours.isEmpty, let states = await prStates(repo: repo, numbers: ours.map(\.number)),
+                  let lsof = try? await sh("lsof -a -d cwd -Fn 2>/dev/null || true")
             else { continue }
-            for worktree in ours {
+            let cwds = TerminalApp.Worktree.parseCwds(lsof)
+            guard !cwds.isEmpty else { continue }
+            let busy = TerminalApp.Worktree.inUse(ours, cwds: cwds)
+            for worktree in ours where !busy.contains(worktree.path) {
                 guard let pr = states[worktree.number], pr.state != "OPEN" else { continue }
                 _ = try? await sh(worktree.removeScript(finalHead: pr.headRefOid))
             }

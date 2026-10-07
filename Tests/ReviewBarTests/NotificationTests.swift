@@ -127,6 +127,13 @@ struct NotificationTests {
         #expect(diff(requested, reviewing(head: "c2", verdicts: [("anna", "APPROVED")])).isEmpty)
     }
 
+    /// Requests now carry others' verdicts, but you haven't reviewed them, so none is announced.
+    @Test func requestedPRsDontAnnounceVerdicts() {
+        let requested = reviewing(reviewedAt: nil, verdicts: [("anna", "APPROVED")])
+        #expect(diff(nil, requested).isEmpty)                            // first time it appears
+        #expect(diff(reviewing(reviewedAt: nil), requested).isEmpty)     // verdict arrives while only requested
+    }
+
     @Test func requestOnAReviewedPRIsARerequest() {
         #expect(AlertDiff.requests([pr(1), pr(2)], reviewed: [pr(2).url]) == [.request(pr(1)), .reRequest(pr(2))])
         #expect(Notifier.content(.reRequest(pr(2, author: "priya-s"))).title == "Review re-requested by priya-s")
@@ -197,13 +204,31 @@ struct PRFilterTests {
     }
 
     @Test func requestsGetHeadCommitAndCI() {
-        let json = #"{"data": {"p0": {"headRefOid": "abc", "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE"}}}]}},"#
+        let json = #"{"data": {"viewer": {"login": "me"}, "p0": {"headRefOid": "abc", "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE"}}}]}},"#
             + #" "p1": {"headRefOid": "def", "commits": {"nodes": [{"commit": {"statusCheckRollup": null}}]}}, "p2": null}}"#
         let prs = Backend.applyHeadCommits([pr(1, draft: false), pr(2, draft: false), pr(3, draft: false)], Data(json.utf8))
         #expect(prs.map(\.headRefOid) == ["abc", "def", nil])
         #expect(prs.map(\.checks) == ["FAILURE", nil, nil])
         #expect(Backend.merge([], requested: prs).map(\.checks) == ["FAILURE", nil, nil])
         #expect(Backend.applyHeadCommits([pr(1, draft: false)], Data("oops".utf8)) == [pr(1, draft: false)])
+        #expect(Backend.applyHeadCommits([pr(1, draft: false)], Data("oops".utf8))[0].verdicts == nil)
+    }
+
+    @Test func requestsGetOtherReviewersVerdicts() {
+        func review(_ who: String, _ state: String, bot: Bool = false) -> String {
+            #"{"author": {"login": "\#(who)", "__typename": "\#(bot ? "Bot" : "User")"}, "state": "\#(state)"}"#
+        }
+        let reviews = [review("alice", "COMMENTED"), review("alice", "APPROVED"),
+                       review("bob", "CHANGES_REQUESTED"), review("bob", "DISMISSED"),
+                       review("carol", "APPROVED"), review("carol", "CHANGES_REQUESTED"),
+                       review("me", "APPROVED"), review("a", "APPROVED"), review("ci", "APPROVED", bot: true)]
+        let json = #"{"data": {"viewer": {"login": "me"}, "p0": {"headRefOid": "abc", "reviews": {"nodes": ["#
+            + reviews.joined(separator: ",") + #"]}}, "p1": {"headRefOid": "def"}}}"#
+        let prs = Backend.applyHeadCommits([pr(1, draft: false), pr(2, draft: false)], Data(json.utf8))
+        let rows = Backend.merge([], requested: prs)
+        #expect(rows[0].verdicts == [.init(login: "alice", state: "APPROVED"),
+                                     .init(login: "carol", state: "CHANGES_REQUESTED")])
+        #expect(rows[1].verdicts.isEmpty)
     }
 
     @Test func draftsKeptByDefaultAndDroppedWhenOff() {

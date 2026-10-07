@@ -18,8 +18,8 @@ struct ReviewingTests {
         return #"{"author": \#(user(login, bot: bot)), "state": "\#(state)", "submittedAt": \#(s), "commit": \#(c)}"#
     }
 
-    private func comment(_ login: String, _ at: String, bot: Bool = false) -> String {
-        #"{"author": \#(user(login, bot: bot)), "createdAt": "\#(at)"}"#
+    private func comment(_ login: String, _ at: String, bot: Bool = false, body: String = "") -> String {
+        #"{"author": \#(user(login, bot: bot)), "createdAt": "\#(at)", "body": "\#(body)"}"#
     }
 
     private func thread(resolved: Bool = false, outdated: Bool = false, opener: String,
@@ -33,13 +33,16 @@ struct ReviewingTests {
 
     private func node(_ number: Int, reviews: [String] = [], viewerLatest: String = "null", comments: [String] = [],
                       threads: [String] = [], checks: String? = "SUCCESS",
-                      createdAt: String = "2026-08-20T00:00:00Z") -> String {
+                      createdAt: String = "2026-08-20T00:00:00Z", headCommittedAt: String? = nil, suitesCreatedAt: [String] = []) -> String {
         let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
+        let committed = headCommittedAt.map { #""\#($0)""# } ?? "null"
+        let suites = suitesCreatedAt.map { #"{"createdAt": "\#($0)"}"# }.joined(separator: ",")
         return """
         {"number": \(number), "title": "PR \(number)", "url": "https://github.com/o/r/pull/\(number)",
          "isDraft": false, "updatedAt": "2026-09-01T00:00:00Z", "createdAt": "\(createdAt)",
          "headRefOid": "\(head)", "repository": {"nameWithOwner": "o/r"}, "author": {"login": "author"},
-         "commits": {"nodes": [{"commit": {"statusCheckRollup": \(rollup)}}]},
+         "commits": {"nodes": [{"commit": {"committedDate": \(committed), "checkSuites": {"nodes": [\(suites)]},
+                                           "statusCheckRollup": \(rollup)}}]},
          "reviews": {"nodes": [\(reviews.joined(separator: ","))]}, "viewerLatestReview": \(viewerLatest),
          "comments": {"nodes": [\(comments.joined(separator: ","))]},
          "reviewThreads": {"nodes": [\(threads.joined(separator: ","))]}}
@@ -68,6 +71,94 @@ struct ReviewingTests {
     @Test func reviewWhoseCommitIsGoneCountsAsNewCommits() throws {
         let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: nil)]))
         #expect(r.turn == .yours(.newCommits))
+    }
+
+    @Test func myCommentAfterTheNewCommitsIsTheAuthorsTurn() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
+                             comments: [comment("me", "2026-09-12T10:00:00Z")],
+                             headCommittedAt: "2026-09-11T10:00:00Z"))
+        #expect(r.hasNewCommits)
+        #expect(r.turn == .authors)
+    }
+
+    @Test func myCommentBeforeTheNewCommitsLeavesThemMine() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
+                             comments: [comment("me", "2026-09-10T12:00:00Z")],
+                             headCommittedAt: "2026-09-11T10:00:00Z"))
+        #expect(r.turn == .yours(.newCommits))
+    }
+
+    @Test func aCommitPushedAfterMyCommentIsMineEvenIfMadeBefore() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
+                             comments: [comment("me", "2026-09-11T10:30:00Z")],
+                             headCommittedAt: "2026-09-11T10:00:00Z",
+                             suitesCreatedAt: ["2026-09-11T11:00:05Z", "2026-09-11T11:00:01Z"]))
+        #expect(r.headPushedAt == "2026-09-11T11:00:01Z")
+        #expect(r.turn == .yours(.newCommits))
+    }
+
+    @Test func aReRequestBeatsMyComment() throws {
+        var r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
+                             comments: [comment("me", "2026-09-12T10:00:00Z")],
+                             headCommittedAt: "2026-09-11T10:00:00Z"))
+        r.isRequested = true
+        #expect(r.turn == .yours(.reRequested))
+    }
+
+    @Test func theAuthorAnsweringMyCommentIsMyTurn() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
+                             comments: [comment("me", "2026-09-12T10:00:00Z"), comment("author", "2026-09-12T14:00:00Z")],
+                             headCommittedAt: "2026-09-11T10:00:00Z"))
+        #expect(r.turn == .yours(.authorReplied))
+        #expect(r.status.hasPrefix("author replied"))
+    }
+
+    @Test func onlyTheAuthorsCommentHandsItBack() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED")],
+                             comments: [comment("lina", "2026-09-12T14:00:00Z"),
+                                        comment("author", "2026-09-12T15:00:00Z", bot: true)]))
+        #expect(r.turn == .authors)
+    }
+
+    @Test func theAuthorWritingToSomeoneElseLeavesItWithThem() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED")],
+                             comments: [comment("author", "2026-09-12T14:00:00Z", body: "@coderabbitai Fixed in 698090b")]))
+        #expect(r.turn == .authors)
+    }
+
+    @Test func aCommentIsForYouWhenItMentionsYouOrNobody() {
+        #expect(Backend.isForYou("Done, e2e numbers updated", me: "me"))
+        #expect(Backend.isForYou(nil, me: "me"))
+        #expect(Backend.isForYou("@Me @lina both done", me: "me"))
+        #expect(!Backend.isForYou("@lina FYI", me: "me"))
+        #expect(!Backend.isForYou("Thanks!\n\n@coderabbitai resolve", me: "me"))
+        #expect(Backend.isForYou("Mailed someone@example.com about it", me: "me"))
+    }
+
+    @Test func mentionsInCodeOrQuotesDontCount() {
+        #expect(Backend.isForYou("Moved it to a `@Published` var", me: "me"))
+        #expect(Backend.isForYou("Done:\n```swift\n@MainActor func f() {}\n```", me: "me"))
+        #expect(Backend.isForYou("> @author could you rename it?\n\nRenamed", me: "me"))
+        #expect(!Backend.isForYou("`x` fixed, @lina FYI", me: "me"))
+    }
+
+    @Test func theAuthorQuotingCodeToMeIsMyTurn() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED")],
+                             comments: [comment("author", "2026-09-12T14:00:00Z", body: "Now a `@Published` var")]))
+        #expect(r.turn == .yours(.authorReplied))
+    }
+
+    @Test func aPushAfterTheAuthorsReplyIsNewCommits() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")],
+                             comments: [comment("me", "2026-09-12T10:00:00Z"), comment("author", "2026-09-12T14:00:00Z")],
+                             suitesCreatedAt: ["2026-09-12T15:00:00Z"]))
+        #expect(r.turn == .yours(.newCommits))
+    }
+
+    @Test func theAuthorsCommentBeforeMyReviewIsAlreadySeen() throws {
+        let r = try one(node(1, reviews: [review("me", "COMMENTED")],
+                             comments: [comment("author", "2026-09-09T10:00:00Z")]))
+        #expect(r.turn == .authors)
     }
 
     @Test func openThreadsAndNothingNewAreTheAuthorsTurn() throws {

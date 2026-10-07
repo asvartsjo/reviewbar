@@ -16,8 +16,8 @@ struct WorktreeCleanupTests {
     @Test func parsesWorktreeList() {
         let list = Worktree.parseList(porcelain([(clone, "branch refs/heads/development"),
                                                  ("/Users/me/code/storefront-worktrees/pr-7", "detached")]))
-        #expect(list == [.init(path: clone, detached: false, branch: "refs/heads/development"),
-                         .init(path: "/Users/me/code/storefront-worktrees/pr-7", detached: true)])
+        #expect(list == [.init(path: clone, detached: false, branch: "refs/heads/development", head: "abc"),
+                         .init(path: "/Users/me/code/storefront-worktrees/pr-7", detached: true, head: "abc")])
     }
 
     @Test func onlyDetachedPRFoldersWhereReviewBarPutsThemAreOurs() {
@@ -42,6 +42,35 @@ struct WorktreeCleanupTests {
         #expect(Backend.parsePRStates(Data(json.utf8))
                 == [7: .init(state: "MERGED", headRefOid: "abc"), 9: .init(state: "OPEN", headRefOid: nil)])
         #expect(Backend.parsePRStates(Data("oops".utf8)) == nil)
+    }
+
+    // MARK: Leaving a worktree a process works in
+
+    @Test func parsesWorkingDirectories() {
+        let lsof = "p412\nfcwd\nn/Users/me/TEACHIQ/gauss\np977\nfcwd\nn/Users/me/TEACHIQ/gauss-worktrees/pr-7/app\n"
+        #expect(Worktree.parseCwds(lsof) == ["/Users/me/TEACHIQ/gauss", "/Users/me/TEACHIQ/gauss-worktrees/pr-7/app"])
+        #expect(Worktree.parseCwds("").isEmpty)
+    }
+
+    @Test func aWorktreeIsInUseFromItsFolderOrBelow() {
+        let beside = "/Users/me/TEACHIQ/gauss-worktrees"
+        let worktrees = [7, 49, 50, 51, 52].map { Worktree.forPR($0, repo: "o/gauss", repoFolder: clone, nextToClone: true) }
+        let busy = Worktree.inUse(worktrees, cwds: ["\(beside)/pr-7",           // the folder itself
+                                                    "\(beside)/pr-50/app/src",  // below it
+                                                    "\(beside)/pr-4962",        // pr-49 is only a prefix
+                                                    "\(beside)/pr-51x",
+                                                    "/Users/me/teachiq/gauss-worktrees/pr-52"])  // case on disk differs
+        #expect(busy == ["\(beside)/pr-7", "\(beside)/pr-50", "\(beside)/pr-52"])
+    }
+
+    @Test func aWorktreeReachedThroughASymlinkIsInUse() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("rb-\(UUID().uuidString.prefix(8))")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let real = root.appendingPathComponent("real/pr-7"), link = root.appendingPathComponent("link")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root.appendingPathComponent("real"))
+        let w = Worktree(repoFolder: clone, path: link.appendingPathComponent("pr-7").path, number: 7)
+        #expect(Worktree.inUse([w], cwds: [real.resolvingSymlinksInPath().path]) == [w.path])
     }
 
     // MARK: Removing one, with real git

@@ -16,4 +16,11 @@ enum ClaudeErrors {
         }
         return message + " Try again then, or pick a lighter model in Settings."
     }
+
+    /// A readable message when an older Claude Code rejects a headless flag, else nil.
+    /// It prints e.g. "error: unknown option '--setting-sources'". Pure, for tests.
+    static func outdatedMessage(_ output: String) -> String? {
+        guard output.lowercased().contains("error: unknown option") else { return nil }
+        return "Claude Code is too old for ReviewBar's review flags. Run `claude update` and try again."
+    }
 }

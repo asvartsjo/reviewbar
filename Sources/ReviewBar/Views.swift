@@ -20,6 +20,7 @@ struct ContentView: View {
     @ViewState private var showMuted = false
     @ViewState private var showParked = false
     @ViewState private var showIdleCrew = false
+    @ViewState private var showCleanup = false
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     private var terminal: TerminalApp { TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed) }
     @AppStorage(AsWindow.key) private var asWindow = false
@@ -264,7 +265,7 @@ struct ContentView: View {
     /// Your open PRs by whose move it is, Parked folded.
     private var mineList: some View {
         Group {
-            if vm.myPRs.isEmpty && !vm.loading {
+            if vm.myPRs.isEmpty && vm.worktreesToGo.isEmpty && !vm.loading {
                 empty("tray", "No open PRs of yours.")
             } else {
                 let sections = vm.mySections
@@ -306,11 +307,55 @@ struct ContentView: View {
                                 }
                         }
                     }
+                    if !vm.worktreesToGo.isEmpty { cleanupFooter(vm.worktreesToGo) }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
         }
+    }
+
+    /// "2 worktrees can go", folded: your worktrees whose PR is merged or closed. Listed only.
+    @ViewBuilder
+    private func cleanupFooter(_ items: [Cleanup.Candidate]) -> some View {
+        Button { showCleanup.toggle() } label: {
+            HStack(spacing: 4) {
+                Text(verbatim: "\(items.count) worktree\(items.count == 1 ? "" : "s") can go")
+                Image(systemName: showCleanup ? "chevron.down" : "chevron.right").font(.caption2.bold())
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .buttonStyle(.hoverRow)
+        .help("Your worktrees whose PR is merged or closed. ReviewBar never removes them")
+        .padding(.top, 6)
+        .listRowSeparator(.hidden)
+        ForEach(showCleanup ? items : []) { c in
+            cleanupRow(c).listRowSeparator(.hidden)
+        }
+    }
+
+    private func cleanupRow(_ c: Cleanup.Candidate) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: (c.path as NSString).abbreviatingWithTildeInPath)
+                    .font(.callout).lineLimit(1).truncationMode(.head)
+                metaLine(c.repo, "", "#\(c.prNumber) \(c.state.lowercased()) · \(c.branch)"
+                            + (vm.hasSession(in: c) ? " · a Claude session is open in it" : ""))
+            }
+            Spacer(minLength: 4)
+            Button("Reveal in Finder", systemImage: "folder") {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: c.path)])
+            }
+            .help("Reveal in Finder")
+            .iconOnly(true)
+            Button("Copy remove command", systemImage: "doc.on.doc") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(c.removeCommand, forType: .string)
+            }
+            .help("Copy \(c.removeCommand). Git refuses if it has local changes; the branch is kept")
+            .iconOnly(true)
+        }
+        .padding(.vertical, 4)
     }
 
     /// A Claude session in one of your repos. A background one opens with `claude attach`; a terminal

@@ -62,6 +62,12 @@ struct ClaudeErrorsTests {
     @Test func ordinaryOutputIsNotALimit() {
         #expect(ClaudeErrors.usageLimitMessage("## Summary\n- Adds rate limiting to the API") == nil)
     }
+
+    @Test func unknownOptionAsksForUpdate() throws {
+        let m = try #require(ClaudeErrors.outdatedMessage("error: unknown option '--setting-sources'"))
+        #expect(m.contains("claude update"))
+        #expect(ClaudeErrors.outdatedMessage("## Summary\n- Rejects an unknown option in the parser") == nil)
+    }
 }
 
 struct TerminalAppTests {

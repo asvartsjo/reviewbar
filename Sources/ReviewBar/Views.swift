@@ -1140,11 +1140,6 @@ struct SettingsView: View {
                     .labelsHidden()
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
-            Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
-            Text(worktreesNextToClone
-                 ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. storefront-worktrees/pr-42."
-                 : "Each PR is checked out in ReviewBar's Application Support folder.")
-                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             Text("Review prompt").font(.headline)
@@ -1187,6 +1182,11 @@ struct SettingsView: View {
             Text("Runs a full review in the background when a PR first asks for your review, one at a time, "
                  + "and notifies you when it's ready. Uses your \(Agent(rawValue: agentRaw)?.name ?? "Claude") plan; "
                  + "PRs already waiting are left alone.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
+            Text(worktreesNextToClone
+                 ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. storefront-worktrees/pr-42."
+                 : "Each PR is checked out in ReviewBar's Application Support folder.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             Divider()

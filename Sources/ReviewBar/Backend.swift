@@ -24,8 +24,9 @@ enum Backend {
         projectSettingsFiles.contains { FileManager.default.fileExists(atPath: codebase + "/" + $0) }
     }
 
-    static let projectSettingsNote = "_This checkout has its own Claude settings (`.claude/settings.json`), "
-        + "so the review ran without them and without the project's CLAUDE.md and rules._"
+    /// No code spans: ReviewPage applies italics between backticks only, so they would break it.
+    static let projectSettingsNote = "*This checkout has its own Claude settings (.claude/settings.json or "
+        + "settings.local.json), so the review ran without them and without the project's CLAUDE.md and rules.*"
 
     /// `text` with `note` as its own paragraph after the VERDICT line, or first when there is none.
     /// Pure, for tests.

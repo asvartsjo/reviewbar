@@ -55,6 +55,12 @@ struct AgentTests {
         #expect(Backend.withNote("## Summary", "_note_") == "_note_\n\n## Summary")
     }
 
+    @Test func projectSettingsNoteRendersInItalics() {
+        let html = ReviewPage.inline(Backend.projectSettingsNote)
+        #expect(html.hasPrefix("<em>This checkout"))
+        #expect(html.hasSuffix("rules.</em>"))
+    }
+
     @Test func codexModelNamesAreShellSafe() {
         #expect(CodexSettings.isValidModel("gpt-5.5-codex"))
         #expect(CodexSettings.isValidModel(""))

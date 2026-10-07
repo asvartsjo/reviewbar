@@ -27,7 +27,7 @@ struct WorktreeCleanupTests {
             (clone, "branch refs/heads/development"),
             ("\(beside)/pr-7", "detached"),                    // ours, next to the clone
             (support, "detached"),                             // ours, under Application Support
-            ("\(beside)/pr-8", "branch refs/heads/atanas/x"),  // right name, but a branch is checked out
+            ("\(beside)/pr-8", "branch refs/heads/me/x"),      // right name, but a branch is checked out
             ("\(beside)/wt1", "detached"),                     // your own worktree
             ("\(beside)/grading-lock-order", "detached"),
             ("/Users/me/elsewhere/pr-10", "detached"),         // pr-N, but not where ReviewBar puts it
@@ -47,19 +47,19 @@ struct WorktreeCleanupTests {
     // MARK: Leaving a worktree a process works in
 
     @Test func parsesWorkingDirectories() {
-        let lsof = "p412\nfcwd\nn/Users/me/TEACHIQ/gauss\np977\nfcwd\nn/Users/me/TEACHIQ/gauss-worktrees/pr-7/app\n"
-        #expect(Worktree.parseCwds(lsof) == ["/Users/me/TEACHIQ/gauss", "/Users/me/TEACHIQ/gauss-worktrees/pr-7/app"])
+        let lsof = "p412\nfcwd\nn/Users/me/code/storefront\np977\nfcwd\nn/Users/me/code/storefront-worktrees/pr-7/app\n"
+        #expect(Worktree.parseCwds(lsof) == ["/Users/me/code/storefront", "/Users/me/code/storefront-worktrees/pr-7/app"])
         #expect(Worktree.parseCwds("").isEmpty)
     }
 
     @Test func aWorktreeIsInUseFromItsFolderOrBelow() {
-        let beside = "/Users/me/TEACHIQ/gauss-worktrees"
-        let worktrees = [7, 49, 50, 51, 52].map { Worktree.forPR($0, repo: "o/gauss", repoFolder: clone, nextToClone: true) }
+        let beside = "/Users/me/code/storefront-worktrees"
+        let worktrees = [7, 49, 50, 51, 52].map { Worktree.forPR($0, repo: "o/storefront", repoFolder: clone, nextToClone: true) }
         let busy = Worktree.inUse(worktrees, cwds: ["\(beside)/pr-7",           // the folder itself
                                                     "\(beside)/pr-50/app/src",  // below it
                                                     "\(beside)/pr-4962",        // pr-49 is only a prefix
                                                     "\(beside)/pr-51x",
-                                                    "/Users/me/teachiq/gauss-worktrees/pr-52"])  // case on disk differs
+                                                    "/Users/me/Code/storefront-worktrees/pr-52"])  // case on disk differs
         #expect(busy == ["\(beside)/pr-7", "\(beside)/pr-50", "\(beside)/pr-52"])
     }
 

@@ -62,10 +62,23 @@ struct ReviewingTests {
 
     // MARK: Whose turn
 
-    @Test func newCommitsAfterMyApprovalAreMyTurn() throws {
-        let r = try one(node(1, reviews: [review("me", "APPROVED", commit: "old1234")]))
-        #expect(r.hasNewCommits)
-        #expect(r.turn == .yours(.newCommits))
+    @Test func newCommitsAfterMyApprovalAreMyTurnUnlessIApproved() throws {
+        let commented = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")]))
+        #expect(commented.hasNewCommits)
+        #expect(commented.turn == .yours(.newCommits))
+        let approved = try one(node(2, reviews: [review("me", "APPROVED", commit: "old1234")]))
+        #expect(approved.hasNewCommits)
+        #expect(approved.turn == .done)
+    }
+
+    @Test func repliesAfterMyApprovalLeaveItDone() throws {
+        let replied = thread(opener: "me", recent: [comment("me", "2026-09-10T10:00:00Z"),
+                                                    comment("author", "2026-09-11T10:00:00Z")])
+        let r = try one(node(1, reviews: [review("me", "APPROVED")],
+                             comments: [comment("author", "2026-09-12T14:00:00Z")], threads: [replied]))
+        #expect(r.waiting == 1 && r.authorRepliedSinceYou)
+        #expect(r.turn == .done)
+        #expect(r.status == "You approved · 1 reply waiting · 0/1 of your threads resolved")
     }
 
     @Test func reviewWhoseCommitIsGoneCountsAsNewCommits() throws {
@@ -259,8 +272,8 @@ struct ReviewingTests {
     }
 
     @Test func mutedPRsGetTheirOwnLastSection() throws {
-        let prs = try parse([node(1, reviews: [review("me", "APPROVED", commit: "old1234")]),   // your turn
-                             node(2, reviews: [review("me", "APPROVED", commit: "old1234")]),   // your turn, muted
+        let prs = try parse([node(1, reviews: [review("me", "COMMENTED", commit: "old1234")]),  // your turn
+                             node(2, reviews: [review("me", "COMMENTED", commit: "old1234")]),  // your turn, muted
                              node(3, reviews: [review("me", "APPROVED")])])                     // done
         let sections = ReviewingPR.sections(prs, muted: { $0.pr.number == 2 })
         #expect(sections.map(\.group) == [.yours, .done, .muted])
@@ -328,7 +341,7 @@ struct ReviewingTests {
         let prs = try parse([
             node(1, reviews: [review("me", "APPROVED")]),                                          // done
             node(2, reviews: [review("me", "COMMENTED"), review("anna", "APPROVED", at: "2026-09-05T10:00:00Z")]),
-            node(3, reviews: [review("me", "APPROVED", commit: "old1234")]),                       // new commits
+            node(3, reviews: [review("me", "COMMENTED", commit: "old1234")]),                      // new commits
             node(4, reviews: [review("me", "COMMENTED"), review("anna", "APPROVED", at: "2026-09-07T10:00:00Z")]),
         ])
         let sections = ReviewingPR.sections(prs)
@@ -338,7 +351,7 @@ struct ReviewingTests {
     }
 
     @Test func yourTurnPutsTheLongestOpenFirst() throws {
-        let stale = [review("me", "APPROVED", commit: "old1234")]
+        let stale = [review("me", "COMMENTED", commit: "old1234")]
         let prs = try parse([
             node(1, reviews: stale + [review("anna", "COMMENTED", at: "2026-09-20T10:00:00Z")],
                  createdAt: "2026-09-15T00:00:00Z"),                                   // newest activity

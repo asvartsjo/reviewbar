@@ -115,7 +115,7 @@ struct ReviewingPR: Identifiable, Hashable {
     enum Turn: Equatable {
         case yours(Reason)
         case authors
-        /// You approved, and nothing changed since or you commented on what did.
+        /// Your approval stands. New commits and replies since don't move it; a re-request does.
         case done
     }
 
@@ -157,10 +157,11 @@ struct ReviewingPR: Identifiable, Hashable {
     var turn: Turn {
         if isRequested { return .yours(myLastReview == nil ? .requested : .reRequested) }
         if myReviewDismissed { return .yours(.dismissed) }
+        if myLastReview?.state == "APPROVED" { return .done }
         if hasNewCommits && !commentedOnHead { return .yours(.newCommits) }
         if waiting > 0 { return .yours(.reply) }
         if authorRepliedSinceYou { return .yours(.authorReplied) }
-        return myLastReview?.state == "APPROVED" ? .done : .authors
+        return .authors
     }
 
     /// The Reviewing tab's sections, in display order.

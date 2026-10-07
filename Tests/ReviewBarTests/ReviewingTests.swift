@@ -176,6 +176,19 @@ struct ReviewingTests {
         #expect(try one(node(1, reviews: [review("me", "COMMENTED")], threads: [replied])).verifyIsDue)
     }
 
+    @Test func verifyIsNextUntilRunOnThisVersion() throws {
+        let mine = thread(opener: "me", recent: [comment("me", "2026-09-10T10:00:00Z")])
+        let pushed = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")], threads: [mine]))
+        #expect(pushed.verifyIsNext(lastRun: nil))                                                  // never run
+        #expect(!pushed.verifyIsNext(lastRun: PRSnapshot(at: "2026-09-12T10:00:00Z", head: head)))  // run on this head
+        #expect(pushed.verifyIsNext(lastRun: PRSnapshot(at: "2026-09-12T10:00:00Z", head: "mid5678"))) // pushed since
+        let replied = try one(node(1, reviews: [review("me", "COMMENTED")],
+                                   threads: [thread(opener: "me", recent: [comment("author", "2026-09-13T10:00:00Z")])]))
+        #expect(replied.verifyIsNext(lastRun: PRSnapshot(at: "2026-09-12T10:00:00Z", head: head)))  // reply since
+        let quiet = try one(node(1, reviews: [review("me", "COMMENTED")], threads: [mine]))
+        #expect(!quiet.verifyIsNext(lastRun: nil))                                                  // not due
+    }
+
     // MARK: New since you last looked
 
     @Test func lastOtherAtIgnoresYouAndIsNilWithoutOthers() throws {

@@ -11,7 +11,30 @@ enum Backend {
     /// Headless reviews get no tools and no MCP servers: the diff is untrusted input
     /// and the model only needs to read the prompt.
     /// Tools are added per run: none, or read-only ones inside the PR's worktree.
-    static let headlessFlags = "-p --output-format text --strict-mcp-config"
+    /// No hooks run, so a hook a PR adds or edits never executes. CLAUDE.md and `.claude/rules/`
+    /// still load, from the worktree and from ~/.claude (see `projectSettingsFiles` for when not).
+    static let headlessFlags = #"-p --output-format text --strict-mcp-config --settings '{"disableAllHooks":true}'"#
+
+    /// Project settings in the review worktree can do more than hooks: `env` can point the API at
+    /// another server, and `apiKeyHelper` runs a command. When one exists the run loads user
+    /// settings only (`--setting-sources user`), which also drops the project's CLAUDE.md and rules.
+    static let projectSettingsFiles = [".claude/settings.json", ".claude/settings.local.json"]
+
+    static func hasProjectSettings(_ codebase: String) -> Bool {
+        projectSettingsFiles.contains { FileManager.default.fileExists(atPath: codebase + "/" + $0) }
+    }
+
+    static let projectSettingsNote = "_This checkout has its own Claude settings (`.claude/settings.json`), "
+        + "so the review ran without them and without the project's CLAUDE.md and rules._"
+
+    /// `text` with `note` as its own paragraph after the VERDICT line, or first when there is none.
+    /// Pure, for tests.
+    static func withNote(_ text: String, _ note: String) -> String {
+        let lines = text.components(separatedBy: "\n")
+        guard let first = lines.first, first.uppercased().hasPrefix("VERDICT:") else { return note + "\n\n" + text }
+        return first + "\n\n" + note + "\n\n" + lines.dropFirst().joined(separator: "\n")
+            .trimmingCharacters(in: .newlines)
+    }
 
     /// How reviews are written and worded. Editable in Settings › Review prompt; the rules,
     /// verdict line and finding format around it stay fixed.
@@ -1423,19 +1446,22 @@ enum Backend {
     /// becomes a readable error instead of being saved as a review.
     static func runAgent(_ prompt: String, quick: Bool = false, codebase: String? = nil) async throws -> String {
         let agent = Agent.current
+        let userSettingsOnly = agent == .claude && codebase.map(hasProjectSettings) == true
         let text: String
         do {
-            text = try await sh(agent.headlessCommand(quick ? agent.quick : agent.review, codebase: codebase),
+            text = try await sh(agent.headlessCommand(quick ? agent.quick : agent.review, codebase: codebase,
+                                                      userSettingsOnly: userSettingsOnly),
                                 input: prompt)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch let e as ShellError {
             if let m = ClaudeErrors.usageLimitMessage(e.stderr) { throw ShellError(code: e.code, stderr: m) }
+            if agent == .claude, let m = ClaudeErrors.outdatedMessage(e.stderr) { throw ShellError(code: e.code, stderr: m) }
             throw e
         }
         if text.count < 400, let m = ClaudeErrors.usageLimitMessage(text) {
             throw ShellError(code: 1, stderr: m)
         }
-        return text
+        return userSettingsOnly ? withNote(text, projectSettingsNote) : text
     }
 
     /// Headless review with the review model (uses your logged-in Max session).

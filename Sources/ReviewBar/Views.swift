@@ -1149,7 +1149,7 @@ struct SettingsView: View {
             Divider()
             Text("Review prompt").font(.headline)
             Text("How reviews are written and how suggested comments are worded. Used by every review and re-review, "
-                 + "and by new reviews in the terminal unless a Review command is set.")
+                 + "and by new reviews in the terminal unless a Review command is set. Follow up and Verify don't use it.")
                 .font(.caption2).foregroundStyle(.secondary)
             TextEditor(text: $reviewStyle)
                 .font(.system(.caption, design: .monospaced))

@@ -328,8 +328,8 @@ enum Backend {
         }
     }
 
-    /// Fills in each PR's head commit with one read-only GraphQL query.
-    /// Best effort: if it fails, PRs keep `updatedAt`-based review keys.
+    /// Fills in each PR's head commit, CI and other reviewers' verdicts with one read-only GraphQL
+    /// query. Best effort: if it fails, PRs keep `updatedAt`-based review keys.
     private static func withHeadCommits(_ prs: [PR]) async -> [PR] {
         guard !prs.isEmpty else { return prs }
         let enc = JSONEncoder()
@@ -338,31 +338,47 @@ enum Backend {
             guard let data = try? enc.encode(prs[i].url), let url = String(data: data, encoding: .utf8)
             else { return nil }
             return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid "
-                + "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }"
+                + "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } "
+                + "reviews(last: 30) { nodes { author { login __typename } state } } } }"
         }
-        let query = "query { \(fields.joined(separator: " ")) }"
+        let query = "query { viewer { login } \(fields.joined(separator: " ")) }"
         guard let out = try? await sh("gh api graphql -f query=\(q(query))") else { return prs }
         return applyHeadCommits(prs, Data(out.utf8))
     }
 
-    /// The `withHeadCommits` response (aliases p0, p1, … by index) → head commit and CI per PR.
-    /// Unchanged PRs when it doesn't decode. Pure, for tests.
+    /// The `withHeadCommits` response (aliases p0, p1, … by index) → head commit, CI and others'
+    /// verdicts per PR. Unchanged PRs when it doesn't decode. Pure, for tests.
     static func applyHeadCommits(_ prs: [PR], _ json: Data) -> [PR] {
-        guard let resp = try? JSONDecoder().decode(HeadCommits.self, from: json) else { return prs }
+        guard let resp = try? JSONDecoder().decode(GQL<HeadCommits>.self, from: json).data else { return prs }
         return prs.enumerated().map { i, pr in
             var pr = pr
-            let node = resp.data["p\(i)"] ?? nil
+            let node = resp.prs["p\(i)"] ?? nil
             pr.headRefOid = node?.headRefOid
             pr.checks = node?.commits?.nodes.first?.commit.statusCheckRollup?.state
+            pr.verdicts = node?.reviews.map {
+                verdicts($0.items.map { ($0.author, $0.state) }, me: resp.viewer.login, author: pr.author.login)
+            }
             return pr
         }
     }
 
+    /// `viewer` and the p0, p1, … aliases side by side under `data`.
     private struct HeadCommits: Decodable {
-        let data: [String: Node?]
+        let viewer: Login
+        let prs: [String: Node?]
+        private struct Viewer: Decodable { let viewer: Login }
+        init(from decoder: Decoder) throws {
+            viewer = try Viewer(from: decoder).viewer
+            prs = try [String: Node?](from: decoder)
+        }
         struct Node: Decodable {
             let headRefOid: String?
             let commits: Commits?
+            let reviews: Nodes<Review>?
+        }
+        struct Review: Decodable {
+            let author: GitHubUser?
+            let state: String
         }
         struct Commits: Decodable { let nodes: [CommitNode] }
         struct CommitNode: Decodable { let commit: Commit }
@@ -505,20 +521,14 @@ enum Backend {
 
             var latestAt = ""
             var mine: ReviewingPR.MyReview?, dismissed = n.viewerLatestReview?.state == "DISMISSED"
-            var verdicts: [String: String] = [:]
             for r in n.reviews.items {
                 if r.author?.login == me {
                     mine = submitted(r, after: mine) ?? mine
                     if r.state == "DISMISSED" { dismissed = true }
                     continue
                 }
-                guard isOther(r.author), let who = r.author?.login, who != author else { continue }
+                guard isOther(r.author), r.author?.login != author else { continue }
                 latestAt = max(latestAt, r.submittedAt ?? "")
-                switch r.state {
-                case "APPROVED", "CHANGES_REQUESTED": verdicts[who] = r.state
-                case "DISMISSED": verdicts[who] = nil
-                default: break
-                }
             }
 
             mine = submitted(n.viewerLatestReview, after: mine) ?? mine
@@ -545,7 +555,7 @@ enum Backend {
             pr.createdAt = n.createdAt
             return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: mine == nil && dismissed,
                                waiting: waiting, myThreads: opened, resolved: resolved, outdated: outdated,
-                               verdicts: verdicts.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) },
+                               verdicts: verdicts(n.reviews.items.map { ($0.author, $0.state) }, me: me, author: author),
                                checks: n.commits.items.first?.commit.statusCheckRollup?.state,
                                latestAt: latestAt.isEmpty ? n.updatedAt : latestAt,
                                lastOtherAt: latestAt.isEmpty ? nil : latestAt)
@@ -565,9 +575,26 @@ enum Backend {
         }
         let added = requested.filter { !reviewedURLs.contains($0.url) }.map {
             ReviewingPR(pr: $0, isRequested: true, myLastReview: nil, waiting: 0, myThreads: 0,
-                        resolved: 0, outdated: 0, verdicts: [], checks: $0.checks, latestAt: $0.updatedAt)
+                        resolved: 0, outdated: 0, verdicts: $0.verdicts ?? [], checks: $0.checks, latestAt: $0.updatedAt)
         }
         return marked + added
+    }
+
+    /// Other people's current verdicts from a PR's reviews (oldest first): each person's last approval
+    /// or change request, gone again when it's dismissed. Never you, the author or a bot. Both callers
+    /// fetch the last 30 reviews, so a verdict older than that is missed on a very busy PR. Pure, for tests.
+    private static func verdicts(_ reviews: [(author: GitHubUser?, state: String)], me: String,
+                                 author: String) -> [ReviewingPR.Verdict] {
+        var latest: [String: String] = [:]
+        for r in reviews {
+            guard let u = r.author, !u.isBot, u.login != me, u.login != author else { continue }
+            switch r.state {
+            case "APPROVED", "CHANGES_REQUESTED": latest[u.login] = r.state
+            case "DISMISSED": latest[u.login] = nil
+            default: break
+            }
+        }
+        return latest.sorted { $0.key < $1.key }.map { .init(login: $0.key, state: $0.value) }
     }
 
     private struct ReviewingData: Decodable {

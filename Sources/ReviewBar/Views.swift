@@ -876,7 +876,6 @@ struct SettingsView: View {
     @AppStorage(MenuBarCount.reviewedKey) private var countReviewed = true
     @AppStorage(MenuBarCount.myPRsKey) private var countMyPRs = true
     @AppStorage(MenuBarCount.mentionsKey) private var countMentions = true
-    @AppStorage(MenuBarCount.crewKey) private var countCrew = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
@@ -1221,10 +1220,9 @@ struct SettingsView: View {
                 Toggle("New commits or replies on PRs you reviewed", isOn: $countReviewed)
                 Toggle("Feedback on your PRs", isOn: $countMyPRs)
                 Toggle("Mentions", isOn: $countMentions)
-                Toggle("Claude sessions that need you", isOn: $countCrew)
             }
             .padding(.leading, 12)
-            Text(countRequests || countReviewed || countMyPRs || countMentions || countCrew
+            Text(countRequests || countReviewed || countMyPRs || countMentions
                  ? "Each PR counts once, even when it's in more than one of these. PRs muted in Reviewing don't count "
                    + "as requests or activity, but a mention still counts."
                  : "Nothing is counted, so the menu bar shows only the icon.")

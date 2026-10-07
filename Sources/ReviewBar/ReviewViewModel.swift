@@ -456,8 +456,7 @@ final class ReviewViewModel: ObservableObject {
     /// PRs, and mentions.
     var badgeCount: Int {
         MenuBarCount.count(yourTurn: reviewing.filter { $0.group == .yours && !isMuted($0) },
-                           feedback: visibleFeedback.map(\.pr.url), mentions: visibleMentions,
-                           crew: crew.filter(\.session.needsMe).map(\.id), counting: .current)
+                           feedback: visibleFeedback.map(\.pr.url), mentions: visibleMentions, counting: .current)
     }
 
     func state(for pr: PR) -> ReviewState { reviews[pr.reviewKey] ?? .idle }

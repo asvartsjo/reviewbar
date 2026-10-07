@@ -745,6 +745,9 @@ final class ReviewViewModel: ObservableObject {
         launchTerminal(pr, mode: mode)
     }
 
+    /// A new review in the terminal, even where `openTerminal` would follow up.
+    func reviewInTerminal(_ pr: PR) { launchTerminal(pr, mode: .review) }
+
     /// The next step on one of my PRs, from its move and my commands; Claude Code only.
     func myPRAction(for pr: PR) -> MyPRAction? {
         guard Agent.current == .claude, let f = myPRs.first(where: { $0.pr.url == pr.url }) else { return nil }

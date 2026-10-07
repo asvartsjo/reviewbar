@@ -16,9 +16,9 @@ ReviewBar refreshes every 5 minutes, and whenever you open the popover if the da
 
 Lists every open PR you review (where you are a requested reviewer, in the repos you choose, any mix of orgs and users), grouped by whose turn it is:
 
-- **Your turn**: newly requested, re-requested, new commits since your last review, a reply in one of your threads, or the author answering in the conversation after your review or comment (a comment to someone else, like `@coderabbitai …`, doesn't count).
+- **Your turn**: newly requested, re-requested, your review dismissed, or, unless you approved, new commits since your last review, a reply in one of your threads, or the author answering in the conversation after your review or comment (a comment to someone else, like `@coderabbitai …`, doesn't count).
 - **Author's turn**: nothing new since your review, or you commented in the conversation after the new commits.
-- **Done**: you approved, and nothing changed or you commented on what did.
+- **Done**: your approval stands. New commits and replies since don't move it (the row and the "Since your review" box still show them); only a re-request or a dismissal does.
 
 Each row shows why it is in its group, how many of the threads you opened are resolved, other reviewers' approvals and change requests, and CI. Bots are ignored. Requested rows show how long the PR has been open (orange from 3 days). ✨ / 🕘 mark a review saved in ReviewBar for this or an older version of the PR. **Review all** above the list reviews every request that doesn't have one yet. The tab count is Your turn.
 

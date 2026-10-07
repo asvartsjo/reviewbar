@@ -20,13 +20,25 @@ struct ShellTests {
     @Test func failureCarriesExitCodeAndStderr() async throws {
         let e = try #require(await shellError("print -u2 boom; exit 3"))
         #expect(e.code == 3)
-        #expect(e.stderr.contains("boom"))
+        #expect(e.stderr == "boom")
     }
 
     /// Some tools (claude among them) report errors on stdout.
     @Test func failureWithoutStderrKeepsStdout() async throws {
         let e = try #require(await shellError("print -r -- out; exit 1"))
-        #expect(e.stderr.contains("out"))
+        #expect(e.stderr == "out")
+    }
+
+    /// `gh api` puts "HTTP 422" on stderr and GitHub's reason on stdout.
+    @Test func failureWithBothKeepsStderrThenStdout() async throws {
+        let e = try #require(await shellError("print -u2 'gh: HTTP 422'; print -r -- '{\"message\":\"why\"}'; exit 1"))
+        #expect(e.stderr == "gh: HTTP 422\n{\"message\":\"why\"}")
+    }
+
+    /// A long failed answer keeps only its last 2000 characters.
+    @Test func failureKeepsOnlyStdoutsTail() async throws {
+        let e = try #require(await shellError("print -n -- x; head -c 3000 /dev/zero | tr '\\0' o; exit 1"))
+        #expect(e.stderr == String(repeating: "o", count: 2000))
     }
 
     /// More than a pipe buffer each way at once, as with a large prompt or diff.

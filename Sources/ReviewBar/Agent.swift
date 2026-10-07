@@ -29,13 +29,16 @@ enum Agent: String, CaseIterable, Identifiable {
 
     /// Shell command that reads the prompt on stdin and prints only the final answer. With
     /// `codebase` (a worktree of the PR) it runs there and may read the code, read-only; without
-    /// it, it gets no tools at all. Pure, for tests.
-    func headlessCommand(_ pair: (model: String, effort: String), codebase: String? = nil) -> String {
+    /// it, it gets no tools at all. `userSettingsOnly` (Claude) skips the worktree's own settings
+    /// files; see `Backend.projectSettingsFiles`. Pure, for tests.
+    func headlessCommand(_ pair: (model: String, effort: String), codebase: String? = nil,
+                         userSettingsOnly: Bool = false) -> String {
         switch self {
         case .claude:
             let tools = codebase == nil ? "--tools ''" : "--tools 'Read,Grep,Glob' --allowedTools 'Read,Grep,Glob'"
+            let sources = userSettingsOnly ? " --setting-sources user" : ""
             return (codebase.map { "cd \(q($0)) && " } ?? "")
-                + "\(Backend.claudeBin) \(Backend.headlessFlags) \(tools)\(ClaudeSettings.flags(pair))"
+                + "\(Backend.claudeBin) \(Backend.headlessFlags)\(sources) \(tools)\(ClaudeSettings.flags(pair))"
         case .codex:
             // Read-only sandbox: the diff is untrusted input. The answer goes to a file so
             // progress output on stdout never ends up in the saved review.

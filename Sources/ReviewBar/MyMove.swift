@@ -32,8 +32,8 @@ extension FeedbackPR {
     /// - No reviewer requested and nobody has reviewed: my move (ask someone), not waiting on others.
     /// - A draft is mine even while CI runs: nobody can review it yet, so it never waits on others.
     /// - Checks running is mine too, not waiting on CI: I watch a fresh push until it goes green or red.
-    /// - Approved with no CI at all is ready to merge. `readyToMerge` needs green checks and stays
-    ///   that way, since notifications use it.
+    /// - Approved with no CI at all is mine to merge. `readyToMerge`, which notifications use, also needs
+    ///   GitHub to call that merge CLEAN; until it does, the row says "approved".
     var move: MyMove {
         if hasConflict { return .yours(.conflict) }
         if checksFailing { return .yours(.checksFailing) }

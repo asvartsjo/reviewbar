@@ -34,16 +34,32 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 
 ## Setup
 
-```sh
-git clone https://github.com/asvartsjo/reviewbar && cd reviewbar
-scripts/make-app.sh              # builds build/ReviewBar.app
-mv build/ReviewBar.app /Applications/
-open /Applications/ReviewBar.app
-```
+Install it locally by building from source. You don't need an Apple developer account or Xcode, only the Command Line Tools (`xcode-select --install`).
 
-Then click the eye in the menu bar, open the gear, and add repos as `owner/repo` (or paste GitHub URLs). Each is checked with `gh` when added, because one repo `gh` can't read makes GitHub reject the whole search.
+1. Install and log in to the tools ReviewBar shells out to (see [Requirements](#requirements)):
 
-The app is ad-hoc signed and not sandboxed (it runs `gh` and `claude`). No Xcode project is needed.
+   ```sh
+   brew install gh && gh auth login        # authorise SSO if your org needs it
+   claude                                  # Claude Code: log in once, then exit
+   # or: codex login                       # Codex CLI instead of Claude
+   ```
+
+2. Build and install the app:
+
+   ```sh
+   git clone https://github.com/asvartsjo/reviewbar && cd reviewbar
+   scripts/make-app.sh              # builds build/ReviewBar.app
+   mv build/ReviewBar.app /Applications/
+   open /Applications/ReviewBar.app
+   ```
+
+3. Click the eye in the menu bar, open the gear, and add repos as `owner/repo` (or paste GitHub URLs). Each is checked with `gh` when added, because one repo `gh` can't read makes GitHub reject the whole search.
+
+The app is ad-hoc signed and not sandboxed (it runs `gh` and `claude`). Because you build it yourself it isn't quarantined, so Gatekeeper doesn't complain. macOS asks for notification and Automation (Terminal) permission the first time they're needed.
+
+To update, `git pull` and run the same build and `mv` again (quit the running app first). To uninstall, delete `/Applications/ReviewBar.app` and, if you want to drop saved reviews, `~/Library/Application Support/ReviewBar/`.
+
+If the build fails with `plugin for module 'TestingMacros' not found` that only affects `swift test`; see [Developing](#developing). If `gh`, `claude` or `codex` isn't found by the app, check that `which gh claude` works in a new Terminal window: the app uses your login shell's `PATH`.
 
 ### Releases
 
@@ -74,11 +90,15 @@ Without a certificate the app is ad-hoc signed: fine for your own Mac (right-cli
 - Views use `@ViewState` instead of `@State`: on the macOS 27 SDK `@State` is a macro that only builds with Xcode, not with just the Command Line Tools.
 - CI (GitHub Actions, macOS) builds, tests and bundles the app on every push; the zipped `.app` is attached to each run. A downloaded build is quarantined by macOS: right-click › Open the first time, or `xattr -dr com.apple.quarantine ReviewBar.app`.
 
+## Contributing
+
+The source is public so you can read it, build it and fork it. Only the maintainers can push to this repository; changes land through pull requests that a maintainer reviews. Issues and PRs from forks are welcome, but there is no promise they will be merged or answered quickly.
+
 ## Notes
 
 - Commands run through an interactive login zsh so `PATH` matches your Terminal.
 - `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are unset for every `claude` call so the subscription is used, never API billing.
 - Reviews are stored in `~/Library/Application Support/ReviewBar/` (`reviews.json` plus one `.md` per review).
 - Diffs are capped at 250 KB. Terminal follow-ups refuse prompts over 800 KB (macOS argument limit).
-- Headless reviews never get a shell or MCP servers (`--strict-mcp-config`). When the repo has a local clone (chosen in Settings, or found under `~/Projects`, `~/Developer`, …), the review runs in a worktree of the PR's head commit with read-only tools (`Read,Grep,Glob`; Codex: `--sandbox read-only --cd <worktree>`), so it can check callers and conventions instead of asking the author. Without a clone it gets no tools (`--tools ''`) and only sees the diff. This needs a recent Claude Code (`claude update`). Opening a PR again moves its worktree to the new head, unless it has local changes or commits the PR doesn't have yet. **Put PR worktrees next to the clone** (Settings › Terminal) keeps them in `<clone>-worktrees/pr-<N>` instead of ReviewBar's own folder. Once a day ReviewBar removes the worktrees it made for PRs that are now merged or closed, and only when nothing would be lost: no uncommitted or untracked files (ignored ones such as a copied `vendor/` don't count) and no commit that isn't on GitHub. Your own worktrees and branches are never touched.
+- Headless reviews never get a shell or MCP servers (`--strict-mcp-config`) and run no hooks (`disableAllHooks`). They still follow the repo's CLAUDE.md and `.claude/rules/` and your own `~/.claude/CLAUDE.md`, so a PR's own edits to those files can steer its review. When the PR's checkout has its own `.claude/settings.json` or `settings.local.json`, which could redirect the API (`env`) or run a command (`apiKeyHelper`), the review loads your user settings only (`--setting-sources user`). That drops the project's CLAUDE.md and rules too, and the review says so under the verdict. When the repo has a local clone (chosen in Settings, or found under `~/Projects`, `~/Developer`, …), the review runs in a worktree of the PR's head commit with read-only tools (`Read,Grep,Glob`; Codex: `--sandbox read-only --cd <worktree>`), so it can check callers and conventions instead of asking the author. Without a clone it gets no tools (`--tools ''`) and only sees the diff. This needs a recent Claude Code (`claude update`). Opening a PR again moves its worktree to the new head, unless it has local changes or commits the PR doesn't have yet. **Put PR worktrees next to the clone** (Settings › Terminal) keeps them in `<clone>-worktrees/pr-<N>` instead of ReviewBar's own folder. Once a day ReviewBar removes the worktrees it made for PRs that are now merged or closed, and only when nothing would be lost: no uncommitted or untracked files (ignored ones such as a copied `vendor/` don't count) and no commit that isn't on GitHub. Your own worktrees and branches are never touched.
 - A review is tied to the PR's head commit, so comments alone don't mark it stale; new commits do.

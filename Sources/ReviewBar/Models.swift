@@ -14,6 +14,8 @@ struct PR: Identifiable, Codable, Hashable {
     var createdAt: String? = nil
     /// CI state of the head commit, filled in with `headRefOid` for review requests.
     var checks: String? = nil
+    /// Other reviewers' current verdicts, filled in with `headRefOid` for review requests.
+    var verdicts: [ReviewingPR.Verdict]? = nil
 
     struct Repo: Codable, Hashable { let nameWithOwner: String }
     struct Author: Codable, Hashable { let login: String }
@@ -105,7 +107,7 @@ struct ReviewingPR: Identifiable, Hashable {
         let at: String
     }
 
-    struct Verdict: Hashable {
+    struct Verdict: Codable, Hashable {
         let login: String
         let state: String      // APPROVED or CHANGES_REQUESTED
     }
@@ -453,6 +455,8 @@ struct FeedbackPR: Identifiable, Hashable {
     var checks: String? = nil
     /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub still computing).
     var mergeable: String? = nil
+    /// GitHub's `mergeStateStatus`: CLEAN when nothing blocks the merge, BLOCKED, BEHIND and so on.
+    var mergeState: String? = nil
     /// A reviewer (not a bot) left a review, comment or thread, answered or not.
     var hasFeedback = false
     /// The PR's head branch name.
@@ -471,8 +475,8 @@ struct FeedbackPR: Identifiable, Hashable {
     func with(latestAt: String, latestBy: String) -> FeedbackPR {
         FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
                    latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable,
-                   hasFeedback: hasFeedback, branch: branch, lastCommitAt: lastCommitAt, approvals: approvals, botThreads: botThreads,
-                   reviewersRequested: reviewersRequested)
+                   mergeState: mergeState, hasFeedback: hasFeedback, branch: branch, lastCommitAt: lastCommitAt,
+                   approvals: approvals, botThreads: botThreads, reviewersRequested: reviewersRequested)
     }
 
     /// Nothing new: no unanswered feedback, no blocker, not ready to merge. Listed in My PRs,
@@ -481,7 +485,15 @@ struct FeedbackPR: Identifiable, Hashable {
 
     var checksFailing: Bool { checks == "FAILURE" || checks == "ERROR" }
     var hasConflict: Bool { mergeable == "CONFLICTING" }
-    var readyToMerge: Bool { decision == "APPROVED" && checks == "SUCCESS" && mergeable == "MERGEABLE" }
+    /// No checks at all (`nil`: a repo without CI) counts as green only when GitHub says nothing
+    /// blocks the merge: a required check whose workflow skipped this PR also leaves no checks.
+    /// Right after a push, in a repo with CI but no required checks, GitHub reports CLEAN with no
+    /// checks for about 2 seconds before they register. A refresh landing there shows the row ready
+    /// until the next one; the notification is keyed by the approval, so it doesn't fire twice.
+    var readyToMerge: Bool {
+        decision == "APPROVED" && mergeable == "MERGEABLE"
+            && (checks == "SUCCESS" || (checks == nil && mergeState == "CLEAN"))
+    }
 
     /// What blocks or unblocks the PR, most urgent first; nil when there's nothing to say.
     var status: String? {

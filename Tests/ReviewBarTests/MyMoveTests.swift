@@ -48,6 +48,14 @@ struct MyMoveTests {
     @Test func approvedWithoutCIIsReadyToMerge() {
         #expect(mine(decision: "APPROVED", checks: nil).move == .yours(.merge))
         #expect(mine(decision: "APPROVED", checks: "PENDING").move == .yours(.checksRunning))
+        // Mine to merge before GitHub calls it CLEAN, but only CLEAN makes it ready (and notifies).
+        let approved = mine(decision: "APPROVED", checks: nil)
+        #expect(!approved.readyToMerge)
+        #expect(approved.moveHint == "approved")
+        var clean = approved; clean.mergeState = "CLEAN"
+        #expect(clean.move == .yours(.merge))
+        #expect(clean.readyToMerge)
+        #expect(clean.moveHint == nil)
     }
 
     @Test func firstMatchingRuleWins() {

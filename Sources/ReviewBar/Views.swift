@@ -1142,7 +1142,7 @@ struct SettingsView: View {
             }
             Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
             Text(worktreesNextToClone
-                 ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. gauss-worktrees/pr-42."
+                 ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. storefront-worktrees/pr-42."
                  : "Each PR is checked out in ReviewBar's Application Support folder.")
                 .font(.caption2).foregroundStyle(.secondary)
 

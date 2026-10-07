@@ -85,8 +85,8 @@ struct TerminalAppTests {
 
     /// My PR commands start in the checkout of the PR's branch, quoted, and stop if it's gone.
     @Test func launcherStartsInADirectory() {
-        let s = TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "", directory: "/Users/me/it's/gauss-x")
-        #expect(s.contains(#"cd '/Users/me/it'\''s/gauss-x' || exit 1"#))
+        let s = TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "", directory: "/Users/me/it's/storefront-x")
+        #expect(s.contains(#"cd '/Users/me/it'\''s/storefront-x' || exit 1"#))
         #expect(!TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "").contains("cd "))
     }
 

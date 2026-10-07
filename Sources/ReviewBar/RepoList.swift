@@ -25,7 +25,7 @@ enum RepoList {
     static let searchRoots = ["Projects", "Developer", "Code", "code", "src", "dev", "repos", "GitHub", "git", "Sites", "work"]
 
     /// A clone of `repo` one level below a usual projects folder, found by reading `.git/config`
-    /// (no git process). A folder named like the repo wins over e.g. `gauss2`.
+    /// (no git process). A folder named like the repo wins over e.g. `storefront2`.
     static func detectFolder(for repo: String) -> String? {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser

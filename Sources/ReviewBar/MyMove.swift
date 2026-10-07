@@ -1,7 +1,6 @@
 import Foundation
 
 /// Whose move it is on one of my open PRs: mine (and why), or someone else's.
-/// Follows the rule table in the `bearings` skill (`~/.claude/skills/bearings/SKILL.md`).
 enum MyMove: Equatable {
     case yours(Reason)
     case waiting(On)
@@ -26,7 +25,7 @@ enum MyMove: Equatable {
 }
 
 extension FeedbackPR {
-    /// The first rule that matches wins. Two choices differ from the skill's table:
+    /// The first rule that matches wins. The less obvious choices:
     /// - A change request I've already answered (pushed since, no open threads) waits on the reviewer
     ///   to re-review; one newer than my last push counts as `reviews` and so as feedback.
     /// - No reviewer requested and nobody has reviewed: my move (ask someone), not waiting on others.

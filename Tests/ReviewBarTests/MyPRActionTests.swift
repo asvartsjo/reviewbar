@@ -35,7 +35,7 @@ struct MyPRActionTests {
     @Test func findsTheCheckoutOfTheBranchInRealGitOutput() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("rb-\(UUID().uuidString.prefix(8))")
         defer { try? FileManager.default.removeItem(at: root) }
-        let repo = root.appendingPathComponent("gauss").path, fix = root.appendingPathComponent("gauss-fix").path
+        let repo = root.appendingPathComponent("storefront").path, fix = root.appendingPathComponent("storefront-fix").path
         let list = try await sh("""
             set -e
             mkdir -p \(q(root.path)) && git init -q -b main \(q(repo)) && cd \(q(repo))

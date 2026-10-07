@@ -3,7 +3,7 @@ import Testing
 
 struct RepoListTests {
     @Test func acceptsOwnerSlashRepo() {
-        #expect(RepoList.normalize("Teachiq/web-platform") == "Teachiq/web-platform")
+        #expect(RepoList.normalize("acme/web-platform") == "acme/web-platform")
         #expect(RepoList.normalize("  asvartsjo/reviewbar \n") == "asvartsjo/reviewbar")
         #expect(RepoList.normalize("project/my.repo_name-2") == "project/my.repo_name-2")
     }
@@ -28,30 +28,30 @@ struct RepoListTests {
 
 struct RepoFolderTests {
     @Test func remotesMatch() {
-        let remotes = "origin\tgit@github.com:Teachiq/gauss.git (fetch)\norigin\tgit@github.com:Teachiq/gauss.git (push)\n"
-        #expect(RepoList.remotesMatch(remotes, repo: "teachiq/Gauss"))
-        #expect(!RepoList.remotesMatch(remotes, repo: "Teachiq/exam"))
-        #expect(!RepoList.remotesMatch("", repo: "Teachiq/gauss"))
+        let remotes = "origin\tgit@github.com:acme/storefront.git (fetch)\norigin\tgit@github.com:acme/storefront.git (push)\n"
+        #expect(RepoList.remotesMatch(remotes, repo: "ACME/Storefront"))
+        #expect(!RepoList.remotesMatch(remotes, repo: "acme/api"))
+        #expect(!RepoList.remotesMatch("", repo: "acme/storefront"))
     }
 
     @Test func worktreeScriptLeavesTheCloneAlone() {
-        let wt = TerminalApp.Worktree(repoFolder: "/Users/me/it's/gauss", path: "/wt/pr-7", number: 7)
+        let wt = TerminalApp.Worktree(repoFolder: "/Users/me/it's/storefront", path: "/wt/pr-7", number: 7)
         let s = wt.script
-        #expect(s.contains(#"git -C '/Users/me/it'\''s/gauss' fetch --quiet origin +pull/7/head:refs/reviewbar/pr-7"#))
+        #expect(s.contains(#"git -C '/Users/me/it'\''s/storefront' fetch --quiet origin +pull/7/head:refs/reviewbar/pr-7"#))
         #expect(s.contains("worktree add --quiet --detach '/wt/pr-7' refs/reviewbar/pr-7"))
         #expect(s.contains("checkout --quiet --detach refs/reviewbar/pr-7"))
         #expect(!s.contains("checkout -b"))
     }
 
     @Test func worktreePaths() {
-        let pr = PR(number: 7, title: "t", url: "https://github.com/Teachiq/gauss/pull/7", isDraft: false,
-                    updatedAt: "2026-09-01T00:00:00Z", repository: .init(nameWithOwner: "Teachiq/gauss"),
+        let pr = PR(number: 7, title: "t", url: "https://github.com/acme/storefront/pull/7", isDraft: false,
+                    updatedAt: "2026-09-01T00:00:00Z", repository: .init(nameWithOwner: "acme/storefront"),
                     author: .init(login: "a"))
-        let beside = TerminalApp.Worktree.forPR(pr, repoFolder: "/Users/me/TEACHIQ/gauss/", nextToClone: true)
-        #expect(beside.path == "/Users/me/TEACHIQ/gauss-worktrees/pr-7")
-        #expect(beside.repoFolder == "/Users/me/TEACHIQ/gauss/")
-        let support = TerminalApp.Worktree.forPR(pr, repoFolder: "/Users/me/TEACHIQ/gauss", nextToClone: false)
-        #expect(support.path.hasSuffix("/ReviewBar/worktrees/Teachiq-gauss/pr-7"))
+        let beside = TerminalApp.Worktree.forPR(pr, repoFolder: "/Users/me/code/storefront/", nextToClone: true)
+        #expect(beside.path == "/Users/me/code/storefront-worktrees/pr-7")
+        #expect(beside.repoFolder == "/Users/me/code/storefront/")
+        let support = TerminalApp.Worktree.forPR(pr, repoFolder: "/Users/me/code/storefront", nextToClone: false)
+        #expect(support.path.hasSuffix("/ReviewBar/worktrees/acme-storefront/pr-7"))
     }
 
     @Test func launcherRunsWorktreeBeforeAgent() throws {
@@ -64,8 +64,8 @@ struct RepoFolderTests {
 
 struct RepoDetectTests {
     @Test func gitConfigMatch() {
-        let config = "[core]\n\tbare = false\n[remote \"origin\"]\n\turl = git@github.com:Teachiq/gauss.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
-        #expect(RepoList.configMatches(config, repo: "Teachiq/gauss"))
-        #expect(!RepoList.configMatches(config, repo: "Teachiq/exam"))
+        let config = "[core]\n\tbare = false\n[remote \"origin\"]\n\turl = git@github.com:acme/storefront.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+        #expect(RepoList.configMatches(config, repo: "acme/storefront"))
+        #expect(!RepoList.configMatches(config, repo: "acme/api"))
     }
 }

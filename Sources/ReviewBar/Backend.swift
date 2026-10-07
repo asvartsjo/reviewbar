@@ -173,8 +173,16 @@ enum Backend {
         let repo: String
         let title: String
         let url: String?        // API URL of the PR or issue
-        let comment: String?    // API URL of the latest comment
         let updatedAt: String
+        let reason: String
+    }
+
+    /// The PR or issue body, a comment, a review or a review thread comment.
+    struct MentionPost: Decodable, Equatable {
+        let author: String?
+        let body: String?
+        let url: String?
+        let at: String?
     }
 
     /// @mentions since `since`, read on GitHub or not, in the given repos (all when empty). Read-only.
@@ -182,39 +190,87 @@ enum Backend {
         if DemoData.isOn { return DemoData.mentions() }
         let jq = #"[.[] | select(.reason == "mention" or .reason == "team_mention") | "#
             + #"{repo: .repository.full_name, title: .subject.title, url: .subject.url, "#
-            + #"comment: .subject.latest_comment_url, updatedAt: .updated_at}]"#
+            + #"updatedAt: .updated_at, reason: .reason}]"#
         let query = "notifications?participating=true&all=true&per_page=50&since=\(since)"
         guard let out = try? await sh("gh api \(q(query)) --jq \(q(jq))"),
-              let threads = try? JSONDecoder().decode([MentionThread].self, from: Data(out.utf8)) else { return [] }
+              let threads = try? JSONDecoder().decode([MentionThread].self, from: Data(out.utf8)),
+              let me = await viewerLogin() else { return [] }
         let wanted = Set(repos.map { $0.lowercased() })
         var result: [Mention] = []
         for t in threads.filter({ wanted.isEmpty || wanted.contains($0.repo.lowercased()) }).prefix(15) {
             guard let api = t.url, let number = Int(api.split(separator: "/").last ?? "") else { continue }
-            var author = "Someone", snippet = "", url = "https://github.com/\(t.repo)/pull/\(number)"
-            let cacheKey = (t.comment ?? api) + "@" + t.updatedAt
+            let cacheKey = api + "@" + t.updatedAt
+            let post: MentionPost?
             if let hit = await mentionCache.get(cacheKey) {
-                (author, snippet, url) = hit
-            } else if let c = t.comment, c.hasPrefix("https://api.github.com/"),
-               let out = try? await sh("gh api \(q(c)) --jq '{u: .user.login, b: .body, h: .html_url}'"),
-               let d = try? JSONDecoder().decode([String: String?].self, from: Data(out.utf8)) {
-                author = (d["u"] ?? nil) ?? author
-                snippet = Self.snippet((d["b"] ?? nil) ?? "")
-                if let h = d["h"] ?? nil, h.hasPrefix("https://github.com/") { url = h }
-                await mentionCache.set(cacheKey, (author, snippet, url))
+                post = hit
+            } else {
+                let posts = await mentionPosts(repo: t.repo, number: number, since: since)
+                post = newestMention(in: posts, me: me, team: t.reason == "team_mention", since: since)
+                // No posts means even the body fetch failed: search again next refresh.
+                if !posts.isEmpty { await mentionCache.set(cacheKey, post) }
             }
-            result.append(Mention(repo: t.repo, number: number, title: t.title, author: author,
-                                  snippet: snippet, url: url, updatedAt: t.updatedAt))
+            guard let post, let at = post.at, at >= since else { continue }
+            let url = post.url.flatMap { $0.hasPrefix("https://github.com/") ? $0 : nil }
+                ?? "https://github.com/\(t.repo)/pull/\(number)"
+            result.append(Mention(repo: t.repo, number: number, title: t.title, author: post.author ?? "Someone",
+                                  snippet: Self.snippet(post.body ?? ""), url: url, updatedAt: at))
         }
-        return result
+        return result.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    /// Comment details by comment URL and update time, so refreshes only fetch new mentions.
+    /// Everything said on a PR or issue since `since`, plus its body. The pull endpoints fail on an issue;
+    /// a pending review has no `submitted_at` (and only you can see it), so it drops out.
+    private static func mentionPosts(repo: String, number: Int, since: String) async -> [MentionPost] {
+        let base = "repos/\(repo)"
+        let post = #"{author: .user.login, body: .body, url: .html_url, at: "#
+        func fetch(_ path: String, _ jq: String) async -> [MentionPost] {
+            guard let out = try? await sh("gh api --paginate \(q(path)) --jq \(q(jq))") else { return [] }
+            return out.split(separator: "\n").compactMap { try? JSONDecoder().decode(MentionPost.self, from: Data($0.utf8)) }
+        }
+        async let body = fetch("\(base)/issues/\(number)", post + ".created_at}")
+        async let comments = fetch("\(base)/issues/\(number)/comments?since=\(since)&per_page=100", ".[] | " + post + ".created_at}")
+        async let threads = fetch("\(base)/pulls/\(number)/comments?since=\(since)&per_page=100", ".[] | " + post + ".created_at}")
+        async let reviews = fetch("\(base)/pulls/\(number)/reviews?per_page=100", ".[] | " + post + ".submitted_at}")
+        return await body + comments + threads + reviews
+    }
+
+    /// The newest post since `since` that is a mention of you. GitHub keeps a thread's "mention"
+    /// reason through later activity, so the thread's latest comment may not be one. Pure, for tests.
+    static func newestMention(in posts: [MentionPost], me: String, team: Bool, since: String) -> MentionPost? {
+        posts.filter { ($0.at ?? "") >= since && isMention($0.body, author: $0.author ?? "", me: me, team: team) }
+            .max { ($0.at ?? "") < ($1.at ?? "") }
+    }
+
+    /// Someone else wrote it and it @mentions you, or any team for a team mention. Quoted lines and
+    /// code don't count: a quote reply repeats the earlier mention. Pure, for tests.
+    static func isMention(_ body: String?, author: String, me: String, team: Bool) -> Bool {
+        guard author.lowercased() != me.lowercased() else { return false }
+        let text = threadText(body ?? "").replacing(/`[^`\n]*`/, with: " ")
+            .split(separator: "\n").filter { !$0.drop(while: \.isWhitespace).hasPrefix(">") }
+            .joined(separator: "\n")
+        if team, text.contains(/(?:^|[^\w\/.])@[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+/) { return true }
+        return text.matches(of: /(?:^|[^\w\/.])@([A-Za-z0-9-]+)/).contains { $0.1.lowercased() == me.lowercased() }
+    }
+
+    /// The mention found per thread and update time, so refreshes only search changed threads.
     private actor MentionCache {
-        private var items: [String: (String, String, String)] = [:]
-        func get(_ k: String) -> (String, String, String)? { items[k] }
-        func set(_ k: String, _ v: (String, String, String)) { items[k] = v }
+        private var items: [String: MentionPost?] = [:]
+        private var me: String?
+        func get(_ k: String) -> MentionPost?? { items[k] }
+        func set(_ k: String, _ v: MentionPost?) { items[k] = v }
+        func viewer() -> String? { me }
+        func setViewer(_ login: String) { me = login }
     }
     private static let mentionCache = MentionCache()
+
+    /// Your GitHub login, fetched once.
+    private static func viewerLogin() async -> String? {
+        if let me = await mentionCache.viewer() { return me }
+        guard let out = try? await sh("gh api user --jq .login"),
+              case let me = out.trimmingCharacters(in: .whitespacesAndNewlines), !me.isEmpty else { return nil }
+        await mentionCache.setViewer(me)
+        return me
+    }
 
     /// First ~140 characters of a comment on one line, quotes and code fences dropped. Pure, for tests.
     static func snippet(_ body: String) -> String {
@@ -225,8 +281,8 @@ enum Backend {
         return text.count > 140 ? String(text.prefix(139)) + "…" : text
     }
 
-    /// A review comment's first real line, bold dropped: "🟡 LOW — title" for the pr-review skill's
-    /// comments, whose Description / Consequence / Suggested fix paragraphs follow. Pure, for tests.
+    /// A review comment's first real line, bold dropped: "🟡 LOW — title" for a severity-tagged
+    /// comment, whose Description / Consequence / Suggested fix paragraphs follow. Pure, for tests.
     static func threadTitle(_ body: String) -> String {
         let first = body.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }

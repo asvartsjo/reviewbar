@@ -7,20 +7,20 @@ struct CrewTests {
     /// `sessionId` and `pid`, plus `waitingFor` while waiting; background ones have `id` and `state`.
     private let sample = Data("""
     [
-      {"pid": 1, "cwd": "/Users/me/TEACHIQ/gauss-fix", "kind": "interactive", "startedAt": 1790939000000,
-       "sessionId": "aaaa1111", "name": "gauss-5b", "status": "waiting", "waitingFor": "input needed"},
-      {"pid": 2, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "interactive", "startedAt": 1790939100000,
-       "sessionId": "bbbb2222", "name": "gauss-ef", "status": "idle"},
-      {"pid": 3, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "interactive", "startedAt": 1790939200000,
-       "sessionId": "cccc3333", "name": "gauss-25", "status": "busy"},
-      {"pid": 4, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "background", "startedAt": 1790939300000,
-       "sessionId": "s4", "name": "pr-4977", "status": null, "state": "blocked", "id": "dddd4444"},
-      {"pid": 5, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "background", "startedAt": 1790939400000,
+      {"pid": 1, "cwd": "/Users/me/code/storefront-fix", "kind": "interactive", "startedAt": 1790939000000,
+       "sessionId": "aaaa1111", "name": "storefront-5b", "status": "waiting", "waitingFor": "input needed"},
+      {"pid": 2, "cwd": "/Users/me/code/storefront", "kind": "interactive", "startedAt": 1790939100000,
+       "sessionId": "bbbb2222", "name": "storefront-ef", "status": "idle"},
+      {"pid": 3, "cwd": "/Users/me/code/storefront", "kind": "interactive", "startedAt": 1790939200000,
+       "sessionId": "cccc3333", "name": "storefront-25", "status": "busy"},
+      {"pid": 4, "cwd": "/Users/me/code/storefront", "kind": "background", "startedAt": 1790939300000,
+       "sessionId": "s4", "name": "pr-152", "status": null, "state": "blocked", "id": "dddd4444"},
+      {"pid": 5, "cwd": "/Users/me/code/storefront", "kind": "background", "startedAt": 1790939400000,
        "sessionId": "s5", "name": "scout", "status": "busy", "state": "working", "id": "eeee5555"},
-      {"pid": 6, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "interactive", "startedAt": 1790939500000,
+      {"pid": 6, "cwd": "/Users/me/code/storefront", "kind": "interactive", "startedAt": 1790939500000,
        "sessionId": "ffff6666", "name": "odd", "status": "dreaming"},
       {"pid": 7, "kind": "interactive", "status": "busy", "sessionId": "no-cwd"},
-      {"pid": 8, "cwd": "/Users/me/TEACHIQ/gauss", "kind": "interactive", "status": "busy"}
+      {"pid": 8, "cwd": "/Users/me/code/storefront", "kind": "interactive", "status": "busy"}
     ]
     """.utf8)
 
@@ -40,29 +40,29 @@ struct CrewTests {
         #expect(Crew.parseSessions(Data(#"{"sessions": []}"#.utf8)).isEmpty)
     }
 
-    private func mine(_ n: Int, branch: String, repo: String = "Teachiq/gauss") -> FeedbackPR {
+    private func mine(_ n: Int, branch: String, repo: String = "acme/storefront") -> FeedbackPR {
         let pr = PR(number: n, title: "PR \(n)", url: "https://github.com/\(repo)/pull/\(n)", isDraft: false,
                     updatedAt: "2026-10-04T00:00:00Z", repository: .init(nameWithOwner: repo), author: .init(login: "me"))
         return FeedbackPR(pr: pr, decision: nil, threads: 0, reviews: 0, comments: 0, latestAt: "", latestBy: "",
                           branch: branch)
     }
 
-    private let clone = "/Users/me/TEACHIQ/gauss"
+    private let clone = "/Users/me/code/storefront"
 
     private var checkouts: [Crew.Checkout] {
-        let review = TerminalApp.Worktree.forPR(4977, repo: "Teachiq/gauss", repoFolder: clone, nextToClone: true).path
+        let review = TerminalApp.Worktree.forPR(152, repo: "acme/storefront", repoFolder: clone, nextToClone: true).path
         let listed: [TerminalApp.Worktree.Listed] = [
             .init(path: clone, detached: false, branch: "refs/heads/development"),
-            .init(path: "/Users/me/TEACHIQ/gauss-fix", detached: false, branch: "refs/heads/atanas/fix"),
+            .init(path: "/Users/me/code/storefront-fix", detached: false, branch: "refs/heads/atanas/fix"),
             .init(path: "\(clone)/.claude/worktrees/bright-fox", detached: false, branch: "refs/heads/worktree-bright-fox"),
             .init(path: review, detached: true),
         ]
-        return Crew.checkouts(repo: "Teachiq/gauss", repoFolder: clone, listed: listed,
-                              myPRs: [mine(4961, branch: "atanas/fix"), mine(9, branch: "atanas/fix", repo: "o/other")])
+        return Crew.checkouts(repo: "acme/storefront", repoFolder: clone, listed: listed,
+                              myPRs: [mine(120, branch: "atanas/fix"), mine(9, branch: "atanas/fix", repo: "o/other")])
     }
 
     @Test func checkoutsKnowTheirPR() {
-        #expect(checkouts.map(\.prNumber) == [nil, 4961, nil, 4977])
+        #expect(checkouts.map(\.prNumber) == [nil, 120, nil, 152])
     }
 
     private func session(_ id: String, _ cwd: String, needsMe: Bool = false, started: Double = 0) -> CrewSession {
@@ -71,16 +71,16 @@ struct CrewTests {
     }
 
     @Test func eachSessionLandsInTheDeepestCheckoutHoldingItsFolder() {
-        let review = TerminalApp.Worktree.forPR(4977, repo: "Teachiq/gauss", repoFolder: clone, nextToClone: true).path
-        let items = Crew.link([session("fix", "/Users/me/TEACHIQ/gauss-fix/server"),
+        let review = TerminalApp.Worktree.forPR(152, repo: "acme/storefront", repoFolder: clone, nextToClone: true).path
+        let items = Crew.link([session("fix", "/Users/me/code/storefront-fix/server"),
                                session("review", review),
                                session("bg", "\(clone)/.claude/worktrees/bright-fox"),
                                session("clone", clone),
-                               session("lookalike", "/Users/me/TEACHIQ/gauss-fixes"),
+                               session("lookalike", "/Users/me/code/storefront-fixes"),
                                session("elsewhere", "/Users/me/Projects/reviewbar")], to: checkouts)
         #expect(items.map(\.session.id) == ["fix", "review", "bg", "clone"])
-        #expect(items.map(\.prNumber) == [4961, 4977, nil, nil])
-        #expect(Set(items.map(\.repo)) == ["Teachiq/gauss"])
+        #expect(items.map(\.prNumber) == [120, 152, nil, nil])
+        #expect(Set(items.map(\.repo)) == ["acme/storefront"])
     }
 
     @Test func waitingOnMeFirstThenNewest() {
@@ -90,8 +90,8 @@ struct CrewTests {
     }
 
     @Test func notifiesOnlyWhenASessionStartsWaiting() {
-        let asks = CrewItem(session: session("a", clone, needsMe: true), repo: "Teachiq/gauss", prNumber: nil)
-        let busy = CrewItem(session: session("b", clone), repo: "Teachiq/gauss", prNumber: nil)
+        let asks = CrewItem(session: session("a", clone, needsMe: true), repo: "acme/storefront", prNumber: nil)
+        let busy = CrewItem(session: session("b", clone), repo: "acme/storefront", prNumber: nil)
         #expect(Crew.newlyWaiting([asks, busy], before: nil).isEmpty)          // first poll: baseline
         #expect(Crew.newlyWaiting([asks, busy], before: []).map(\.id) == ["a"])
         #expect(Crew.newlyWaiting([asks, busy], before: ["a"]).isEmpty)        // still the same question
@@ -107,19 +107,19 @@ struct CrewTests {
 
     @Test func secondSessionCheckSeesAnyStateAndFreshLaunches() {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        var idle = session("gauss-7a", "/Users/me/TEACHIQ/gauss-fix")
+        var idle = session("storefront-7a", "/Users/me/code/storefront-fix")
         idle = CrewSession(id: idle.id, name: idle.name, cwd: idle.cwd, background: false, needsMe: false,
                            working: false, startedAt: idle.startedAt)
-        let crew = [CrewItem(session: idle, repo: "Teachiq/gauss", prNumber: 4961)]
-        let open = Crew.openSession(onPR: 4961, repo: "teachiq/gauss", crew: crew, launchedAt: nil, now: now)
+        let crew = [CrewItem(session: idle, repo: "acme/storefront", prNumber: 120)]
+        let open = Crew.openSession(onPR: 120, repo: "ACME/Storefront", crew: crew, launchedAt: nil, now: now)
         #expect(open?.contains("idle at its prompt") == true)
-        #expect(open?.contains("gauss-7a") == true)
-        #expect(Crew.openSession(onPR: 4962, repo: "Teachiq/gauss", crew: crew, launchedAt: nil, now: now) == nil)
-        #expect(Crew.openSession(onPR: 4961, repo: "o/other", crew: crew, launchedAt: nil, now: now) == nil)
+        #expect(open?.contains("storefront-7a") == true)
+        #expect(Crew.openSession(onPR: 121, repo: "acme/storefront", crew: crew, launchedAt: nil, now: now) == nil)
+        #expect(Crew.openSession(onPR: 120, repo: "o/other", crew: crew, launchedAt: nil, now: now) == nil)
         // A double click: the first session isn't listed yet.
-        #expect(Crew.openSession(onPR: 4962, repo: "Teachiq/gauss", crew: crew,
+        #expect(Crew.openSession(onPR: 121, repo: "acme/storefront", crew: crew,
                                  launchedAt: now.addingTimeInterval(-5), now: now) != nil)
-        #expect(Crew.openSession(onPR: 4962, repo: "Teachiq/gauss", crew: crew,
+        #expect(Crew.openSession(onPR: 121, repo: "acme/storefront", crew: crew,
                                  launchedAt: now.addingTimeInterval(-90), now: now) == nil)
     }
 
@@ -174,7 +174,7 @@ struct CrewTests {
         let s = Crew.parseSessions(sample)
         #expect(s[1].sessionId == "bbbb2222")
         #expect(s[3].sessionId == "s4")   // agent view sessions have one too, beside their `id`
-        #expect(s[1].displayName == "gauss-ef")
+        #expect(s[1].displayName == "storefront-ef")
         var titled = s[1]
         titled.title = "Bearing skill usage"
         #expect(titled.displayName == "Bearing skill usage")

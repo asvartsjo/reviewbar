@@ -56,7 +56,7 @@ struct ReviewingDetailTests {
         #expect(d.myThreads[1].location == "file-level.ts")
     }
 
-    /// The pr-review skill's shape: a title line, then paragraphs and a code block. JSON-escaped.
+    /// A severity-tagged comment's shape: a title line, then paragraphs and a code block. JSON-escaped.
     private let skillComment = #"🟡 **LOW** — Logic in the controller\r\n\r\n**Description:** Move it.\r\n\r\n"#
         + #"**Suggested fix:** An Action.\r\n```php\r\nnew Action();\r\n```"#
 

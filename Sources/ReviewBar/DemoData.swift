@@ -113,6 +113,14 @@ enum DemoData {
                   repo: "acme/storefront", prNumber: 152)]
     }
 
+    /// Two of my worktrees whose PRs are done: one merged, one closed.
+    static func cleanup() -> [Cleanup.Candidate] {
+        [Cleanup.Candidate(repo: "acme/storefront", repoFolder: "/demo/storefront", path: "/demo/storefront-search-filters",
+                           branch: "search-filters", prNumber: 95, state: "MERGED"),
+         Cleanup.Candidate(repo: "acme/api", repoFolder: "/demo/api", path: "/demo/api-old-invoices",
+                           branch: "old-invoices", prNumber: 112, state: "CLOSED")]
+    }
+
     static func mentions() -> [Mention] {
         [Mention(repo: "acme/api", number: 214, title: rateLimit.title, author: "omar",
                  snippet: "@you does this match what we agreed for the partner API?",

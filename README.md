@@ -2,29 +2,19 @@
 
 A macOS menubar app that lists GitHub pull requests awaiting your review in selected repos, and hands them to Claude Code or OpenAI's Codex CLI for private review notes. Runs on your Claude or ChatGPT subscription login, not the API.
 
-## What it does
+Nothing is ever posted to GitHub. Only read-only `gh` commands are used.
 
-- Lists open PRs where you are a requested reviewer, in the repos you choose (any mix of orgs and users).
-- **Review with Claude** runs `claude -p` headlessly and shows a private summary, a lean (approve / comment / request changes), and findings with `file:line`, quoted code and a question to ask the author.
-- **Review changes since…**: when a PR you reviewed gets new commits, review only those commits against your earlier notes (which concerns are resolved, still open, and what's new). If the branch was rebased or force-pushed the new commits can't be separated, so it falls back to the full diff with your notes, and says so. **Full review** is still there.
-- **My PRs** also shows CI and merge state: merge conflicts and failing checks come first under **Your move**, and so do approved PRs with green checks ("Ready to merge").
-- **Terminal** (Settings): open Claude Code sessions in Terminal, iTerm2, Ghostty, WezTerm, kitty or Alacritty. Only installed ones are listed; **Automatic** (the default) picks the first installed of Ghostty, iTerm2, WezTerm, kitty, Alacritty, then Terminal. For anything else (Warp, …) choose **Copy command** and paste it into your terminal. When Claude exits you are left at a normal shell prompt. **Review command** is the first message of a new review there: empty (the default) uses the built-in review prompt, or enter e.g. `/pr-review {url}` to run your own skill or command (Codex always uses the built-in one). **Verify command** is sent by *Verify fixes* in a PR's "Since your review" box (shown after new commits or a reply in your review threads there): by default it asks Claude to check each of your GitHub threads against the commits since your review; leave it empty to hide the button (Claude only).
-- **Review prompt** (Settings): see and edit how reviews are written and how suggested comments are worded. It's used by every review and re-review (Claude and Codex), and by new terminal reviews unless a Review command is set. *Full prompt* shows the whole prompt; the rules and output format around your text stay fixed, because ReviewBar reads the verdict and findings from them. **Reset to built-in** (or an empty box) brings back the default.
-- **Menu bar number** (Settings › Panel): pick what the number counts: review requests (awaiting your review), new commits or replies on PRs you reviewed, feedback on your PRs, and mentions. All are on by default. A PR counts once even when it's in several. PRs muted in Reviewing don't count as requests or activity, but a mention still counts.
-- **Include draft PRs** (Settings, on by default) hides other people's drafts from Reviewing when turned off; your own drafts always show in My PRs.
-- A running review can be cancelled. Hitting your Claude plan's usage limit shows a clear message (with the reset time when Claude Code gives one) instead of a failed review.
-- If one watched repo can't be read by `gh` (typo, lost access, SSO), it is named and left out so the rest keep working; it is tried again when you change Settings.
-- **Notifications** for new review requests (a request on a PR you already reviewed says re-requested), replies on your review threads, feedback on your PRs, checks turning green on your PRs that aren't ready to merge yet (a push whose checks finish between two refreshes counts too; parked PRs and PRs without checks stay quiet; it never counts in the menu bar), and on PRs you reviewed: new commits after your review, all your threads resolved, and other reviewers approving or requesting changes (each can be turned off in Settings). New commits don't create a GitHub notification, so they show up with the 5-minute refresh. The new-commits notification has a **Verify fixes** button (hover over it, or use the Alerts style) that starts the Verify session, when a Verify command and a terminal are set. Clicking one opens the PR. Several events on one PR in the same refresh (say a re-request and new commits) become one notification, and more than three PRs at once become one summary. The first refresh after launch only sets a baseline, so starting the app doesn't flood you.
-- **Stay open when clicking elsewhere** (Settings › Panel, off by default) keeps the popover up while you work in other apps; close it with the menu bar icon or Esc.
-- **Open as a window** (Settings › Panel, off by default) opens a normal window instead of the popup: move and resize it (at least 480×580), and it stays open until you close it. It remembers its position and size. Clicking the menu bar icon brings it to the front. It isn't in the Dock or ⌘-Tab.
-- **Open at login** (Settings › Startup). Refreshes every 5 minutes and whenever you open the popover if the data is over a minute old.
-- Reviews are saved locally and reload on launch, labelled with the model and effort that wrote them.
-- **Settings › AI tool** switches between Claude Code and Codex. For Codex, type a model name (e.g. `gpt-5.5`) or leave it empty for your Codex config, and pick a reasoning effort; `OPENAI_API_KEY` is unset so it uses your ChatGPT login, and headless reviews run with `codex exec --sandbox read-only`.
-- **Settings › Claude** picks a model and effort for anything that reads code (Review with Claude, every Terminal session), (default Opus), and a separate pair (default Sonnet, low effort) for **Summarise feedback**. Models are Claude Code aliases, so they follow the latest release in each family. That summary reads only comments, never the diff, so it reports what people said and what's waiting on you, not whether a fix is right. Terminal sessions get it as a starting point together with the full comments and diff. "Default" passes no model flag, so Claude Code's own settings apply.
-- **Reviewing** lists every open PR you review, grouped by whose turn it is. **Your turn**: newly requested, re-requested, new commits since your last review, a reply in one of your threads, or the author answering in the conversation after your review or comment (a comment to someone else, like `@coderabbitai …`, doesn't count). **Author's turn**: nothing new since your review, or you commented in the conversation after the new commits. **Done**: you approved, and nothing changed or you commented on what did. Each row shows why, how many of the threads you opened are resolved, other reviewers' approvals and change requests, and CI. Bots are ignored. Requested rows show how long the PR has been open (orange from 3 days), ✨ / 🕘 mark a review saved in ReviewBar for this or an older version, and **Review all** above the list reviews every request without one. The tab count is Your turn; the menu bar number is what Settings › Panel › Menu bar number picks (by default Your turn, feedback on your PRs and mentions). A reply in a thread also counts as a review on GitHub, so replying after new commits makes them look seen. Opening a PR you reviewed shows **Since your review**: the new commits (or that the branch was rebased), what other people did since, newest first (approvals, change requests, reviews, replies in threads, PR comments, force-pushes, review requests and dismissals, draft changes; click one to open it), each thread you opened (open, who replied, resolved, and whether the code it points at changed; click one to open it on GitHub), replied first, then open, then resolved, and within each by the severity icon it starts with (🚨 🔴 🟠 🟡 ❓, when a comment starts with one), with a red **N blocking** for open 🚨/🔴 ones, and other reviewers' verdicts and open threads. It loads fresh each time you open the PR. Once someone else has reviewed or commented since your review, **Summarise what happened** gives a short summary of just that. A blue dot marks PRs where someone else reviewed, commented or pushed since you last opened them (and, inside, the activity since then); a PR you never opened counts as new. Your own comments never do. The first launch with this feature records every listed PR as seen. Right-click a row to **mute** it until something happens (the next review, comment or push by someone else brings it back) or for good (also no new-commits, resolved or verdict notifications); muted PRs sit dimmed in a **Muted** section at the bottom and don't count in the tab or menu bar. A review request you never reviewed can only be muted for good; a re-request always shows, muted or not.
-- **My PRs** lists your own open PRs (the 30 most recently updated), including ones nobody has looked at yet. Those with reviewer feedback you haven't answered come first: unresolved threads where a reviewer spoke last, and approvals, change requests, review summaries or comments newer than your last commit or comment. Bots are ignored there. The list is grouped by whose move it is: **Your move** (a conflict, failing checks, feedback to answer, an open bot thread such as CodeRabbit's, a draft that may be ready for review, checks still running, or an approved PR to merge; newest first), **Waiting on others** (reviewers still to look; dismissed PRs wait here until new feedback) and **Parked** (folded): drafts with no commit for 30+ days, and any PR you park from its right-click menu (**Unpark** brings it back; a parked PR never notifies or counts). A line on top counts both: "3 wait on you · 5 on others", and the tab shows the Your move count. Only feedback from people, blockers and PRs ready to merge notify or count in the menu bar; drafts and bot threads don't. **Summarise feedback** is offered once a reviewer has left any feedback, answered or not. **Work through feedback in Terminal** opens Claude Code with all of it plus the diff, starting with a grouped list of what reviewers are asking for. With Claude Code, a PR with feedback or failing CI gets **Triage feedback** instead once you set a **Triage feedback command** (Settings › Terminal; empty by default, e.g. `/pr-feedback {url}` to run your own skill), and one ready to merge gets **Merge check** (in its detail and its right-click menu): they send that command or the merge command (`can I merge {url}?`) in the checkout that has the PR's branch checked out, a worktree or your clone. ReviewBar never switches a branch: with no such checkout it copies the command instead. With Claude Code, the **Crew** tab lists the Claude sessions working in your watched repos (read with `claude agents --json` every 15 seconds, locally): terminal sessions and agent view (`claude --bg`) ones, those waiting on you first ("needs you": a question in the terminal, or a blocked background session), with the PR each works on when its folder tells (a worktree on your PR's branch, or a review worktree). Click an agent view session to open it with `claude attach`; click a terminal session for its PR, or to bring it to the front (also right-click › **Show session**): its tab in iTerm2 or Terminal, or VS Code's window for its folder for a session in the Claude Code extension. Rows say where each runs (iTerm2, Terminal, VS Code), found from its parent processes. Right-click › **Stop session** stops either kind and keeps its conversation: agent view with `claude stop` (`claude attach` resumes it), terminal by ending its `claude` process (`claude --resume` reopens it; a working one asks first). Sessions at their prompt fold under **Idle**: one can live on with no visible window. A PR with a session shows a **Claude needs you** or **Claude working** badge, in My PRs and in Reviewing. Before any terminal button opens a session on a PR that already has one (in any state, idle included) or that ReviewBar opened a session on in the last minute, it asks first: two sessions in one checkout overwrite each other's edits. When a session starts waiting on you, a **Claude needs you** notification fires (agent view itself only notifies while it's open), and sessions waiting on you add to the menu bar number; both can be turned off in Settings. Agent view is a research preview: if its output changes, the tab stays empty. The tab shows how many sessions are active (not idle).
-- **Follow up in Terminal** opens Claude Code seeded with the saved notes, the PR's reviews, review threads and conversation (your comments marked, unresolved threads first) and the current diff. It is offered for any PR with saved notes or replies.
-- Nothing is ever posted to GitHub. Only read-only `gh` commands are used.
+## At a glance
+
+- **Reviewing**: every open PR you review, grouped by whose turn it is, with thread, approval and CI status.
+- **My PRs**: your own open PRs, grouped by whose move it is: conflicts, failing checks, unanswered feedback, ready to merge.
+- **Crew** (Claude Code): the Claude sessions working in your watched repos, those waiting on you first.
+- **Review with Claude** (or Codex): a private summary, a lean (approve / comment / request changes) and findings with `file:line`, quoted code and a question to ask the author.
+- **Review changes since…**: re-review only the commits since your last review, against your earlier notes.
+- **Terminal hand-offs**: open Claude Code in your terminal for a review, a follow-up, verifying fixes or working through feedback on your own PR.
+- **Notifications** and a **menu bar number** for what needs you.
+
+How each of these works, every setting, and what keeps headless reviews safe: **[docs/features.md](docs/features.md)**.
 
 ## Requirements
 
@@ -32,11 +22,11 @@ A macOS menubar app that lists GitHub pull requests awaiting your review in sele
 - [`gh`](https://cli.github.com) logged in (`gh auth login`, authorise SSO if your org needs it)
 - [Claude Code](https://claude.com/claude-code) logged in with your Max account (`claude`), or [Codex CLI](https://github.com/openai/codex) logged in with ChatGPT (`codex login`)
 
-## Setup
+## Install
 
-Install it locally by building from source. You don't need an Apple developer account or Xcode, only the Command Line Tools (`xcode-select --install`).
+Build it from source. You don't need an Apple developer account or Xcode, only the Command Line Tools (`xcode-select --install`).
 
-1. Install and log in to the tools ReviewBar shells out to (see [Requirements](#requirements)):
+1. Install and log in to the tools ReviewBar shells out to:
 
    ```sh
    brew install gh && gh auth login        # authorise SSO if your org needs it
@@ -57,9 +47,50 @@ Install it locally by building from source. You don't need an Apple developer ac
 
 The app is ad-hoc signed and not sandboxed (it runs `gh` and `claude`). Because you build it yourself it isn't quarantined, so Gatekeeper doesn't complain. macOS asks for notification and Automation (Terminal) permission the first time they're needed.
 
-To update, `git pull` and run the same build and `mv` again (quit the running app first). To uninstall, delete `/Applications/ReviewBar.app` and, if you want to drop saved reviews, `~/Library/Application Support/ReviewBar/`.
+**Update:** quit the app, `git pull`, then run the same build and `mv` again.
 
-If the build fails with `plugin for module 'TestingMacros' not found` that only affects `swift test`; see [Developing](#developing). If `gh`, `claude` or `codex` isn't found by the app, check that `which gh claude` works in a new Terminal window: the app uses your login shell's `PATH`.
+**Uninstall:** delete `/Applications/ReviewBar.app` and, to drop saved reviews, `~/Library/Application Support/ReviewBar/`.
+
+**Troubleshooting**
+
+- `plugin for module 'TestingMacros' not found` only affects `swift test`; see [Developing](#developing).
+- If the app can't find `gh`, `claude` or `codex`, check that `which gh claude` works in a new Terminal window: the app uses your login shell's `PATH`.
+
+## Settings
+
+Open the gear in the panel. Details for each: [docs/features.md › Settings](docs/features.md#settings).
+
+| Section | What you set |
+|---|---|
+| Repositories | The repos to watch, as `owner/repo` |
+| AI tool | Claude Code or Codex, and the model and effort for reviews and for Summarise feedback |
+| Terminal | Which terminal opens Claude Code sessions, the Review, Verify and Triage feedback commands, and where PR worktrees go |
+| Review prompt | How reviews are written and how suggested comments are worded |
+| Pull requests | Whether other people's drafts show in Reviewing |
+| Notifications | Which events notify you |
+| Panel | What the menu bar number counts, stay open when clicking elsewhere, open as a window |
+| Startup | Open at login |
+
+## Developing
+
+- `swift run` starts it straight from the source tree. Notifications and Open at login need the `.app` bundle, so they are disabled there. It uses a separate settings domain from the `.app`, so add your repos in each.
+- `swift run ReviewBar --demo` (or `open build/ReviewBar.app --args --demo` for notifications) shows made-up PRs covering every Reviewing state, without calling `gh`. The next refresh (↻, or reopening the panel a minute later) plays a second step: a push, a resolved thread, a new approval and a new request. Reviews are never saved in demo mode; actions that need GitHub or Claude fail on the fake repos.
+- `swift test` runs the unit tests (repo name parsing, model settings, feedback, reply and reviewing parsing from sample GitHub responses). With only the Command Line Tools, SwiftPM may not find the Swift Testing macros ("plugin for module 'TestingMacros' not found"); pass the plugin path:
+
+  ```sh
+  swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
+  ```
+
+  To shorten it, add an alias to `~/.zshrc`:
+
+  ```sh
+  alias rbtest='swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing'
+  ```
+
+- `open Package.swift` opens it in Xcode.
+- Views use `@ViewState` instead of `@State`: on the macOS 27 SDK `@State` is a macro that only builds with Xcode, not with just the Command Line Tools.
+- CI (GitHub Actions, macOS) builds, tests and bundles the app on every push; the zipped `.app` is attached to each run. A downloaded build is quarantined by macOS: right-click › Open the first time, or `xattr -dr com.apple.quarantine ReviewBar.app`.
+- When you add or change a feature, update [docs/features.md](docs/features.md), and the At a glance list above if it's a new headline feature.
 
 ### Releases
 
@@ -68,6 +99,8 @@ Push a tag to build a drag-to-Applications `.dmg` (universal: Apple Silicon and 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
 ```
+
+"Run workflow" on the Release workflow builds the `.dmg` as a run artifact without making a release. Locally: `scripts/make-app.sh && scripts/make-dmg.sh`.
 
 Without a certificate the app is ad-hoc signed: fine for your own Mac (right-click › Open the first time), but macOS may ask again for notification and Terminal permissions after each update. Signing and notarization switch on by themselves once these repository secrets exist (Settings › Secrets and variables › Actions):
 
@@ -79,26 +112,6 @@ Without a certificate the app is ad-hoc signed: fine for your own Mac (right-cli
 | `APPLE_API_KEY_ID` | that key's ID |
 | `APPLE_API_ISSUER_ID` | the issuer ID from the App Store Connect keys page |
 
-"Run workflow" on the Release workflow builds the `.dmg` as a run artifact without making a release. Locally: `scripts/make-app.sh && scripts/make-dmg.sh`.
-
-### Developing
-
-- `swift run` starts it straight from the source tree. Notifications and Open at login need the `.app` bundle, so they are disabled there. It uses a separate settings domain from the `.app`, so add your repos in each.
-- `swift run ReviewBar --demo` (or `open build/ReviewBar.app --args --demo` for notifications) shows made-up PRs covering every Reviewing state, without calling `gh`. The next refresh (↻, or reopening the panel a minute later) plays a second step: a push, a resolved thread, a new approval and a new request. Reviews are never saved in demo mode; actions that need GitHub or Claude fail on the fake repos.
-- `swift test` runs the unit tests (repo name parsing, model settings, feedback, reply and reviewing parsing from sample GitHub responses). With only the Command Line Tools, SwiftPM may not find the Swift Testing macros ("plugin for module 'TestingMacros' not found"); pass the plugin path: `swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing`. To shorten it, add `alias rbtest='swift test -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing'` to `~/.zshrc`.
-- `open Package.swift` opens it in Xcode.
-- Views use `@ViewState` instead of `@State`: on the macOS 27 SDK `@State` is a macro that only builds with Xcode, not with just the Command Line Tools.
-- CI (GitHub Actions, macOS) builds, tests and bundles the app on every push; the zipped `.app` is attached to each run. A downloaded build is quarantined by macOS: right-click › Open the first time, or `xattr -dr com.apple.quarantine ReviewBar.app`.
-
 ## Contributing
 
 The source is public so you can read it, build it and fork it. Only the maintainers can push to this repository; changes land through pull requests that a maintainer reviews. Issues and PRs from forks are welcome, but there is no promise they will be merged or answered quickly.
-
-## Notes
-
-- Commands run through an interactive login zsh so `PATH` matches your Terminal.
-- `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are unset for every `claude` call so the subscription is used, never API billing.
-- Reviews are stored in `~/Library/Application Support/ReviewBar/` (`reviews.json` plus one `.md` per review).
-- Diffs are capped at 250 KB. Terminal follow-ups refuse prompts over 800 KB (macOS argument limit).
-- Headless reviews never get a shell or MCP servers (`--strict-mcp-config`) and run no hooks (`disableAllHooks`). They still follow the repo's CLAUDE.md and `.claude/rules/` and your own `~/.claude/CLAUDE.md`, so a PR's own edits to those files can steer its review. When the PR's checkout has its own `.claude/settings.json` or `settings.local.json`, which could redirect the API (`env`) or run a command (`apiKeyHelper`), the review loads your user settings only (`--setting-sources user`). That drops the project's CLAUDE.md and rules too, and the review says so under the verdict. When the repo has a local clone (chosen in Settings, or found under `~/Projects`, `~/Developer`, …), the review runs in a worktree of the PR's head commit with read-only tools (`Read,Grep,Glob`; Codex: `--sandbox read-only --cd <worktree>`), so it can check callers and conventions instead of asking the author. Without a clone it gets no tools (`--tools ''`) and only sees the diff. This needs a recent Claude Code (`claude update`). Opening a PR again moves its worktree to the new head, unless it has local changes or commits the PR doesn't have yet. **Put PR worktrees next to the clone** (Settings › Terminal) keeps them in `<clone>-worktrees/pr-<N>` instead of ReviewBar's own folder. Once a day ReviewBar removes the worktrees it made for PRs that are now merged or closed, and only when nothing would be lost: no uncommitted or untracked files (ignored ones such as a copied `vendor/` don't count) and no commit that isn't on GitHub. Your own worktrees and branches are never touched.
-- A review is tied to the PR's head commit, so comments alone don't mark it stale; new commits do.

@@ -876,7 +876,6 @@ struct SettingsView: View {
     @AppStorage(MenuBarCount.reviewedKey) private var countReviewed = true
     @AppStorage(MenuBarCount.myPRsKey) private var countMyPRs = true
     @AppStorage(MenuBarCount.mentionsKey) private var countMentions = true
-    @AppStorage(MenuBarCount.crewKey) private var countCrew = true
     @AppStorage(TerminalApp.key) private var terminalRaw = ""
     @AppStorage(ClaudeSettings.reviewCommandKey) private var reviewCommand = ClaudeSettings.reviewCommandDefault
     @AppStorage(ClaudeSettings.verifyCommandKey) private var verifyCommand = ClaudeSettings.verifyCommandDefault
@@ -1106,7 +1105,10 @@ struct SettingsView: View {
             }
             .font(.caption2).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Review command").font(.headline)
+                HStack(spacing: 4) {
+                    Text("Review command").font(.headline)
+                    InfoButton(help: "About the Review command") { CommandHelp.review }
+                }
                 Text(agentRaw == Agent.codex.rawValue
                      ? "Claude Code only. Codex reviews use the built-in prompt."
                      : "The first message of a new review in the terminal, with {url} as the PR's link. "
@@ -1117,7 +1119,10 @@ struct SettingsView: View {
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Verify command").font(.headline)
+                HStack(spacing: 4) {
+                    Text("Verify command").font(.headline)
+                    InfoButton(help: "About the Verify command") { CommandHelp.verify }
+                }
                 Text(agentRaw == Agent.codex.rawValue
                      ? "Claude Code only."
                      : "Sent by Verify fixes (PRs where you have review threads), with {url} as the PR's link. "
@@ -1130,7 +1135,10 @@ struct SettingsView: View {
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Triage feedback command").font(.headline)
+                HStack(spacing: 4) {
+                    Text("Triage feedback command").font(.headline)
+                    InfoButton(help: "About the Triage feedback command") { CommandHelp.triage }
+                }
                 Text(agentRaw == Agent.codex.rawValue
                      ? "Claude Code only."
                      : "Sent by Triage feedback on your own PRs with feedback or failing CI, in your checkout of "
@@ -1140,14 +1148,12 @@ struct SettingsView: View {
                     .labelsHidden()
                     .disabled(agentRaw == Agent.codex.rawValue)
             }
-            Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
-            Text(worktreesNextToClone
-                 ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. storefront-worktrees/pr-42."
-                 : "Each PR is checked out in ReviewBar's Application Support folder.")
-                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
-            Text("Review prompt").font(.headline)
+            HStack(spacing: 4) {
+                Text("Review prompt").font(.headline)
+                InfoButton(help: "How prompts and commands work") { PromptsHelp(agent: Agent(rawValue: agentRaw) ?? .claude) }
+            }
             Text("How reviews are written and how suggested comments are worded. Used by every review and re-review, "
                  + "and by new reviews in the terminal unless a Review command is set.")
                 .font(.caption2).foregroundStyle(.secondary)
@@ -1188,6 +1194,11 @@ struct SettingsView: View {
                  + "and notifies you when it's ready. Uses your \(Agent(rawValue: agentRaw)?.name ?? "Claude") plan; "
                  + "PRs already waiting are left alone.")
                 .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
+            Text(worktreesNextToClone
+                 ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. storefront-worktrees/pr-42."
+                 : "Each PR is checked out in ReviewBar's Application Support folder.")
+                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             Text("Notifications").font(.headline)
@@ -1209,10 +1220,9 @@ struct SettingsView: View {
                 Toggle("New commits or replies on PRs you reviewed", isOn: $countReviewed)
                 Toggle("Feedback on your PRs", isOn: $countMyPRs)
                 Toggle("Mentions", isOn: $countMentions)
-                Toggle("Claude sessions that need you", isOn: $countCrew)
             }
             .padding(.leading, 12)
-            Text(countRequests || countReviewed || countMyPRs || countMentions || countCrew
+            Text(countRequests || countReviewed || countMyPRs || countMentions
                  ? "Each PR counts once, even when it's in more than one of these. PRs muted in Reviewing don't count "
                    + "as requests or activity, but a mention still counts."
                  : "Nothing is counted, so the menu bar shows only the icon.")
@@ -1367,6 +1377,128 @@ struct SettingsView: View {
             if !RepoList.remotesMatch(remotes, repo: repo) {
                 problems = ["\((url.path as NSString).abbreviatingWithTildeInPath) has no git remote for \(repo). "
                             + "Saved anyway; check it's the right folder."]
+            }
+        }
+    }
+}
+
+/// An ⓘ that opens `content` in a popover beside it.
+struct InfoButton<Content: View>: View {
+    let help: String
+    @ViewBuilder let content: () -> Content
+    @ViewState private var shown = false
+
+    var body: some View {
+        Button { shown.toggle() } label: { Image(systemName: "info.circle") }
+            .buttonStyle(.borderless)
+            .help(help)
+            .popover(isPresented: $shown, arrowEdge: .trailing) { content() }
+    }
+}
+
+/// One command's ⓘ in Settings: what sends it, where it runs, and what an empty field does.
+struct CommandHelp: View {
+    let title: String
+    let facts: [(label: String, text: String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(verbatim: title).font(.headline)
+            ForEach(facts, id: \.label) { fact in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: fact.label).bold()
+                    Text(LocalizedStringKey(fact.text)).foregroundStyle(.secondary)
+                }
+            }
+            Text("{url} becomes the PR's link; without it, the link is added at the end. Commands are Claude Code only.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(14)
+        .frame(width: 360)
+    }
+
+    static let review = CommandHelp(title: "Review command", facts: [
+        ("Sent by", "Review in your terminal, on PRs you review."),
+        ("Runs in", "A worktree of the PR's head commit, when the repo has a local clone."),
+        ("When set", "It replaces the built-in prompt, and the Review prompt isn't sent: your own skill decides how to review."),
+        ("When empty", "The built-in review prompt with your Review prompt."),
+        ("Not used by", "Review with Claude, Re-run and Review changes since. They run in the background and always use the built-in prompt."),
+        ("Example", "`/pr-review {url}`"),
+    ])
+
+    static let verify = CommandHelp(title: "Verify command", facts: [
+        ("Sent by", "Verify fixes in a PR's \"Since your review\" box, and the Verify fixes button on the new-commits notification."),
+        ("Shown when", "You have review threads on the PR, and there are new commits or a reply in your threads since your review."),
+        ("Runs in", "A worktree of the PR's head commit, when the repo has a local clone."),
+        ("Built in", "Checks each of your threads against the new commits (fixed, partly, not fixed or author disagreed), "
+            + "then says whether it's OK to approve. It asks before drafting any reply."),
+        ("When empty", "Both Verify fixes buttons are hidden."),
+    ])
+
+    static let triage = CommandHelp(title: "Triage feedback command", facts: [
+        ("Sent by", "Triage feedback, on your own PR when it has review feedback or failing CI."),
+        ("Runs in", "Your own checkout of the PR's branch (the clone or a worktree), so fixes are committed where you work. "
+            + "With no such checkout nothing opens and the command is copied instead."),
+        ("When empty", "No Triage feedback button. Work through feedback opens instead, with a built-in prompt holding "
+            + "the reviews, threads and diff."),
+        ("Example", "`/pr-feedback {url}`"),
+    ])
+}
+
+/// What each button sends, and how the Review prompt and the commands in Settings fit together.
+/// Opened from the ⓘ next to Review prompt.
+struct PromptsHelp: View {
+    let agent: Agent
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Prompts and commands").font(.headline)
+                Text("A Review command replaces the Review prompt in the terminal. The Review prompt still shapes "
+                     + "the reviews ReviewBar runs itself, whose notes show in the app.")
+                // LocalizedStringKey, so the bold and code markup render; a joined String would show it raw.
+                Text(LocalizedStringKey("A **prompt** is written by ReviewBar: rules, the PR's details and the diff. "
+                     + "The Review prompt is the part you can edit."))
+                Text(LocalizedStringKey("A **command** is one line you write, such as `/pr-review {url}`. It starts a "
+                     + "terminal session and your own skill does the rest."))
+                section("Reviewing", [
+                    ("Review with \(agent.name), Re-run, Full review",
+                     "The built-in prompt with your Review prompt. Runs in the background; the notes stay in the app."),
+                    ("Review changes since …", "The built-in re-review prompt with your Review prompt."),
+                    ("Review in your terminal",
+                     "Your Review command. Without one, the built-in prompt with your Review prompt."),
+                    ("Follow up", "A built-in prompt with your saved notes and the GitHub threads. Uses neither setting."),
+                    ("Verify fixes", "Your Verify command. Leaving it empty hides both buttons, in the PR and on the notification."),
+                ])
+                section("My PRs", [
+                    ("Triage feedback", "Your Triage feedback command, in your checkout of the PR's branch."),
+                    ("Work through feedback", "A built-in prompt with the reviews, threads and diff. Shown whenever "
+                     + "Triage feedback isn't (labelled Open when there's no feedback)."),
+                    ("Merge check", "Fixed, not a setting: “can I merge {url}?”. Shown once the PR is approved and CI is green."),
+                ])
+                section("Both", [
+                    ("Summarise …", "A built-in prompt on the summary model. Reads comments only, never the diff."),
+                ])
+                Text("Commands are Claude Code only. Codex always gets the built-in prompts.")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(14)
+        }
+        .frame(width: 400, height: 480)
+    }
+
+    private func section(_ title: String, _ rows: [(button: String, sends: String)]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.callout.bold()).padding(.top, 4)
+            ForEach(rows, id: \.button) { row in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: row.button).bold()
+                    Text(verbatim: row.sends).foregroundStyle(.secondary)
+                }
             }
         }
     }

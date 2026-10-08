@@ -77,7 +77,7 @@ With Claude Code, the **Crew** tab lists the Claude sessions working in your wat
 - Right-click › **Stop session** stops either kind and keeps its conversation: agent view with `claude stop` (`claude attach` resumes it), terminal by ending its `claude` process (`claude --resume` reopens it; a working one asks first).
 - A PR with a session shows a **Claude needs you** or **Claude working** badge, in My PRs and in Reviewing.
 - Before any terminal button opens a session on a PR that already has one (in any state, idle included), or that ReviewBar opened a session on in the last minute, it asks first: two sessions in one checkout overwrite each other's edits.
-- When a session starts waiting on you, a **Claude needs you** notification fires (agent view itself only notifies while it's open), and sessions waiting on you add to the menu bar number. Both can be turned off in Settings.
+- When a session starts waiting on you, a **Claude needs you** notification fires (agent view itself only notifies while it's open). It can be turned off in Settings. Sessions don't add to the menu bar number.
 
 Agent view is a research preview: if its output changes, the tab stays empty.
 
@@ -113,11 +113,11 @@ See and edit how reviews are written and how suggested comments are worded. It's
 - **Review command**: the first message of a new review there. Empty (the default) uses the built-in review prompt; enter e.g. `/pr-review {url}` to run your own skill or command. Codex always uses the built-in one.
 - **Verify command**: sent by *Verify fixes*. By default it asks Claude to check each of your GitHub threads against the commits since your review; leave it empty to hide the button (Claude only).
 - **Triage feedback command**: sent by *Triage feedback* on your own PRs with feedback or failing CI. Empty by default, so those PRs get the built-in Work through feedback prompt; enter e.g. `/pr-feedback {url}` to run your own skill.
-- **Put PR worktrees next to the clone** keeps them in `<clone>-worktrees/pr-<N>` instead of ReviewBar's own folder. See [Local clones and worktrees](#local-clones-and-worktrees).
 
 ### Pull requests
 
 - **Include draft PRs** (on by default): turn off to hide other people's drafts from Reviewing. Your own drafts always show in My PRs.
+- **Put PR worktrees next to the clone** keeps them in `<clone>-worktrees/pr-<N>` instead of ReviewBar's own folder. See [Local clones and worktrees](#local-clones-and-worktrees).
 
 ### Notifications
 

@@ -88,6 +88,7 @@ ReviewBar notifies you about:
 - new review requests (a request on a PR you already reviewed says re-requested);
 - replies on your review threads;
 - feedback on your PRs;
+- checks turning green on your PRs that aren't ready to merge yet (a push whose checks finish between two refreshes counts too; parked PRs and PRs without checks stay quiet; it never counts in the menu bar);
 - on PRs you reviewed: new commits after your review, all your threads resolved, and other reviewers approving or requesting changes.
 
 Each kind can be turned off in Settings. Clicking a notification opens the PR. New commits don't create a GitHub notification, so they show up with the 5-minute refresh; that notification has a **Verify fixes** button (hover over it, or use the Alerts style) that starts the Verify session when a Verify command and a terminal are set.

@@ -49,6 +49,7 @@ final class ReviewViewModel: ObservableObject {
     private var seenRequests: Set<String>?
     private var seenReplies: [String: String]?
     private var seenFeedback: [String: String]?
+    private var seenChecks: [String: AlertDiff.CI]?
     private var seenReviewing: [String: ReviewingPR]?
     /// Repos left out of searches because `gh` can't read them; cleared when Settings change.
     @Published private(set) var skippedRepos: Set<String> = []
@@ -97,6 +98,7 @@ final class ReviewViewModel: ObservableObject {
         seenRequests = nil
         seenReplies = nil
         seenFeedback = nil
+        seenChecks = nil
         seenReviewing = nil
         seenMentions = nil
         cleanupAt = nil
@@ -161,6 +163,8 @@ final class ReviewViewModel: ObservableObject {
             alerts += AlertDiff.newer(visibleFeedback, seen: seenFeedback, url: \.pr.url, latestAt: \.latestAt)
                 .map(ReviewAlert.feedback)
             seenFeedback = AlertDiff.latestByURL(myPRs, url: \.pr.url, latestAt: \.latestAt)
+            alerts += AlertDiff.checksPassed(myPRs, before: seenChecks, parked: parked).map(ReviewAlert.checksPassed)
+            seenChecks = AlertDiff.ciByURL(myPRs)
         } catch { errors.append("My PRs: \(error.localizedDescription)") }
 
         // Mentions are best effort: an empty list on failure, and only new ones notify.

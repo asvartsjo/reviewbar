@@ -792,6 +792,7 @@ struct DetailView: View {
                 Button(terminalLabel("Follow up"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
                     .prominent(!vm.verifyIsDue(pr))
                     .help("Continue in \(Agent.current.appName) with this PR and the review above")
+                reviewCommandButton.iconOnly(compact)
                 Button("Open in browser", systemImage: "arrow.up.right.square") {
                     let s = vm.savedReview(for: pr)
                     ReviewPage.open(pr: pr, text: text, label: s.map(ReviewPage.label), date: s?.date)
@@ -817,6 +818,7 @@ struct DetailView: View {
                         .help("Review the whole diff again")
                         .iconOnly(compact)
                     terminalButton.iconOnly(compact)
+                    if vm.hasFollowUpContext(pr) { reviewCommandButton.iconOnly(compact) }
                 } else if runsReviewCommand {
                     terminalButton.prominent(!vm.verifyIsDue(pr))
                     Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
@@ -827,6 +829,7 @@ struct DetailView: View {
                         .prominent(!vm.verifyIsDue(pr))
                         .help("\(Agent.current.name) reads the diff and writes private notes here. Nothing is posted to GitHub.")
                     terminalButton.iconOnly(compact)
+                    if vm.hasFollowUpContext(pr) { reviewCommandButton.iconOnly(compact) }
                 }
             }
         }
@@ -842,9 +845,18 @@ struct DetailView: View {
     }
 
     /// The terminal button sends your Review command (Settings › Terminal), so it becomes the main one.
-    private var runsReviewCommand: Bool {
-        !vm.hasFollowUpContext(pr) && Agent.current == .claude
-            && ClaudeSettings.command(reviewCommand, url: pr.url) != nil
+    private var runsReviewCommand: Bool { !vm.hasFollowUpContext(pr) && hasReviewCommand }
+
+    private var hasReviewCommand: Bool {
+        Agent.current == .claude && ClaudeSettings.command(reviewCommand, url: pr.url) != nil
+    }
+
+    /// Next to Follow up, which uses the built-in prompt: your Review command stays one click away.
+    @ViewBuilder private var reviewCommandButton: some View {
+        if hasReviewCommand {
+            Button(terminalLabel("Review"), systemImage: "text.magnifyingglass") { vm.reviewInTerminal(pr) }
+                .help("Start a new review in \(Agent.current.appName) with your Review command")
+        }
     }
 
     private func open(_ url: String) {

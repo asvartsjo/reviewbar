@@ -790,7 +790,7 @@ struct DetailView: View {
                     .help("Stop this review")
             case .done(let text):
                 Button(terminalLabel("Follow up"), systemImage: TerminalApp.symbol) { vm.openTerminal(pr) }
-                    .prominent(!vm.verifyIsDue(pr))
+                    .prominent(!vm.verifyIsNext(pr))
                     .help("Continue in \(Agent.current.appName) with this PR and the review above")
                 Button("Open in browser", systemImage: "arrow.up.right.square") {
                     let s = vm.savedReview(for: pr)
@@ -811,20 +811,20 @@ struct DetailView: View {
             default:
                 if let earlier = vm.earlierReview(for: pr) {
                     Button("Review changes since \(earlier.pr.versionLabel)", systemImage: "sparkles") { vm.reviewChanges(pr, since: earlier) }
-                        .prominent(!vm.verifyIsDue(pr))
+                        .prominent(!vm.verifyIsNext(pr))
                         .help("Review only the commits since \(earlier.pr.versionLabel)")
                     Button("Full review", systemImage: "sparkles") { vm.review(pr) }
                         .help("Review the whole diff again")
                         .iconOnly(compact)
                     terminalButton.iconOnly(compact)
                 } else if runsReviewCommand {
-                    terminalButton.prominent(!vm.verifyIsDue(pr))
+                    terminalButton.prominent(!vm.verifyIsNext(pr))
                     Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
                         .help("Quick read-only review with the built-in prompt; notes are saved here")
                         .iconOnly(compact)
                 } else {
                     Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
-                        .prominent(!vm.verifyIsDue(pr))
+                        .prominent(!vm.verifyIsNext(pr))
                         .help("\(Agent.current.name) reads the diff and writes private notes here. Nothing is posted to GitHub.")
                     terminalButton.iconOnly(compact)
                 }
@@ -1149,7 +1149,7 @@ struct SettingsView: View {
             Divider()
             Text("Review prompt").font(.headline)
             Text("How reviews are written and how suggested comments are worded. Used by every review and re-review, "
-                 + "and by new reviews in the terminal unless a Review command is set.")
+                 + "and by new reviews in the terminal unless a Review command is set. Follow up and Verify don't use it.")
                 .font(.caption2).foregroundStyle(.secondary)
             TextEditor(text: $reviewStyle)
                 .font(.system(.caption, design: .monospaced))

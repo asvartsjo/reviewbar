@@ -111,7 +111,7 @@ See and edit how reviews are written and how suggested comments are worded. It's
 
 - **Terminal app**: open Claude Code sessions in Terminal, iTerm2, Ghostty, WezTerm, kitty or Alacritty. Only installed ones are listed. **Automatic** (the default) picks the first installed of Ghostty, iTerm2, WezTerm, kitty, Alacritty, then Terminal. For anything else (Warp, …) choose **Copy command** and paste it into your terminal. When Claude exits you are left at a normal shell prompt.
 - **Review command**: the first message of a new review there. Empty (the default) uses the built-in review prompt; enter e.g. `/pr-review {url}` to run your own skill or command. Codex always uses the built-in one.
-- **Verify command**: sent by *Verify fixes*. By default it asks Claude to check each of your GitHub threads against the commits since your review; leave it empty to hide the button (Claude only).
+- **Verify command**: sent by *Verify fixes*. By default it asks Claude to check each of your GitHub threads against the commits since your review; leave it empty to hide the button (Claude only). Under the button, ReviewBar notes when Verify last ran and on which commit; until new commits or replies arrive, the button stays plain instead of highlighted.
 - **Triage feedback command**: sent by *Triage feedback* on your own PRs with feedback or failing CI. Empty by default, so those PRs get the built-in Work through feedback prompt; enter e.g. `/pr-feedback {url}` to run your own skill.
 - **Put PR worktrees next to the clone** keeps them in `<clone>-worktrees/pr-<N>` instead of ReviewBar's own folder. See [Local clones and worktrees](#local-clones-and-worktrees).
 

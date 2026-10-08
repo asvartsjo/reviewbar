@@ -160,14 +160,28 @@ struct ReviewingDetailBox: View {
         return t.isOutdated ? state + " The lines you commented on have changed since." : state
     }
 
-    /// Sends your Verify command (Settings › Terminal). Shown only once there's something to verify.
+    /// Sends your Verify command (Settings › Terminal). Shown only once there's something to verify;
+    /// plain instead of prominent when you already ran it and nothing changed since.
     @ViewBuilder private var verifyButton: some View {
         if Agent.current == .claude, ClaudeSettings.command(verifyCommand, url: reviewing.pr.url) != nil {
             let terminal = TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed)
-            Button(terminal.label("Verify fixes"), systemImage: TerminalApp.symbol) { vm.verifyInTerminal(reviewing.pr) }
-                .buttonStyle(.borderedProminent).controlSize(.large)
-                .help("Checks each of your threads against the commits since your review")
+            VStack(alignment: .leading, spacing: 4) {
+                Button(terminal.label("Verify fixes"), systemImage: TerminalApp.symbol) { vm.verifyInTerminal(reviewing.pr) }
+                    .prominent(vm.verifyIsNext(reviewing.pr)).controlSize(.large)
+                    .help("Checks each of your threads against the commits since your review")
+                if let run = vm.lastVerifyRun(reviewing.pr) { lastRun(run) }
+            }
         }
+    }
+
+    /// When Verify fixes last ran here, and whether the PR changed since.
+    private func lastRun(_ run: PRSnapshot) -> some View {
+        let when = Self.isoParser.date(from: run.at)?.formatted(.relative(presentation: .named)) ?? ""
+        let commit = run.head.map { " on " + $0.prefix(7) } ?? ""
+        let text = reviewing.changed(since: run)
+            ? "Verify ran \(when)\(commit). New commits or replies since."
+            : "Verify ran \(when)\(commit). Nothing new since."
+        return Text(verbatim: text).font(.caption).foregroundStyle(.secondary)
     }
 
     @ViewBuilder private func reviewers(_ people: [ReviewingDetail.Reviewer]) -> some View {

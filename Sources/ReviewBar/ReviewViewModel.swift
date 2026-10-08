@@ -252,13 +252,33 @@ final class ReviewViewModel: ObservableObject {
 
     func reviewingPR(for pr: PR) -> ReviewingPR? { reviewing.first { $0.pr.url == pr.url } }
 
-    /// Verify fixes is the next step: you have threads here, something changed since your review,
-    /// and a Verify command is set. Then it's the one prominent button in the PR detail.
+    /// Verify fixes can run: you have threads here, something changed since your review, and a
+    /// Verify command is set. Then the PR detail shows its button.
     func verifyIsDue(_ pr: PR) -> Bool {
         guard Agent.current == .claude, ClaudeSettings.verifyCommand(for: pr.url) != nil,
               let r = reviewingPR(for: pr), r.verifyIsDue,
               let d = detailLoad(for: pr).detail else { return false }
         return !d.myThreads.isEmpty
+    }
+
+    /// Verify fixes is the next step: due, and not run since the last change. Then it's the one
+    /// prominent button in the PR detail.
+    func verifyIsNext(_ pr: PR) -> Bool {
+        verifyIsDue(pr) && reviewingPR(for: pr)?.verifyIsNext(lastRun: verifyRuns[pr.url]) == true
+    }
+
+    // MARK: Verify runs
+
+    private static let verifyRunsKey = "reviewingVerifyRuns"
+    /// PR url -> when Verify fixes last opened a session on it, and the head then. Survives restarts,
+    /// so a later look tells whether you already verified this version.
+    @Published private var verifyRuns = loadSnapshots(verifyRunsKey)
+
+    func lastVerifyRun(_ pr: PR) -> PRSnapshot? { verifyRuns[pr.url] }
+
+    private func recordVerifyRun(_ pr: PR) {
+        verifyRuns[pr.url] = PRSnapshot(at: Self.isoNow(), head: pr.headRefOid)
+        Self.saveSnapshots(verifyRuns, Self.verifyRunsKey)
     }
 
     // MARK: New since you last looked
@@ -267,7 +287,7 @@ final class ReviewViewModel: ObservableObject {
     private static let lastListedKey = "reviewingLastListed"
     /// PR url -> when you last opened it, and its head then. Survives restarts.
     @Published private var seen = loadSnapshots(seenKey)
-    /// PR url -> when a Reviewing fetch last listed it, for PRs with a seen or mute snapshot.
+    /// PR url -> when a Reviewing fetch last listed it, for PRs with a seen, mute or Verify snapshot.
     private var lastListed = UserDefaults.standard.dictionary(forKey: lastListedKey) as? [String: String] ?? [:]
     /// The snapshot each PR had before this session's latest opening, for the open detail.
     private var seenBefore: [String: PRSnapshot] = [:]
@@ -300,9 +320,11 @@ final class ReviewViewModel: ObservableObject {
         for url in listed { lastListed[url] = now }
         seen = PRSnapshot.pruned(seen, listed: listed, lastListed: lastListed, cutoff: month)
         mutedUntil = PRSnapshot.pruned(mutedUntil, listed: listed, lastListed: lastListed, cutoff: month)
-        lastListed = lastListed.filter { seen[$0.key] != nil || mutedUntil[$0.key] != nil }
+        verifyRuns = PRSnapshot.pruned(verifyRuns, listed: listed, lastListed: lastListed, cutoff: month)
+        lastListed = lastListed.filter { seen[$0.key] != nil || mutedUntil[$0.key] != nil || verifyRuns[$0.key] != nil }
         saveSeen()
         Self.saveSnapshots(mutedUntil, Self.mutedUntilKey)
+        Self.saveSnapshots(verifyRuns, Self.verifyRunsKey)
         UserDefaults.standard.set(lastListed, forKey: Self.lastListedKey)
     }
 
@@ -863,7 +885,8 @@ final class ReviewViewModel: ObservableObject {
         }
     }
 
-    /// Your Verify command (Settings › Terminal) in the PR's worktree.
+    /// Your Verify command (Settings › Terminal) in the PR's worktree; a session that opens is
+    /// recorded in `verifyRuns`.
     func verifyInTerminal(_ pr: PR) {
         guard let command = ClaudeSettings.verifyCommand(for: pr.url) else { return }
         launchTerminal(pr, mode: .verify(command: command))
@@ -898,7 +921,9 @@ final class ReviewViewModel: ObservableObject {
             let opening = "Opening a session in \(TerminalApp.chosen.name)…"
             if TerminalApp.chosen != .copy { terminalNotice = opening }
             do {
-                if let command = try await Backend.openInTerminal(pr, mode: mode) {
+                let command = try await Backend.openInTerminal(pr, mode: mode)
+                if case .verify = mode { recordVerifyRun(pr) }
+                if let command {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(command, forType: .string)
                     terminalNotice = "Command copied. Paste it into any terminal to start the session."

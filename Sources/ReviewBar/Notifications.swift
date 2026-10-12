@@ -12,6 +12,8 @@ enum ReviewAlert: Equatable {
     case reRequest(PR)
     case reply(ReplyPR)
     case feedback(FeedbackPR)
+    /// Checks turned green on your PR before it's ready to merge.
+    case checksPassed(FeedbackPR)
     /// New commits on a PR you reviewed, after your last review.
     case pushed(ReviewingPR)
     /// The last of your threads on a PR was resolved.
@@ -59,6 +61,31 @@ enum AlertDiff {
         return alerts
     }
 
+    /// A PR's head commit and whether its checks were green, as one refresh saw them.
+    struct CI: Equatable {
+        let head: String?
+        let passing: Bool
+    }
+
+    static func ciByURL(_ prs: [FeedbackPR]) -> [String: CI] {
+        Dictionary(prs.map { ($0.pr.url, CI(head: $0.pr.headRefOid, passing: $0.checksPassing)) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Your PRs whose checks are green now but weren't on the previous refresh: still running or
+    /// failing on the same head, or the head moved (CI can finish between two refreshes). Its own
+    /// diff because a green run leaves a PR quiet, so `latestAt` doesn't move. Quiet for a PR not
+    /// seen before, one without checks, a draft, a parked one, and an approved one: green and approved
+    /// is ready to merge (that alert says more), or blocked by a conflict, or about to be ready once
+    /// GitHub has worked out whether it merges.
+    static func checksPassed(_ now: [FeedbackPR], before: [String: CI]?, parked: Set<String>) -> [FeedbackPR] {
+        guard let before else { return [] }
+        return now.filter { f in
+            guard f.checksPassing, !f.pr.isDraft, f.decision != "APPROVED", !parked.contains(f.pr.url),
+                  let old = before[f.pr.url] else { return false }
+            return old.head != f.pr.headRefOid || !old.passing
+        }
+    }
+
     static func latestByURL<T>(_ items: [T], url: (T) -> String, latestAt: (T) -> String) -> [String: String] {
         Dictionary(items.map { (url($0), latestAt($0)) }, uniquingKeysWith: max)
     }
@@ -75,6 +102,7 @@ enum AutoReview {
 
 enum NotifySettings {
     static let requestsKey = "notifyRequests", repliesKey = "notifyReplies", feedbackKey = "notifyFeedback"
+    static let checksPassedKey = "notifyChecksPassed"
     static let mentionsKey = "notifyMentions"
     static let crewKey = "notifyCrew"
     static let pushedKey = "notifyPushed", resolvedKey = "notifyAllResolved", verdictsKey = "notifyVerdicts"
@@ -89,6 +117,7 @@ enum NotifySettings {
         case .request, .reRequest: return isOn(requestsKey)
         case .reply: return isOn(repliesKey)
         case .feedback: return isOn(feedbackKey)
+        case .checksPassed: return isOn(checksPassedKey)
         case .pushed: return isOn(pushedKey)
         case .allResolved: return isOn(resolvedKey)
         case .verdict: return isOn(verdictsKey)
@@ -167,7 +196,7 @@ enum Notifier {
     }
 
     /// Alerts per PR, in the order each PR first appears, most important first within a PR:
-    /// a request, then new commits, a reply, verdicts, all resolved. Pure, for tests.
+    /// a request, then new commits, a reply, verdicts, all resolved, feedback, checks passed. Pure, for tests.
     static func grouped(_ alerts: [ReviewAlert]) -> [[ReviewAlert]] {
         func rank(_ a: ReviewAlert) -> Int {
             switch a {
@@ -177,6 +206,7 @@ enum Notifier {
             case .verdict: return 3
             case .allResolved: return 4
             case .feedback: return 5
+            case .checksPassed: return 6
             }
         }
         var order: [String] = [], byURL: [String: [ReviewAlert]] = [:]
@@ -250,16 +280,20 @@ enum Notifier {
                 }
             }
             return ("feedback-\(f.pr.url)-\(f.latestAt)", title, "\(line(f.pr)) · \(f.summary) · \(f.latestBy)", f.pr.url)
+        case .checksPassed(let f):
+            let review = f.decision == "CHANGES_REQUESTED" ? "changes requested" : "waiting on review"
+            return ("checks-\(f.pr.url)-\(f.pr.headRefOid ?? "")", "Checks passed on your PR", "\(line(f.pr)) · \(review)", f.pr.url)
         }
     }
 
     static func summary(_ alerts: [ReviewAlert]) -> String {
-        var requests = 0, replies = 0, feedback = 0, updates = 0
+        var requests = 0, replies = 0, feedback = 0, passed = 0, updates = 0
         for a in alerts {
             switch a {
             case .request, .reRequest: requests += 1
             case .reply: replies += 1
             case .feedback: feedback += 1
+            case .checksPassed: passed += 1
             case .pushed, .allResolved, .verdict: updates += 1
             }
         }
@@ -267,6 +301,7 @@ enum Notifier {
         return [n(requests, "review request", "review requests"),
                 n(replies, "PR with replies", "PRs with replies"),
                 n(feedback, "PR of yours with feedback", "PRs of yours with feedback"),
+                n(passed, "PR of yours with checks passed", "PRs of yours with checks passed"),
                 n(updates, "update on PRs you review", "updates on PRs you review")]
             .compactMap { $0 }.joined(separator: ", ")
     }

@@ -489,6 +489,7 @@ struct FeedbackPR: Identifiable, Hashable {
     /// but never notifies or counts, and can't be dismissed.
     var isQuiet: Bool { latestAt.isEmpty }
 
+    var checksPassing: Bool { checks == "SUCCESS" }
     var checksFailing: Bool { checks == "FAILURE" || checks == "ERROR" }
     var hasConflict: Bool { mergeable == "CONFLICTING" }
     /// No checks at all (`nil`: a repo without CI) counts as green only when GitHub says nothing

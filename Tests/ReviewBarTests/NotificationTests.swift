@@ -195,6 +195,69 @@ struct NotificationTests {
         #expect(Notifier.category(for: [.reRequest(pr(5)), .pushed(r)], verifyAvailable: false) == nil)
         #expect(Notifier.category(for: [.reRequest(pr(5)), .allResolved(r)], verifyAvailable: true) == nil)
     }
+
+    // MARK: Checks passed on your PRs
+
+    private func mine(_ n: Int, head: String = "c1", checks: String? = "SUCCESS", decision: String? = "REVIEW_REQUIRED",
+                      mergeable: String = "MERGEABLE", draft: Bool = false) -> FeedbackPR {
+        var p = PR(number: n, title: "PR \(n)", url: "https://github.com/o/r/pull/\(n)", isDraft: draft,
+                   updatedAt: "2026-09-01T00:00:00Z", repository: .init(nameWithOwner: "o/r"), author: .init(login: "me"))
+        p.headRefOid = head
+        return FeedbackPR(pr: p, decision: decision, threads: 0, reviews: 0, comments: 0,
+                          latestAt: "", latestBy: "", checks: checks, mergeable: mergeable)
+    }
+
+    private func passed(_ now: [FeedbackPR], before: [FeedbackPR]?, parked: Set<String> = []) -> [Int] {
+        AlertDiff.checksPassed(now, before: before.map(AlertDiff.ciByURL), parked: parked).map(\.pr.number)
+    }
+
+    @Test func checksPassedWhenRunningOrFailingTurnsGreen() {
+        #expect(passed([mine(1)], before: [mine(1, checks: "PENDING")]) == [1])
+        #expect(passed([mine(1)], before: [mine(1, checks: "FAILURE")]) == [1])
+        #expect(passed([mine(1)], before: [mine(1, checks: nil)]) == [1])
+    }
+
+    /// CI can finish between two refreshes: a new head that's already green is news too.
+    @Test func checksPassedOnANewHeadThatIsAlreadyGreen() {
+        #expect(passed([mine(1, head: "c2")], before: [mine(1, head: "c1")]) == [1])
+    }
+
+    @Test func checksPassedStaysQuiet() {
+        #expect(passed([mine(1)], before: [mine(1)]).isEmpty)                            // green, same head
+        #expect(passed([mine(1)], before: nil).isEmpty)                                  // first refresh
+        #expect(passed([mine(1)], before: []).isEmpty)                                   // PR not seen before
+        #expect(passed([mine(1, checks: "PENDING")], before: [mine(1, checks: "FAILURE")]).isEmpty)
+        #expect(passed([mine(1, checks: nil)], before: [mine(1, checks: "PENDING")]).isEmpty)
+        #expect(passed([mine(1, decision: "APPROVED")], before: [mine(1, checks: "PENDING")]).isEmpty) // ready to merge
+        #expect(passed([mine(1)], before: [mine(1, checks: "PENDING")], parked: [mine(1).pr.url]).isEmpty)
+        #expect(passed([mine(1, draft: true)], before: [mine(1, checks: "PENDING", draft: true)]).isEmpty)
+    }
+
+    /// Approved and green but not ready to merge: a conflict, or GitHub hasn't worked out
+    /// mergeability yet and "Ready to merge" follows on the next refresh.
+    @Test func checksPassedStaysQuietWhenApprovedButNotReady() {
+        for mergeable in ["CONFLICTING", "UNKNOWN"] {
+            #expect(passed([mine(1, decision: "APPROVED", mergeable: mergeable)],
+                           before: [mine(1, checks: "PENDING", decision: "APPROVED", mergeable: mergeable)]).isEmpty)
+        }
+    }
+
+    @Test func checksPassedContent() {
+        let c = Notifier.content(.checksPassed(mine(7, head: "c9")))
+        #expect(c.title == "Checks passed on your PR")
+        #expect(c.body == "o/r #7: PR 7 · waiting on review")
+        #expect(c.id == "checks-https://github.com/o/r/pull/7-c9")
+        #expect(Notifier.content(.checksPassed(mine(7, decision: "CHANGES_REQUESTED"))).body
+                == "o/r #7: PR 7 · changes requested")
+        #expect(Notifier.summary([.checksPassed(mine(1)), .checksPassed(mine(2))]) == "2 PRs of yours with checks passed")
+    }
+
+    /// New feedback and green checks on one PR in the same refresh: one notification, feedback on top.
+    @Test func checksPassedJoinsTheFeedbackNotification() {
+        let f = FeedbackPR(pr: mine(3).pr, decision: nil, threads: 0, reviews: 0, comments: 1,
+                           latestAt: "x", latestBy: "y")
+        #expect(Notifier.grouped([.checksPassed(mine(3)), .feedback(f)]) == [[.feedback(f), .checksPassed(mine(3))]])
+    }
 }
 
 struct PRFilterTests {

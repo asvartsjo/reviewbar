@@ -898,6 +898,7 @@ struct SettingsView: View {
     @AppStorage(NotifySettings.requestsKey) private var notifyRequests = true
     @AppStorage(NotifySettings.repliesKey) private var notifyReplies = true
     @AppStorage(NotifySettings.feedbackKey) private var notifyFeedback = true
+    @AppStorage(NotifySettings.checksPassedKey) private var notifyChecksPassed = true
     @AppStorage(NotifySettings.pushedKey) private var notifyPushed = true
     @AppStorage(NotifySettings.resolvedKey) private var notifyAllResolved = true
     @AppStorage(NotifySettings.verdictsKey) private var notifyVerdicts = true
@@ -1221,6 +1222,7 @@ struct SettingsView: View {
             Toggle("All your threads on a PR resolved", isOn: $notifyAllResolved)
             Toggle("Other reviewers approve or request changes", isOn: $notifyVerdicts)
             Toggle("Feedback on your PRs", isOn: $notifyFeedback)
+            Toggle("Checks pass on your PRs before they're approved", isOn: $notifyChecksPassed)
             Toggle("@mentions of you or your teams", isOn: $notifyMentions)
             Toggle("A Claude session needs you (Claude Code only)", isOn: $notifyCrew)
             notificationHint

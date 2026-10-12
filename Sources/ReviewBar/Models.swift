@@ -154,8 +154,8 @@ struct ReviewingPR: Identifiable, Hashable {
     /// New commits or a reply in your threads since your review: something to verify.
     var verifyIsDue: Bool { hasNewCommits || waiting > 0 }
 
-    /// Verify is due and nothing changed since you last ran it (`lastRun`, nil: never), so it's
-    /// still the next step rather than a re-run. Pure, for tests.
+    /// Verify is due and you haven't run it on this version: never (`lastRun` nil), or the PR
+    /// changed since (`changed(since:)`). Pure, for tests.
     func verifyIsNext(lastRun: PRSnapshot?) -> Bool {
         verifyIsDue && (lastRun.map { changed(since: $0) } ?? true)
     }

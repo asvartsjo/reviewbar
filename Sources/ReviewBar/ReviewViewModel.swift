@@ -276,8 +276,11 @@ final class ReviewViewModel: ObservableObject {
 
     func lastVerifyRun(_ pr: PR) -> PRSnapshot? { verifyRuns[pr.url] }
 
-    private func recordVerifyRun(_ pr: PR) {
-        verifyRuns[pr.url] = PRSnapshot(at: Self.isoNow(), head: pr.headRefOid)
+    /// With the head asked from GitHub: the list's can be a refresh behind, and a push in between
+    /// would make this run look stale.
+    private func recordVerifyRun(_ pr: PR) async {
+        let at = Self.isoNow()
+        verifyRuns[pr.url] = PRSnapshot(at: at, head: await Backend.currentHead(pr))
         Self.saveSnapshots(verifyRuns, Self.verifyRunsKey)
     }
 
@@ -886,7 +889,8 @@ final class ReviewViewModel: ObservableObject {
     }
 
     /// Your Verify command (Settings › Terminal) in the PR's worktree; a session that opens is
-    /// recorded in `verifyRuns`.
+    /// recorded in `verifyRuns`. With Copy command, copying it counts: the app can't tell whether
+    /// you pasted it.
     func verifyInTerminal(_ pr: PR) {
         guard let command = ClaudeSettings.verifyCommand(for: pr.url) else { return }
         launchTerminal(pr, mode: .verify(command: command))
@@ -922,7 +926,6 @@ final class ReviewViewModel: ObservableObject {
             if TerminalApp.chosen != .copy { terminalNotice = opening }
             do {
                 let command = try await Backend.openInTerminal(pr, mode: mode)
-                if case .verify = mode { recordVerifyRun(pr) }
                 if let command {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(command, forType: .string)
@@ -930,6 +933,7 @@ final class ReviewViewModel: ObservableObject {
                 } else if terminalNotice == opening {
                     terminalNotice = nil
                 }
+                if case .verify = mode { await recordVerifyRun(pr) }
             } catch {
                 if terminalNotice == opening { terminalNotice = nil }
                 self.error = error.localizedDescription

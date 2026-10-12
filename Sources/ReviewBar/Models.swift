@@ -63,7 +63,8 @@ struct ReviewingPR: Identifiable, Hashable {
     /// Your latest review, skipping your pending draft and dismissed reviews. A later Comment
     /// (a thread reply is one) keeps your earlier verdict, as it does on GitHub.
     let myLastReview: MyReview?
-    /// No review of yours counts, and one was dismissed: GitHub still lists you as a reviewer.
+    /// Your latest review was dismissed: GitHub still lists you as a reviewer. An earlier review
+    /// can still fill `myLastReview`, but its verdict no longer counts.
     var myReviewDismissed = false
     /// Unresolved threads you took part in whose last comment is someone else's (not a bot).
     let waiting: Int
@@ -115,7 +116,8 @@ struct ReviewingPR: Identifiable, Hashable {
     enum Turn: Equatable {
         case yours(Reason)
         case authors
-        /// Your approval stands. New commits and replies since don't move it; a re-request does.
+        /// Your approval stands. New commits and replies since don't move it; a re-request or
+        /// a dismissal does.
         case done
     }
 

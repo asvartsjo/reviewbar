@@ -62,7 +62,7 @@ struct ReviewingTests {
 
     // MARK: Whose turn
 
-    @Test func newCommitsAfterMyApprovalAreMyTurnUnlessIApproved() throws {
+    @Test func newCommitsAreMyTurnUnlessIApproved() throws {
         let commented = try one(node(1, reviews: [review("me", "COMMENTED", commit: "old1234")]))
         #expect(commented.hasNewCommits)
         #expect(commented.turn == .yours(.newCommits))
@@ -386,6 +386,16 @@ struct ReviewingTests {
         // A review after the dismissal counts again; a pending draft alone is no dismissal.
         #expect(try one(node(2, reviews: [dismissed, review("me", "COMMENTED")])).turn == .authors)
         #expect(try one(node(3, reviews: [review("me", "PENDING", at: nil)])).turn == .authors)
+    }
+
+    @Test func aDismissedReviewIsYourTurnEvenAfterAnEarlierApproval() throws {
+        let approved = review("me", "APPROVED", at: "2026-09-09T10:00:00Z", commit: "old1234")
+        let dismissed = review("me", "DISMISSED", at: "2026-09-10T10:00:00Z")
+        for r in [try one(node(1, reviews: [approved, dismissed])),
+                  try one(node(1, reviews: [approved], viewerLatest: dismissed))] {   // the reviews window missed it
+            #expect(r.myLastReview?.state == "APPROVED")
+            #expect(r.turn == .yours(.dismissed))
+        }
     }
 
     // MARK: Reviews

@@ -11,7 +11,7 @@ enum MenuBarCount {
 
     struct Parts: Equatable {
         var requests = true    // Your turn: your review is requested or re-requested
-        var reviewed = true    // Your turn: new commits or replies on a PR you reviewed
+        var reviewed = true    // Your turn: new commits or replies on a PR you reviewed but haven't approved
         var myPRs = true       // your PRs with new feedback
         var mentions = true
         var crew = true        // Claude sessions waiting on you (Crew)

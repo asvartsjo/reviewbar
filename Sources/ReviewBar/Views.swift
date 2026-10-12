@@ -818,7 +818,7 @@ struct DetailView: View {
                         .help("Review the whole diff again")
                         .iconOnly(compact)
                     terminalButton.iconOnly(compact)
-                    if vm.hasFollowUpContext(pr) { reviewCommandButton.iconOnly(compact) }
+                    reviewCommandButton.iconOnly(compact)
                 } else if runsReviewCommand {
                     terminalButton.prominent(!vm.verifyIsDue(pr))
                     Button("Review with \(Agent.current.name)", systemImage: "sparkles") { vm.review(pr) }
@@ -829,7 +829,7 @@ struct DetailView: View {
                         .prominent(!vm.verifyIsDue(pr))
                         .help("\(Agent.current.name) reads the diff and writes private notes here. Nothing is posted to GitHub.")
                     terminalButton.iconOnly(compact)
-                    if vm.hasFollowUpContext(pr) { reviewCommandButton.iconOnly(compact) }
+                    reviewCommandButton.iconOnly(compact)
                 }
             }
         }
@@ -852,8 +852,9 @@ struct DetailView: View {
     }
 
     /// Next to Follow up, which uses the built-in prompt: your Review command stays one click away.
+    /// Shown only where Follow up is. Its own icon, not `TerminalApp.symbol`, keeps the two apart when only icons show.
     @ViewBuilder private var reviewCommandButton: some View {
-        if hasReviewCommand {
+        if vm.hasFollowUpContext(pr) && hasReviewCommand {
             Button(terminalLabel("Review"), systemImage: "text.magnifyingglass") { vm.reviewInTerminal(pr) }
                 .help("Start a new review in \(Agent.current.appName) with your Review command")
         }

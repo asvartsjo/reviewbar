@@ -90,7 +90,7 @@ Open the gear in the panel. Details for each: [docs/features.md › Settings](do
 - `open Package.swift` opens it in Xcode.
 - Views use `@ViewState` instead of `@State`: on the macOS 27 SDK `@State` is a macro that only builds with Xcode, not with just the Command Line Tools.
 - CI (GitHub Actions, macOS) builds, tests and bundles the app on every push; the zipped `.app` is attached to each run. A downloaded build is quarantined by macOS: right-click › Open the first time, or `xattr -dr com.apple.quarantine ReviewBar.app`.
-- When you add or change a feature, update [docs/features.md](docs/features.md), and the At a glance list above if it's a new headline feature.
+- When you add or change a feature, update [docs/features.md](docs/features.md), and the At a glance list above if it's a new headline feature. If it changes what a button sends or when it shows, update the ⓘ help in Settings too (`CommandHelp` and `PromptsHelp` in `Views.swift`).
 
 ### Releases
 

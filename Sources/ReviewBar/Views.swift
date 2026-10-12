@@ -1397,6 +1397,9 @@ struct InfoButton<Content: View>: View {
 }
 
 /// One command's ⓘ in Settings: what sends it, where it runs, and what an empty field does.
+/// This and `PromptsHelp` restate behaviour that lives elsewhere (`Backend.openInTerminal`, `MyPRAction`,
+/// `MyMove`, `Notifications.canVerify`, the Reviewing detail buttons) and nothing checks them: change them
+/// together, along with docs/features.md › Settings.
 struct CommandHelp: View {
     let title: String
     let facts: [(label: String, text: String)]

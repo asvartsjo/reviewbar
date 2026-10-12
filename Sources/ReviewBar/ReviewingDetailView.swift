@@ -27,7 +27,11 @@ struct ReviewingDetailBox: View {
                 activity(d)
                 threads(d)
                 reviewers(d.reviewers(reviewing.verdicts))
-                if vm.verifyIsDue(reviewing.pr) { verifyButton.padding(.top, 4) }
+                if vm.verifyIsDue(reviewing.pr) {
+                    verifyButton.padding(.top, 4)
+                } else if let run = vm.lastVerifyRun(reviewing.pr) {
+                    lastRun(run).padding(.top, 4)
+                }
             } else if load.loading {
                 Text("Loading activity, threads and commits…").foregroundStyle(.secondary)
             }
@@ -76,6 +80,11 @@ struct ReviewingDetailBox: View {
 
     private static let isoParser = ISO8601DateFormatter()
 
+    /// "2 hours ago" for a GitHub ISO timestamp; nil if it doesn't parse.
+    private static func relative(_ iso: String) -> String? {
+        isoParser.date(from: iso)?.formatted(.relative(presentation: .named))
+    }
+
     @ViewBuilder private func activity(_ d: ReviewingDetail) -> some View {
         let before = vm.previouslySeen(reviewing.pr)
         if d.activity.isEmpty {
@@ -83,7 +92,7 @@ struct ReviewingDetailBox: View {
         } else {
             heading("Activity").padding(.top, 4)
             ForEach(Array(d.activity.enumerated()), id: \.offset) { _, a in
-                let when = Self.isoParser.date(from: a.at)?.formatted(.relative(presentation: .named)) ?? ""
+                let when = Self.relative(a.at) ?? ""
                 Button { if let u = URL(string: a.url ?? reviewing.pr.url) { NSWorkspace.shared.open(u) } } label: {
                     line(new: before.map { a.at > $0 } ?? false) {
                         Text(verbatim: a.text).lineLimit(1)
@@ -160,14 +169,27 @@ struct ReviewingDetailBox: View {
         return t.isOutdated ? state + " The lines you commented on have changed since." : state
     }
 
-    /// Sends your Verify command (Settings › Terminal). Shown only once there's something to verify.
+    /// Sends your Verify command (Settings › Terminal). Shown only once there's something to verify;
+    /// plain instead of prominent when you already ran it and nothing changed since.
     @ViewBuilder private var verifyButton: some View {
         if Agent.current == .claude, ClaudeSettings.command(verifyCommand, url: reviewing.pr.url) != nil {
             let terminal = TerminalApp.resolve(saved: terminalRaw, installed: TerminalApp.installed)
-            Button(terminal.label("Verify fixes"), systemImage: TerminalApp.symbol) { vm.verifyInTerminal(reviewing.pr) }
-                .buttonStyle(.borderedProminent).controlSize(.large)
-                .help("Checks each of your threads against the commits since your review")
+            VStack(alignment: .leading, spacing: 4) {
+                Button(terminal.label("Verify fixes"), systemImage: TerminalApp.symbol) { vm.verifyInTerminal(reviewing.pr) }
+                    .prominent(vm.verifyIsNext(reviewing.pr)).controlSize(.large)
+                    .help("Checks each of your threads against the commits since your review")
+                if let run = vm.lastVerifyRun(reviewing.pr) { lastRun(run) }
+            }
         }
+    }
+
+    /// When Verify fixes last ran here, and whether the PR changed since (`changed(since:)`: a new
+    /// head, or anyone else's review or comment).
+    private func lastRun(_ run: PRSnapshot) -> some View {
+        let ran = ["Verify ran", Self.relative(run.at), run.head.map { "on " + $0.prefix(7) }]
+            .compactMap { $0 }.joined(separator: " ")
+        let text = ran + (reviewing.changed(since: run) ? ". New activity since." : ". Nothing new since.")
+        return Text(verbatim: text).font(.caption).foregroundStyle(.secondary)
     }
 
     @ViewBuilder private func reviewers(_ people: [ReviewingDetail.Reviewer]) -> some View {

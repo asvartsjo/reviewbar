@@ -402,6 +402,11 @@ enum Backend {
         return applyHeadCommits(prs, Data(out.utf8))
     }
 
+    /// The PR's head commit now, not as of the last refresh; the known one if GitHub can't be asked.
+    static func currentHead(_ pr: PR) async -> String? {
+        await withHeadCommits([pr]).first?.headRefOid ?? pr.headRefOid
+    }
+
     /// The `withHeadCommits` response (aliases p0, p1, … by index) → head commit, CI and others'
     /// verdicts per PR. Unchanged PRs when it doesn't decode. Pure, for tests.
     static func applyHeadCommits(_ prs: [PR], _ json: Data) -> [PR] {
@@ -1776,11 +1781,28 @@ enum Backend {
         case .copy(let command):
             return command
         case .process(let exe, let args):
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: exe)
-            p.arguments = args
-            try p.run()
+            try await launch(exe, args)
             return nil
+        }
+    }
+
+    /// Starts the terminal. osascript (Terminal, iTerm) is waited for: a refused automation
+    /// permission shows only in its exit status. The others aren't, as `wezterm start` keeps
+    /// running with its window.
+    private static func launch(_ exe: String, _ args: [String]) async throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        guard exe == "/usr/bin/osascript" else { try p.run(); return }
+        let errP = Pipe()
+        p.standardError = errP
+        let status: Int32 = try await withCheckedThrowingContinuation { c in
+            p.terminationHandler = { c.resume(returning: $0.terminationStatus) }
+            do { try p.run() } catch { p.terminationHandler = nil; c.resume(throwing: error) }
+        }
+        guard status == 0 else {
+            let err = String(decoding: errP.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw ShellError(code: status, stderr: err)
         }
     }
 }

@@ -64,9 +64,9 @@ Open the gear in the panel. Details for each: [docs/features.md › Settings](do
 |---|---|
 | Repositories | The repos to watch, as `owner/repo` |
 | AI tool | Claude Code or Codex, and the model and effort for reviews and for Summarise feedback |
-| Terminal | Which terminal opens Claude Code sessions, the Review, Verify and Triage feedback commands, and where PR worktrees go |
+| Terminal | Which terminal opens Claude Code sessions, and the Review, Verify and Triage feedback commands |
 | Review prompt | How reviews are written and how suggested comments are worded |
-| Pull requests | Whether other people's drafts show in Reviewing |
+| Pull requests | Whether other people's drafts show in Reviewing, and where PR worktrees go |
 | Notifications | Which events notify you |
 | Panel | What the menu bar number counts, stay open when clicking elsewhere, open as a window |
 | Startup | Open at login |

@@ -1391,7 +1391,7 @@ struct InfoButton<Content: View>: View {
     var body: some View {
         Button { shown.toggle() } label: { Image(systemName: "info.circle") }
             .buttonStyle(.borderless)
-            .help(help)
+            .help(help).accessibilityLabel(help)
             .popover(isPresented: $shown, arrowEdge: .trailing) { content() }
     }
 }
@@ -1420,16 +1420,19 @@ struct CommandHelp: View {
     }
 
     static let review = CommandHelp(title: "Review command", facts: [
-        ("Sent by", "Review in your terminal, on PRs you review."),
+        ("Sent by", "Review in your terminal, on PRs you review. Once the PR has your saved notes or replies, "
+            + "that button becomes Follow up instead."),
         ("Runs in", "A worktree of the PR's head commit, when the repo has a local clone."),
         ("When set", "It replaces the built-in prompt, and the Review prompt isn't sent: your own skill decides how to review."),
         ("When empty", "The built-in review prompt with your Review prompt."),
-        ("Not used by", "Review with Claude, Re-run and Review changes since. They run in the background and always use the built-in prompt."),
+        ("Not used by", "Review with Claude, Re-run, Full review and Review changes since, which run in the background "
+            + "and always use the built-in prompt. Nor Follow up, which sends your notes and the GitHub threads."),
         ("Example", "`/pr-review {url}`"),
     ])
 
     static let verify = CommandHelp(title: "Verify command", facts: [
-        ("Sent by", "Verify fixes in a PR's \"Since your review\" box, and the Verify fixes button on the new-commits notification."),
+        ("Sent by", "Verify fixes in a PR's \"Since your review\" box, and the Verify fixes button on the new-commits "
+            + "notification (not when the terminal is Copy command)."),
         ("Shown when", "You have review threads on the PR, and there are new commits or a reply in your threads since your review."),
         ("Runs in", "A worktree of the PR's head commit, when the repo has a local clone."),
         ("Built in", "Checks each of your threads against the new commits (fixed, partly, not fixed or author disagreed), "
@@ -1470,13 +1473,15 @@ struct PromptsHelp: View {
                     ("Review in your terminal",
                      "Your Review command. Without one, the built-in prompt with your Review prompt."),
                     ("Follow up", "A built-in prompt with your saved notes and the GitHub threads. Uses neither setting."),
-                    ("Verify fixes", "Your Verify command. Leaving it empty hides both buttons, in the PR and on the notification."),
+                    ("Verify fixes", "Your Verify command. Leaving it empty hides both buttons, in the PR and on the "
+                     + "notification. The notification has none when the terminal is Copy command."),
                 ])
                 section("My PRs", [
                     ("Triage feedback", "Your Triage feedback command, in your checkout of the PR's branch."),
                     ("Work through feedback", "A built-in prompt with the reviews, threads and diff. Shown whenever "
                      + "Triage feedback isn't (labelled Open when there's no feedback)."),
-                    ("Merge check", "Fixed, not a setting: “can I merge {url}?”. Shown once the PR is approved and CI is green."),
+                    ("Merge check", "Fixed, not a setting: “can I merge {url}?”. Shown when it's your move to merge: "
+                     + "approved, no conflict or open feedback, not a draft, and CI green or none."),
                 ])
                 section("Both", [
                     ("Summarise …", "A built-in prompt on the summary model. Reads comments only, never the diff."),

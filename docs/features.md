@@ -59,7 +59,7 @@ Lists your own open PRs (the 30 most recently updated), including ones nobody ha
 - **Waiting on others**: reviewers still to look. Dismissed PRs wait here until new feedback.
 - **Parked** (folded): drafts with no commit for 30+ days, and any PR you park from its right-click menu. **Unpark** brings it back. A parked PR never notifies or counts.
 
-Feedback you haven't answered means unresolved threads where a reviewer spoke last, and approvals, change requests, review summaries or comments newer than your last commit or comment. Bots are ignored. A line on top counts both groups ("3 wait on you · 5 on others"), and the tab shows the Your move count. Only feedback from people, blockers and PRs ready to merge notify or count in the menu bar; drafts and bot threads don't. Your own drafts always show here.
+Feedback you haven't answered means unresolved threads where a reviewer spoke last, and approvals, change requests, review summaries or comments newer than your last commit or comment. Bots are ignored. A line on top counts both groups ("3 wait on you · 5 on others"), and the tab shows the Your move count. Only feedback from people, blockers and PRs ready to merge notify or count in the menu bar; drafts and bot threads don't. Checks passing on a PR that isn't approved yet notifies too, but never counts. Your own drafts always show here.
 
 Actions on a PR:
 
@@ -88,7 +88,7 @@ ReviewBar notifies you about:
 - new review requests (a request on a PR you already reviewed says re-requested);
 - replies on your review threads;
 - feedback on your PRs;
-- checks turning green on your PRs that aren't ready to merge yet (a push whose checks finish between two refreshes counts too; parked PRs and PRs without checks stay quiet; it never counts in the menu bar);
+- checks turning green on your PRs that aren't approved yet (a push whose checks finish between two refreshes counts too; drafts, parked PRs and PRs without checks stay quiet; it never counts in the menu bar);
 - on PRs you reviewed: new commits after your review, all your threads resolved, and other reviewers approving or requesting changes.
 
 Each kind can be turned off in Settings. Clicking a notification opens the PR. New commits don't create a GitHub notification, so they show up with the 5-minute refresh; that notification has a **Verify fixes** button (hover over it, or use the Alerts style) that starts the Verify session when a Verify command and a terminal are set.

@@ -61,26 +61,28 @@ enum AlertDiff {
         return alerts
     }
 
-    /// A PR's head commit and combined CI state, as one refresh saw them.
+    /// A PR's head commit and whether its checks were green, as one refresh saw them.
     struct CI: Equatable {
         let head: String?
-        let checks: String?
+        let passing: Bool
     }
 
     static func ciByURL(_ prs: [FeedbackPR]) -> [String: CI] {
-        Dictionary(prs.map { ($0.pr.url, CI(head: $0.pr.headRefOid, checks: $0.checks)) }, uniquingKeysWith: { a, _ in a })
+        Dictionary(prs.map { ($0.pr.url, CI(head: $0.pr.headRefOid, passing: $0.checksPassing)) }, uniquingKeysWith: { a, _ in a })
     }
 
     /// Your PRs whose checks are green now but weren't on the previous refresh: still running or
     /// failing on the same head, or the head moved (CI can finish between two refreshes). Its own
     /// diff because a green run leaves a PR quiet, so `latestAt` doesn't move. Quiet for a PR not
-    /// seen before, one without checks, a parked one, and one that's ready to merge (that alert says more).
+    /// seen before, one without checks, a draft, a parked one, and an approved one: green and approved
+    /// is ready to merge (that alert says more), or blocked by a conflict, or about to be ready once
+    /// GitHub has worked out whether it merges.
     static func checksPassed(_ now: [FeedbackPR], before: [String: CI]?, parked: Set<String>) -> [FeedbackPR] {
         guard let before else { return [] }
         return now.filter { f in
-            guard f.checks == "SUCCESS", !f.readyToMerge, !parked.contains(f.pr.url),
+            guard f.checksPassing, !f.pr.isDraft, f.decision != "APPROVED", !parked.contains(f.pr.url),
                   let old = before[f.pr.url] else { return false }
-            return old.head != f.pr.headRefOid || old.checks != "SUCCESS"
+            return old.head != f.pr.headRefOid || !old.passing
         }
     }
 
@@ -100,8 +102,9 @@ enum AutoReview {
 
 enum NotifySettings {
     static let requestsKey = "notifyRequests", repliesKey = "notifyReplies", feedbackKey = "notifyFeedback"
+    static let checksPassedKey = "notifyChecksPassed"
     static let mentionsKey = "notifyMentions"
-    static let crewKey = "notifyCrew", checksPassedKey = "notifyChecksPassed"
+    static let crewKey = "notifyCrew"
     static let pushedKey = "notifyPushed", resolvedKey = "notifyAllResolved", verdictsKey = "notifyVerdicts"
 
     /// On unless turned off.
@@ -193,7 +196,7 @@ enum Notifier {
     }
 
     /// Alerts per PR, in the order each PR first appears, most important first within a PR:
-    /// a request, then new commits, a reply, verdicts, all resolved. Pure, for tests.
+    /// a request, then new commits, a reply, verdicts, all resolved, feedback, checks passed. Pure, for tests.
     static func grouped(_ alerts: [ReviewAlert]) -> [[ReviewAlert]] {
         func rank(_ a: ReviewAlert) -> Int {
             switch a {
@@ -278,11 +281,7 @@ enum Notifier {
             }
             return ("feedback-\(f.pr.url)-\(f.latestAt)", title, "\(line(f.pr)) · \(f.summary) · \(f.latestBy)", f.pr.url)
         case .checksPassed(let f):
-            let review = switch f.decision {
-            case "CHANGES_REQUESTED": "changes requested"
-            case "APPROVED": "approved"
-            default: "waiting on review"
-            }
+            let review = f.decision == "CHANGES_REQUESTED" ? "changes requested" : "waiting on review"
             return ("checks-\(f.pr.url)-\(f.pr.headRefOid ?? "")", "Checks passed on your PR", "\(line(f.pr)) · \(review)", f.pr.url)
         }
     }

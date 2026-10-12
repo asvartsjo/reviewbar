@@ -198,12 +198,13 @@ struct NotificationTests {
 
     // MARK: Checks passed on your PRs
 
-    private func mine(_ n: Int, head: String = "c1", checks: String? = "SUCCESS",
-                      decision: String? = "REVIEW_REQUIRED") -> FeedbackPR {
-        var p = pr(n, author: "me")
+    private func mine(_ n: Int, head: String = "c1", checks: String? = "SUCCESS", decision: String? = "REVIEW_REQUIRED",
+                      mergeable: String = "MERGEABLE", draft: Bool = false) -> FeedbackPR {
+        var p = PR(number: n, title: "PR \(n)", url: "https://github.com/o/r/pull/\(n)", isDraft: draft,
+                   updatedAt: "2026-09-01T00:00:00Z", repository: .init(nameWithOwner: "o/r"), author: .init(login: "me"))
         p.headRefOid = head
         return FeedbackPR(pr: p, decision: decision, threads: 0, reviews: 0, comments: 0,
-                          latestAt: "", latestBy: "", checks: checks, mergeable: "MERGEABLE")
+                          latestAt: "", latestBy: "", checks: checks, mergeable: mergeable)
     }
 
     private func passed(_ now: [FeedbackPR], before: [FeedbackPR]?, parked: Set<String> = []) -> [Int] {
@@ -229,6 +230,16 @@ struct NotificationTests {
         #expect(passed([mine(1, checks: nil)], before: [mine(1, checks: "PENDING")]).isEmpty)
         #expect(passed([mine(1, decision: "APPROVED")], before: [mine(1, checks: "PENDING")]).isEmpty) // ready to merge
         #expect(passed([mine(1)], before: [mine(1, checks: "PENDING")], parked: [mine(1).pr.url]).isEmpty)
+        #expect(passed([mine(1, draft: true)], before: [mine(1, checks: "PENDING", draft: true)]).isEmpty)
+    }
+
+    /// Approved and green but not ready to merge: a conflict, or GitHub hasn't worked out
+    /// mergeability yet and "Ready to merge" follows on the next refresh.
+    @Test func checksPassedStaysQuietWhenApprovedButNotReady() {
+        for mergeable in ["CONFLICTING", "UNKNOWN"] {
+            #expect(passed([mine(1, decision: "APPROVED", mergeable: mergeable)],
+                           before: [mine(1, checks: "PENDING", decision: "APPROVED", mergeable: mergeable)]).isEmpty)
+        }
     }
 
     @Test func checksPassedContent() {

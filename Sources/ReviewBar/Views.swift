@@ -1198,7 +1198,7 @@ struct SettingsView: View {
             Toggle("All your threads on a PR resolved", isOn: $notifyAllResolved)
             Toggle("Other reviewers approve or request changes", isOn: $notifyVerdicts)
             Toggle("Feedback on your PRs", isOn: $notifyFeedback)
-            Toggle("Checks pass on your PRs before they're ready to merge", isOn: $notifyChecksPassed)
+            Toggle("Checks pass on your PRs before they're approved", isOn: $notifyChecksPassed)
             Toggle("@mentions of you or your teams", isOn: $notifyMentions)
             Toggle("A Claude session needs you (Claude Code only)", isOn: $notifyCrew)
             notificationHint

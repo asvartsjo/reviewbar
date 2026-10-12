@@ -601,18 +601,24 @@ enum Backend {
             }
 
             var latestAt = ""
-            var mine: ReviewingPR.MyReview?, dismissed = n.viewerLatestReview?.state == "DISMISSED"
+            var mine: ReviewingPR.MyReview?, dismissed = false
+            /// Oldest first. A dismissal counts only while no review of yours comes after it,
+            /// even when an earlier one (an approval) still fills `mine`.
+            func track(_ r: ReviewingData.Review?) {
+                guard let r, r.state != "PENDING" else { return }
+                mine = submitted(r, after: mine) ?? mine
+                dismissed = r.state == "DISMISSED"
+            }
             for r in n.reviews.items {
                 if r.author?.login == me {
-                    mine = submitted(r, after: mine) ?? mine
-                    if r.state == "DISMISSED" { dismissed = true }
+                    track(r)
                     continue
                 }
                 guard isOther(r.author), r.author?.login != author else { continue }
                 latestAt = max(latestAt, r.submittedAt ?? "")
             }
 
-            mine = submitted(n.viewerLatestReview, after: mine) ?? mine
+            track(n.viewerLatestReview)
             var myCommentAt = "", authorCommentAt = ""
             for c in n.comments?.items ?? [] {
                 let at = c.createdAt ?? ""
@@ -642,7 +648,7 @@ enum Backend {
                         author: PR.Author(login: author), headRefOid: n.headRefOid)
             pr.createdAt = n.createdAt
             let head = n.commits.items.first?.commit
-            return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: mine == nil && dismissed,
+            return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: dismissed,
                                waiting: waiting, myThreads: opened, resolved: resolved, outdated: outdated,
                                verdicts: verdicts(n.reviews.items.map { ($0.author, $0.state) }, me: me, author: author),
                                checks: head?.statusCheckRollup?.state,

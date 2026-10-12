@@ -1232,7 +1232,7 @@ struct SettingsView: View {
             Text("Menu bar number counts")
             VStack(alignment: .leading, spacing: 4) {
                 Toggle("Review requests (awaiting your review)", isOn: $countRequests)
-                Toggle("New commits or replies on PRs you reviewed", isOn: $countReviewed)
+                Toggle("New commits or replies on PRs you reviewed but haven't approved", isOn: $countReviewed)
                 Toggle("Feedback on your PRs", isOn: $countMyPRs)
                 Toggle("Mentions", isOn: $countMentions)
             }

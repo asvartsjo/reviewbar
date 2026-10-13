@@ -145,16 +145,19 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         }
 
         static func forPR(_ number: Int, repo: String, repoFolder: String, nextToClone: Bool) -> Worktree {
-            let path: URL
+            let path = folder(repo: repo, repoFolder: repoFolder, nextToClone: nextToClone)
+                .appendingPathComponent("pr-\(number)")
+            return Worktree(repoFolder: repoFolder, path: path.path, number: number)
+        }
+
+        /// The folder that holds the repo's worktrees under either location setting.
+        static func folder(repo: String, repoFolder: String, nextToClone: Bool) -> URL {
             if nextToClone {
                 let clone = URL(fileURLWithPath: repoFolder, isDirectory: true).standardized
-                path = clone.deletingLastPathComponent()
-                    .appendingPathComponent("\(clone.lastPathComponent)-worktrees/pr-\(number)")
-            } else {
-                let name = repo.replacingOccurrences(of: "/", with: "-")
-                path = Store.dir.appendingPathComponent("worktrees/\(name)/pr-\(number)")
+                return clone.deletingLastPathComponent().appendingPathComponent("\(clone.lastPathComponent)-worktrees")
             }
-            return Worktree(repoFolder: repoFolder, path: path.path, number: number)
+            let name = repo.replacingOccurrences(of: "/", with: "-")
+            return Store.dir.appendingPathComponent("worktrees/\(name)")
         }
 
         /// One entry of `git worktree list --porcelain`.

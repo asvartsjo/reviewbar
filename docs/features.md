@@ -65,7 +65,7 @@ Actions on a PR:
 
 - **Summarise feedback** is offered once a reviewer has left any feedback, answered or not. It reads only comments, never the diff, so it reports what people said and what's waiting on you, not whether a fix is right.
 - **Work through feedback in Terminal** opens Claude Code with all the feedback plus the diff, starting with a grouped list of what reviewers are asking for.
-- With Claude Code, a PR with feedback or failing CI gets **Triage feedback** instead once you set a [Triage feedback command](#terminal), and one ready to merge gets **Merge check** (in its detail and its right-click menu). They send that command or the merge command (`can I merge {url}?`) in the checkout that has the PR's branch checked out: a worktree or your clone. ReviewBar never switches a branch: with no such checkout it copies the command instead.
+- With Claude Code, a PR with feedback or failing CI gets **Triage feedback** instead once you set a [Triage feedback command](#terminal), and one ready to merge gets **Merge check** (in its detail and its right-click menu). They send that command or the merge command (`can I merge {url}?`) in the checkout that has the PR's branch checked out: a worktree or your clone. ReviewBar never switches a branch: with no such checkout it adds a worktree on the branch, beside its PR worktrees (`storefront-worktrees/atanas-fix` for `atanas/fix`), fetching the branch first if it's only on origin. It counts as your own worktree: once the PR is merged it is listed under *worktrees can go*, never removed. If git can't add it, the command is copied instead.
 
 ## Crew
 

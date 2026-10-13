@@ -1461,7 +1461,7 @@ struct CommandHelp: View {
     static let triage = CommandHelp(title: "Triage feedback command", facts: [
         ("Sent by", "Triage feedback, on your own PR when it has review feedback or failing CI."),
         ("Runs in", "Your own checkout of the PR's branch (the clone or a worktree), so fixes are committed where you work. "
-            + "With no such checkout nothing opens and the command is copied instead."),
+            + "With no such checkout ReviewBar adds a worktree on the branch, beside its PR worktrees."),
         ("When empty", "No Triage feedback button. Work through feedback opens instead, with a built-in prompt holding "
             + "the reviews, threads and diff."),
         ("Example", "`/pr-feedback {url}`"),

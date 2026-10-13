@@ -51,4 +51,52 @@ struct MyPRActionTests {
         #expect(MyPRAction.checkout(of: "atanas/other", in: listed) == nil)
         #expect(MyPRAction.checkout(of: "atanas", in: listed) == nil)
     }
+
+    @Test func newCheckoutGoesBesideThePRWorktrees() {
+        let clone = "/Users/me/code/storefront"
+        #expect(MyPRAction.newCheckoutPath(of: "atanas/fix", repo: "acme/storefront", repoFolder: clone, nextToClone: true)
+                == "/Users/me/code/storefront-worktrees/atanas-fix")
+        let pr = TerminalApp.Worktree.forPR(7, repo: "acme/storefront", repoFolder: clone, nextToClone: false).path
+        let branch = MyPRAction.newCheckoutPath(of: "atanas/fix", repo: "acme/storefront", repoFolder: clone, nextToClone: false)
+        #expect((branch as NSString).deletingLastPathComponent == (pr as NSString).deletingLastPathComponent)
+        #expect((branch as NSString).lastPathComponent == "atanas-fix")
+    }
+
+    /// Real git: a branch only on origin becomes a local branch tracking it, a local-only branch is
+    /// checked out as it is, and a worktree whose folder was deleted neither matches nor blocks a new one.
+    @Test func makesACheckoutOfTheBranchInRealGit() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("rb-\(UUID().uuidString.prefix(8))")
+        defer { try? FileManager.default.removeItem(at: root) }
+        func at(_ name: String) -> String { root.appendingPathComponent(name).path }
+        _ = try await sh("""
+            set -e
+            mkdir -p \(q(root.path)) && git init -q -b main \(q(at("origin"))) && cd \(q(at("origin")))
+            git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+            git branch atanas/remote-only
+            git clone -q \(q(at("origin"))) \(q(at("storefront")))
+            git -C \(q(at("storefront"))) branch atanas/local-only
+            """)
+        func make(_ branch: String, _ path: String) async throws -> String {
+            try await sh(MyPRAction.makeCheckoutScript(branch: branch, repoFolder: at("storefront"), path: path)
+                + " || exit 1\ngit -C \(q(path)) rev-parse --abbrev-ref HEAD\n"
+                + "git -C \(q(path)) rev-parse --abbrev-ref @{u} 2>/dev/null; true")
+        }
+        func listed() async throws -> [TerminalApp.Worktree.Listed] {
+            TerminalApp.Worktree.parseList(try await sh("git -C \(q(at("storefront"))) worktree list --porcelain"))
+        }
+
+        let remote = try await make("atanas/remote-only", at("wt/atanas-remote-only"))
+        #expect(remote.contains("atanas/remote-only\norigin/atanas/remote-only"))
+        let local = try await make("atanas/local-only", at("wt/atanas-local-only"))
+        #expect(local.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("atanas/local-only"))
+        #expect(MyPRAction.checkout(of: "atanas/local-only", in: try await listed()) != nil)
+
+        try FileManager.default.removeItem(atPath: at("wt/atanas-local-only"))
+        #expect(MyPRAction.checkout(of: "atanas/local-only", in: try await listed()) == nil)
+        _ = try await make("atanas/local-only", at("wt2/atanas-local-only"))
+        func real(_ p: String?) -> String? { p.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } }
+        #expect(real(MyPRAction.checkout(of: "atanas/local-only", in: try await listed())) == real(at("wt2/atanas-local-only")))
+
+        await #expect(throws: ShellError.self) { try await make("atanas/nowhere", at("wt/atanas-nowhere")) }
+    }
 }

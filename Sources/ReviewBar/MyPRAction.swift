@@ -39,14 +39,16 @@ enum MyPRAction: Equatable {
 
     /// Where a new checkout of `branch` goes: beside ReviewBar's `pr-<N>` worktrees, named after the
     /// branch (`atanas/fix` → `atanas-fix`), so it never takes the place of the PR's review worktree.
-    /// Pure, for tests.
+    /// Branches can share a folder (`a/b` and `a-b`, or one named `pr-7`): `worktree add` then refuses
+    /// the taken folder, and the command is copied instead. Pure, for tests.
     static func newCheckoutPath(of branch: String, repo: String, repoFolder: String, nextToClone: Bool) -> String {
         TerminalApp.Worktree.folder(repo: repo, repoFolder: repoFolder, nextToClone: nextToClone)
             .appendingPathComponent(branch.replacingOccurrences(of: "/", with: "-")).path
     }
 
     /// Shell lines that add a worktree on `branch` at `path`. The branch is fetched first, so one that
-    /// is only on origin becomes a local branch tracking it; a local branch is checked out as it is.
+    /// is only on origin becomes a local branch tracking it; a local branch is fast-forwarded to its
+    /// upstream when it can be (GitHub's Update branch moves origin on), else checked out as it is.
     /// Pruning first frees a branch whose worktree folder was deleted. Pure, for tests.
     static func makeCheckoutScript(branch: String, repoFolder: String, path: String) -> String {
         let repo = q(repoFolder), wt = q(path)
@@ -54,7 +56,8 @@ enum MyPRAction: Equatable {
         git -C \(repo) worktree prune || exit 1
         mkdir -p "$(dirname \(wt))" || exit 1
         git -C \(repo) fetch --quiet origin \(q(branch)) 2>/dev/null
-        git -C \(repo) worktree add --quiet \(wt) \(q(branch))
+        git -C \(repo) worktree add --quiet \(wt) \(q(branch)) || exit 1
+        git -C \(wt) merge --quiet --ff-only '@{u}' 2>/dev/null || true
         """
     }
 }

@@ -29,6 +29,21 @@ struct AgentTests {
         #expect(x.contains("--sandbox read-only --color never --cd '/wt' "))
     }
 
+    @Test func codexMarksTheWorktreeUntrusted() {
+        let x = Agent.codex.headlessCommand((model: "", effort: ""), codebase: "/wt/pr-1")
+        #expect(x.contains(#"-c 'projects={"/wt/pr-1"={trust_level="untrusted"}}'"#))
+        #expect(x.contains("-c skills.include_instructions=false"))
+        // Without a worktree no PR code is checked out, so nothing to distrust.
+        #expect(!Agent.codex.headlessCommand((model: "", effort: "")).contains("projects="))
+    }
+
+    @Test func codexTrustKeyIsEscaped() {
+        #expect(CodexSettings.tomlString(#"/a.b/c d/"q"\x"#) == #""/a.b/c d/\"q\"\\x""#)
+        #expect(CodexSettings.tomlString("a\nb") == #""a\u000Ab""#)
+        #expect(CodexSettings.untrustedFlags("/it's")
+                .hasPrefix(#"-c 'projects={"/it'\''s"={trust_level="untrusted"}}' "#))
+    }
+
     @Test func projectSettingsInTheWorktreeAreSkipped() throws {
         let c = Agent.claude.headlessCommand((model: "", effort: ""), codebase: "/wt", userSettingsOnly: true)
         #expect(c.contains("--setting-sources user"))

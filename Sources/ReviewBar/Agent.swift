@@ -44,7 +44,7 @@ enum Agent: String, CaseIterable, Identifiable {
             // progress output on stdout never ends up in the saved review.
             return "f=$(mktemp -t reviewbar) || exit 1; "
                 + "\(CodexSettings.bin) exec --skip-git-repo-check --sandbox read-only --color never "
-                + (codebase.map { "--cd \(q($0)) " } ?? "")
+                + (codebase.map { "--cd \(q($0)) \(CodexSettings.untrustedFlags($0)) " } ?? "")
                 + "--output-last-message \"$f\"\(CodexSettings.flags(pair)) - >/dev/null "
                 + "|| { s=$?; rm -f \"$f\"; exit $s; }; cat \"$f\"; rm -f \"$f\""
         }
@@ -94,5 +94,29 @@ enum CodexSettings {
     static func flags(_ pair: (model: String, effort: String)) -> String {
         (pair.model.isEmpty ? "" : " --model \(pair.model)")
             + (pair.effort.isEmpty ? "" : " -c model_reasoning_effort=\(pair.effort)")
+    }
+
+    /// Keeps a PR worktree from configuring its own review. A worktree inherits trust from the
+    /// clone it belongs to, and a trusted project gets its AGENTS.md and `.codex/config.toml`
+    /// (instructions, MCP servers) loaded; marking the worktree untrusted turns all of that off.
+    /// Repo skills aren't trust-gated, so their catalog is left out of the prompt instead.
+    /// The path goes in the TOML value, not the key: Codex splits `-c` keys on every dot.
+    static func untrustedFlags(_ worktree: String) -> String {
+        "-c \(q("projects={\(tomlString(worktree))={trust_level=\"untrusted\"}}")) "
+            + "-c skills.include_instructions=false"
+    }
+
+    /// A TOML basic string: quotes, backslashes and control characters escaped.
+    static func tomlString(_ s: String) -> String {
+        var out = "\""
+        for u in s.unicodeScalars {
+            switch u {
+            case "\"": out += "\\\""
+            case "\\": out += "\\\\"
+            case _ where u.value < 0x20 || u.value == 0x7F: out += String(format: "\\u%04X", u.value)
+            default: out.unicodeScalars.append(u)
+            }
+        }
+        return out + "\""
     }
 }

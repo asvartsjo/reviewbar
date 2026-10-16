@@ -467,6 +467,8 @@ struct FeedbackPR: Identifiable, Hashable {
     var hasFeedback = false
     /// The PR's head branch name.
     var branch: String? = nil
+    /// The head branch is on a fork, so `branch` names the fork's branch, not one on origin.
+    var crossRepo = false
     /// When the head commit was made (ISO 8601). Unlike `updatedAt`, labels and bulk edits don't move it.
     var lastCommitAt: String? = nil
     /// How many of `reviews` are approvals: news, but nothing to answer.
@@ -481,7 +483,7 @@ struct FeedbackPR: Identifiable, Hashable {
     func with(latestAt: String, latestBy: String) -> FeedbackPR {
         FeedbackPR(pr: pr, decision: decision, threads: threads, reviews: reviews, comments: comments,
                    latestAt: latestAt, latestBy: latestBy, checks: checks, mergeable: mergeable,
-                   mergeState: mergeState, hasFeedback: hasFeedback, branch: branch, lastCommitAt: lastCommitAt,
+                   mergeState: mergeState, hasFeedback: hasFeedback, branch: branch, crossRepo: crossRepo, lastCommitAt: lastCommitAt,
                    approvals: approvals, botThreads: botThreads, reviewersRequested: reviewersRequested)
     }
 

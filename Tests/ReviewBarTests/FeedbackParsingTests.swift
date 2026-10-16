@@ -73,15 +73,16 @@ struct FeedbackParsingTests {
     private func myPRsJSON(lastCommit: String = "2026-09-10T00:00:00Z", decision: String = "REVIEW_REQUIRED",
                            reviews: [String] = [], comments: [String] = [], threads: [String] = [],
                            checks: String? = nil, mergeable: String? = nil, mergeState: String? = nil,
-                           branch: String? = nil) -> Data {
+                           branch: String? = nil, crossRepo: Bool? = nil) -> Data {
         let head = branch.map { "\"\($0)\"" } ?? "null"
+        let fork = crossRepo.map { "\($0)" } ?? "null"
         let rollup = checks.map { #"{"state": "\#($0)"}"# } ?? "null"
         let merge = mergeable.map { "\"\($0)\"" } ?? "null"
         let state = mergeState.map { "\"\($0)\"" } ?? "null"
         return Data("""
         {"data": {"viewer": {"login": "me"}, "search": {"nodes": [
           {"number": 7, "title": "Mine", "url": "https://github.com/o/r/pull/7", "isDraft": false,
-           "createdAt": "2026-09-09T00:00:00Z", "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "headRefName": \(head), "reviewDecision": "\(decision)",
+           "createdAt": "2026-09-09T00:00:00Z", "updatedAt": "2026-09-11T00:00:00Z", "headRefOid": "fff0000", "headRefName": \(head), "isCrossRepository": \(fork), "reviewDecision": "\(decision)",
            "mergeable": \(merge), "mergeStateStatus": \(state),
            "reviewRequests": {"totalCount": 1},
            "repository": {"nameWithOwner": "o/r"}, "author": {"login": "me"},
@@ -145,11 +146,12 @@ struct FeedbackParsingTests {
             threads: [myThread(last: comment("coderabbitai", "2026-09-11T09:00:00Z", bot: true)),
                       myThread(resolved: true, last: comment("coderabbitai", "2026-09-11T09:00:00Z", bot: true)),
                       myThread(last: comment("me", "2026-09-11T10:00:00Z"))],
-            branch: "atanas/fix"))
+            branch: "atanas/fix", crossRepo: true))
         #expect(prs.map(\.botThreads) == [1])
         #expect(prs.map(\.threads) == [0])
         #expect(prs.map(\.isQuiet) == [true])
         #expect(prs.map(\.branch) == ["atanas/fix"])
+        #expect(prs.map(\.crossRepo) == [true])
         #expect(prs.map(\.lastCommitAt) == ["2026-09-10T00:00:00Z"])
         #expect(prs.map(\.move) == [.yours(.feedback)])
     }

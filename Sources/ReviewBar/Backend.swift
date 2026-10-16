@@ -954,7 +954,7 @@ enum Backend {
       viewer { login }
       search(query: $q, type: ISSUE, first: 30) {
         nodes { ... on PullRequest {
-          number title url isDraft createdAt updatedAt headRefOid headRefName reviewDecision
+          number title url isDraft createdAt updatedAt headRefOid headRefName isCrossRepository reviewDecision
           repository { nameWithOwner } author { login }
           mergeable mergeStateStatus
           reviewRequests(first: 1) { totalCount }
@@ -1043,7 +1043,8 @@ enum Backend {
                                hasFeedback: n.reviews.items.contains { isReviewer($0.author) }
                                    || n.comments.items.contains { isReviewer($0.author) }
                                    || n.reviewThreads.items.contains { isReviewer($0.comments.items.last?.author) },
-                               branch: n.headRefName, lastCommitAt: head?.committedDate, approvals: approvals, botThreads: botThreads,
+                               branch: n.headRefName, crossRepo: n.isCrossRepository ?? false,
+                               lastCommitAt: head?.committedDate, approvals: approvals, botThreads: botThreads,
                                reviewersRequested: n.reviewRequests.totalCount > 0)
 
             // No unanswered feedback: news only if something blocks it, or it can be merged.
@@ -1078,6 +1079,7 @@ enum Backend {
             let updatedAt: String
             let headRefOid: String?
             let headRefName: String?
+            let isCrossRepository: Bool?
             let reviewDecision: String?
             let mergeable: String?
             let mergeStateStatus: String?

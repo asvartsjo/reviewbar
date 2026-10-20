@@ -120,6 +120,16 @@ struct NotificationTests {
                                       .verdict(now, .init(login: "cara", state: "CHANGES_REQUESTED"))])
     }
 
+    @Test func yourOnlyReviewDismissedAlertsOnce() {
+        var dismissed = reviewing(reviewedAt: nil)
+        dismissed.myReviewDismissed = true
+        #expect(diff(reviewing(), dismissed) == [.dismissed(dismissed)])
+        #expect(diff(dismissed, dismissed).isEmpty)       // still dismissed next refresh
+        #expect(diff(nil, dismissed).isEmpty)              // not seen before: no baseline
+        #expect(Notifier.content(.dismissed(dismissed)).title == "Your review was dismissed")
+        #expect(NotifySettings.wants(.dismissed(dismissed)) == NotifySettings.isOn(NotifySettings.requestsKey))
+    }
+
     /// A request you hadn't reviewed is listed without verdicts, so your first review would
     /// otherwise announce every earlier one.
     @Test func yourFirstReviewDoesntAnnounceOlderVerdicts() {

@@ -3,8 +3,8 @@ import Foundation
 /// Canned data for `--demo` (`swift run ReviewBar --demo`, or `open ReviewBar.app --args --demo`):
 /// every Reviewing state without calling `gh`. Each refresh moves the story one step, up to the
 /// last. Step 1 is the baseline. Step 2 pushes to #140, resolves your last thread on #160, adds an
-/// approval on #152 and a new request (#180), so the blue dot, "mute until something happens" and
-/// the notifications have something to react to. Reviews are never written to disk in demo mode.
+/// approval on #152, dismisses your approval on #175 and adds a new request (#180), so the blue dot,
+/// "mute until something happens" and the notifications have something to react to. Reviews are never written to disk in demo mode.
 enum DemoData {
     static let isOn = CommandLine.arguments.contains("--demo")
     static let lastStep = 2
@@ -62,8 +62,8 @@ enum DemoData {
             ReviewingPR(pr: productPage, myLastReview: .init(state: "COMMENTED", commit: oid("170a"), at: ago(days: 5)),
                         waiting: 0, myThreads: 1, resolved: 0, outdated: 1, verdicts: [], checks: "FAILURE",
                         latestAt: ago(hours: 6), lastOtherAt: ago(hours: 6)),
-            ReviewingPR(pr: tokens, myLastReview: .init(state: "APPROVED", commit: nil, at: ago(days: 6)),
-                        waiting: 0, myThreads: 0, resolved: 0, outdated: 0, verdicts: [], checks: nil,
+            ReviewingPR(pr: tokens, myLastReview: s >= 2 ? nil : .init(state: "APPROVED", commit: nil, at: ago(days: 6)),
+                        myReviewDismissed: s >= 2, waiting: 0, myThreads: 0, resolved: 0, outdated: 0, verdicts: [], checks: nil,
                         latestAt: ago(hours: 8), lastOtherAt: ago(hours: 8)),
         ]
     }
@@ -233,8 +233,8 @@ enum DemoData {
             return ReviewingDetail(commits: .gone, myThreads: [], openThreadsBy: [:],
                 activity: [did("lina", .commented, ago(hours: 8)),
                            did("lina", .convertedToDraft, ago(hours: 9)),
-                           did("lina", .forcePushed(times: 1), ago(hours: 10)),
-                           did("lina", .dismissedReview(of: nil), ago(hours: 10))])
+                           did("lina", .forcePushed(times: 1), ago(hours: 10))]
+                    + (s >= 2 ? [did("lina", .dismissedReview(of: nil), iso(stepStarted[2] ?? Date()))] : []))
         default:
             return ReviewingDetail(commits: .unknown, myThreads: [], openThreadsBy: [:])
         }

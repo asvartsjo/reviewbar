@@ -85,7 +85,7 @@ Agent view is a research preview: if its output changes, the tab stays empty.
 
 ReviewBar notifies you about:
 
-- new review requests (a request on a PR you already reviewed says re-requested);
+- new review requests (a request on a PR you already reviewed says re-requested), and your only review on a PR being dismissed;
 - replies on your review threads;
 - feedback on your PRs;
 - checks turning green on your PRs that aren't approved yet (a push whose checks finish between two refreshes counts too; drafts, parked PRs and PRs without checks stay quiet; it never counts in the menu bar);

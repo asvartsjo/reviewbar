@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import ReviewBar
 
@@ -59,6 +60,40 @@ struct RepoFolderTests {
         let s = TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "", checkout: wt)
         let a = try #require(s.range(of: "worktree add")), b = try #require(s.range(of: #"claude "$prompt""#))
         #expect(a.lowerBound < b.lowerBound)
+    }
+
+    @Test func launcherPassesSettingSourcesOnlyWhenAsked() throws {
+        let wt = TerminalApp.Worktree(repoFolder: "/r", path: "/wt", number: 1)
+        let s = TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "", checkout: wt, skipPRSettings: true)
+        let a = try #require(s.range(of: "sources=(--setting-sources user)"))
+        let b = try #require(s.range(of: #"claude "${sources[@]}" "$prompt""#))
+        #expect(a.lowerBound < b.lowerBound)
+        #expect(!TerminalApp.launcherScript(claude: "codex", promptFile: "/p", path: "", checkout: wt).contains("sources"))
+        // Without a PR worktree (your own checkout), nothing changes.
+        #expect(!TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "", directory: "/c",
+                                            skipPRSettings: true).contains("sources"))
+    }
+
+    /// Runs the real shell lines: only a PR worktree with its own Claude settings drops them.
+    @Test func prSettingsAreSkippedInThePRWorktreeOnly() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("reviewbar-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let clone = root.appendingPathComponent("it's clone"), wt = root.appendingPathComponent("it's clone-worktrees/pr-1")
+        for dir in [clone, wt] {
+            try fm.createDirectory(at: dir.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        }
+        let check = TerminalApp.Worktree(repoFolder: clone.path, path: wt.path, number: 1).userSettingsOnlyScript
+        func sources(in dir: URL) async throws -> String {
+            try await sh("cd \(q(dir.path)) && { \(check) } >/dev/null && print -r -- \"${sources[*]}\"")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        #expect(try await sources(in: wt) == "")
+        try "{}".write(to: wt.appendingPathComponent(".claude/settings.local.json"), atomically: true, encoding: .utf8)
+        #expect(try await sources(in: wt) == "--setting-sources user")
+        // The worktree couldn't be updated and the script fell back to your clone.
+        #expect(try await sources(in: clone) == "")
     }
 }
 

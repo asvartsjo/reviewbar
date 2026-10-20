@@ -1774,7 +1774,8 @@ enum Backend {
         let path = (try? await sh("print -r -- $PATH").trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
         let script = TerminalApp.launcherScript(
             claude: Agent.current.interactiveCommand(Agent.current.review),
-            promptFile: promptFile.path, path: path, checkout: worktree, directory: directory)
+            promptFile: promptFile.path, path: path, checkout: worktree, directory: directory,
+            skipPRSettings: Agent.current == .claude)
         try script.write(to: launcher, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcher.path)
 

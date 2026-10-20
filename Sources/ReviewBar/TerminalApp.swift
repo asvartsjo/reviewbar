@@ -75,17 +75,21 @@ enum TerminalApp: String, CaseIterable, Identifiable {
     /// deletes itself, starts Claude, and leaves you at a normal shell when Claude exits.
     /// Exits quietly if the prompt is already gone: Ghostty can run a launch command twice. Pure, for tests.
     /// `checkout` is the repo's local clone plus where this PR's worktree goes, if a folder is set.
+    /// `skipPRSettings` (Claude only) adds `checkout`'s `userSettingsOnlyScript`.
     static func launcherScript(claude: String, promptFile: String, path: String,
-                               checkout: Worktree? = nil, directory: String? = nil) -> String {
-        """
+                               checkout: Worktree? = nil, directory: String? = nil,
+                               skipPRSettings: Bool = false) -> String {
+        let guarded = skipPRSettings ? checkout : nil
+        return """
         #!/bin/zsh
         \(path.isEmpty ? "" : "export PATH=\(q(path))")
         [[ -f \(q(promptFile)) ]] || exit 0
         \(checkout?.script ?? "")
+        \(guarded?.userSettingsOnlyScript ?? "")
         \(directory.map { "cd \(q($0)) || exit 1" } ?? "")
         prompt="$(cat \(q(promptFile)))"
         rm -f \(q(promptFile)) "$0"
-        \(claude) "$prompt"
+        \(claude)\(guarded == nil ? "" : #" "${sources[@]}""#) "$prompt"
         exec "${SHELL:-/bin/zsh}" -l
 
         """
@@ -125,6 +129,23 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             fi
             if [[ -d \(wt) ]]; then cd \(wt); else print "Couldn't make a worktree; starting in your clone."; cd \(repo); fi
             print "In $PWD at $(git rev-parse --short HEAD 2>/dev/null)"
+            """
+        }
+
+        /// Shell lines for after `script`. Claude Code takes a worktree's trust from your clone, so an
+        /// interactive session would load the PR's own `.claude/settings.json` or `settings.local.json`
+        /// (hooks, `env`, `apiKeyHelper`) without asking. When the shell is in this worktree and it has
+        /// one (`Backend.projectSettingsFiles`), `sources` becomes `--setting-sources user`, as for
+        /// headless reviews, and the terminal says so. The clone `script` falls back to is yours, so it
+        /// keeps its settings. Pure, for tests.
+        var userSettingsOnlyScript: String {
+            let files = Backend.projectSettingsFiles.map { "-f \(q(path + "/" + $0))" }.joined(separator: " || ")
+            return """
+            sources=()
+            if [[ "$PWD" -ef \(q(path)) ]] && [[ \(files) ]]; then
+              sources=(--setting-sources user)
+              print "This PR has its own Claude settings (.claude/settings.json or settings.local.json), so the session starts with your user settings only, without the project's CLAUDE.md and rules."
+            fi
             """
         }
 

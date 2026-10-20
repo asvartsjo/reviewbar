@@ -147,6 +147,8 @@ Headless reviews never get a shell or MCP servers (`--strict-mcp-config`) and ru
 
 When the PR's checkout has its own `.claude/settings.json` or `settings.local.json`, which could redirect the API (`env`) or run a command (`apiKeyHelper`), the review loads your user settings only (`--setting-sources user`). That drops the project's CLAUDE.md and rules too, and the review says so under the verdict.
 
+Sessions started in the terminal (**Open in terminal**, **Verify fixes**) do the same in the PR's worktree. Claude Code takes the worktree's trust from your clone, so it wouldn't ask before loading the PR's settings. The terminal prints a line when it happens. **Triage feedback** runs in your own checkout and keeps its settings.
+
 Codex reviews mark the PR's checkout as an untrusted project, even when you trust the clone it belongs to, so Codex loads neither its `AGENTS.md` nor its `.codex/config.toml` (instructions, MCP servers). Repo skills aren't covered by trust, so their list is left out of the prompt (`skills.include_instructions=false`). Your own `~/.codex/` config and `AGENTS.md` still apply.
 
 ### Local clones and worktrees

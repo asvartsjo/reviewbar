@@ -60,6 +60,7 @@ final class ReviewViewModel: ObservableObject {
 
     init() {
         RepoList.migrateLegacySettings()
+        ClaudeSettings.removeRetiredSettings()
         saved = Store.load().sorted { $0.date > $1.date }
         for s in saved { reviews[s.id] = .done(s.text) }
         Notifier.requestAuthorization()

@@ -52,6 +52,17 @@ struct MyPRActionTests {
         #expect(MyPRAction.checkout(of: "atanas", in: listed) == nil)
     }
 
+    /// A fork's PR from `main` must not land in the clone's own `main`, which tracks origin.
+    @Test func onlyTheForksBranchCountsForAForkPR() {
+        #expect(!MyPRAction.isForkBranch(remote: "origin", merge: "refs/heads/main", number: 7))
+        #expect(!MyPRAction.isForkBranch(remote: nil, merge: nil, number: 7))           // no upstream: a local branch
+        #expect(MyPRAction.isForkBranch(remote: "origin", merge: "refs/pull/7/head", number: 7))   // gh pr checkout
+        #expect(!MyPRAction.isForkBranch(remote: "origin", merge: "refs/pull/8/head", number: 7))
+        #expect(MyPRAction.isForkBranch(remote: "carol", merge: "refs/heads/main", number: 7))     // the fork's remote
+        #expect(MyPRAction.isForkBranch(remote: "https://github.com/carol/storefront.git", merge: "refs/heads/main",
+                                        number: 7))
+    }
+
     @Test func newCheckoutGoesBesideThePRWorktrees() {
         let clone = "/Users/me/code/storefront"
         #expect(MyPRAction.newCheckoutPath(of: "atanas/fix", repo: "acme/storefront", repoFolder: clone, nextToClone: true)

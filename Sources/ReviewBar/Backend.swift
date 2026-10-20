@@ -186,7 +186,8 @@ enum Backend {
     }
 
     /// @mentions since `since`, read on GitHub or not, in the given repos (all when empty). Read-only.
-    static func fetchMentions(since: String, repos: [String]) async -> [Mention] {
+    /// Nil when the notifications or your login can't be read, so a failed refresh isn't "no mentions".
+    static func fetchMentions(since: String, repos: [String]) async -> [Mention]? {
         if DemoData.isOn { return DemoData.mentions() }
         let jq = #"[.[] | select(.reason == "mention" or .reason == "team_mention") | "#
             + #"{repo: .repository.full_name, title: .subject.title, url: .subject.url, "#
@@ -194,7 +195,7 @@ enum Backend {
         let query = "notifications?participating=true&all=true&per_page=50&since=\(since)"
         guard let out = try? await sh("gh api \(q(query)) --jq \(q(jq))"),
               let threads = try? JSONDecoder().decode([MentionThread].self, from: Data(out.utf8)),
-              let me = await viewerLogin() else { return [] }
+              let me = await viewerLogin() else { return nil }
         let wanted = Set(repos.map { $0.lowercased() })
         var result: [Mention] = []
         for t in threads.filter({ wanted.isEmpty || wanted.contains($0.repo.lowercased()) }).prefix(15) {

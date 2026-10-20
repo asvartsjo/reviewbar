@@ -53,6 +53,19 @@ struct ShellTests {
         #expect(e.stderr.filter { $0 == "e" }.count == 500_000)
     }
 
+    @Test func aTimeoutReturnsTheOutputOrNil() async {
+        #expect(await sh("print -r -- ok", timeout: .seconds(20)) == "ok\n")
+        #expect(await sh("exit 1", timeout: .seconds(20)) == nil)
+    }
+
+    /// A child left behind holds the output pipe for 15 s, as a process stuck on a network mount
+    /// would: the timeout still returns at its limit.
+    @Test func aTimeoutDoesntWaitForWhatCantBeStopped() async {
+        let start = ContinuousClock.now
+        #expect(await sh("sleep 15 &!; sleep 15", timeout: .seconds(2)) == nil)
+        #expect(ContinuousClock.now - start < .seconds(6))
+    }
+
     /// Early enough that zsh is still reading its startup files, when they are slow.
     @Test func cancellingStopsTheCommand() async {
         await expectCancelStops(after: .milliseconds(500))

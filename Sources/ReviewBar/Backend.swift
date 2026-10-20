@@ -1816,14 +1816,15 @@ extension Backend {
     /// in every repo with a local clone, when `Worktree.removeScript` finds nothing to lose and no
     /// process is working in it (`Worktree.inUse`). Best effort: anything that fails or is skipped is
     /// left for the next run. The working directories are read per repo, after the PR lookup, so a
-    /// folder entered meanwhile counts; when none is found (a failed `lsof` gives none), nothing is removed.
+    /// folder entered meanwhile counts; when none is found (a failed `lsof` gives none, and so does one
+    /// that takes over 30 s, e.g. on a stale network mount), nothing is removed.
     static func removeClosedWorktrees(repos: [String]) async {
         for repo in repos {
             guard let folder = RepoList.folder(for: repo),
                   let list = try? await sh("git -C \(q(folder)) worktree list --porcelain") else { continue }
             let ours = TerminalApp.Worktree.ours(TerminalApp.Worktree.parseList(list), repo: repo, repoFolder: folder)
             guard !ours.isEmpty, let states = await prStates(repo: repo, numbers: ours.map(\.number)),
-                  let lsof = try? await sh("lsof -a -d cwd -Fn 2>/dev/null || true")
+                  let lsof = await sh("lsof -a -d cwd -Fn 2>/dev/null || true", timeout: .seconds(30))
             else { continue }
             let cwds = TerminalApp.Worktree.parseCwds(lsof)
             guard !cwds.isEmpty else { continue }

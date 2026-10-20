@@ -83,6 +83,14 @@ struct CrewTests {
         #expect(Set(items.map(\.repo)) == ["acme/storefront"])
     }
 
+    @Test func theTabCountsActiveSessions() {
+        let idle = CrewSession(id: "idle", name: "idle", cwd: clone, background: false, needsMe: false,
+                               working: false, startedAt: .distantPast)
+        let items = Crew.link([idle, session("asks", clone, needsMe: true), session("works", clone)], to: checkouts)
+        #expect(Crew.active(items).map(\.session.id).sorted() == ["asks", "works"])
+        #expect(Crew.active([]).isEmpty)
+    }
+
     @Test func waitingOnMeFirstThenNewest() {
         let items = Crew.link([session("old", clone, started: 1), session("new", clone, started: 3),
                                session("asks", clone, needsMe: true, started: 2)], to: checkouts)

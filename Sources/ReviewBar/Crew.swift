@@ -87,6 +87,9 @@ enum Crew {
         }
     }
 
+    /// The sessions the Crew tab shows and counts: waiting on me or working, not idle. Pure, for tests.
+    static func active(_ items: [CrewItem]) -> [CrewItem] { items.filter { !$0.session.idle } }
+
     /// Each session in one of the checkouts (the deepest one containing its folder), waiting on me
     /// first, then the newest. Sessions outside every watched repo are left out. Pure, for tests.
     static func link(_ sessions: [CrewSession], to checkouts: [Checkout]) -> [CrewItem] {

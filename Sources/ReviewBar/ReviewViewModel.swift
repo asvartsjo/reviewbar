@@ -29,7 +29,7 @@ final class ReviewViewModel: ObservableObject {
     /// Every Claude session in my watched repos, idle ones too, waiting on me first.
     @Published private(set) var allCrew: [CrewItem] = []
     /// The sessions Crew shows and counts: waiting on me or working.
-    var crew: [CrewItem] { allCrew.filter { !$0.session.idle } }
+    var crew: [CrewItem] { Crew.active(allCrew) }
     /// Idle sessions, folded under Crew: one can live on with no visible window.
     var idleCrew: [CrewItem] { allCrew.filter(\.session.idle) }
     /// Your worktrees whose PR is merged or closed, from the last `refreshCleanup`.

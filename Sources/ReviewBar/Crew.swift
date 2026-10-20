@@ -104,16 +104,28 @@ enum Crew {
 extension Crew {
     /// Where a terminal session lives: what Show session can bring to the front, and what its row says.
     enum Host: Equatable {
-        case iterm, terminal, vscode, other
+        case iterm, terminal, vscode
+        /// Ghostty, WezTerm, kitty or Alacritty: none can be asked which tab runs a tty, so Show
+        /// session brings the app to the front.
+        case app(TerminalApp)
+        case other
 
         var name: String {
             switch self {
             case .iterm: "iTerm2"
             case .terminal: "Terminal"
             case .vscode: "VS Code"
+            case .app(let app): app.name
             case .other: "terminal"
             }
         }
+
+        /// The folder of each app's bundle, as it shows in a process path.
+        static let bundleFolders: [(folder: String, host: Host)] = [
+            ("/iTerm.app/", .iterm), ("/Terminal.app/", .terminal), ("/Visual Studio Code.app/", .vscode),
+            ("/Ghostty.app/", .app(.ghostty)), ("/WezTerm.app/", .app(.wezterm)),
+            ("/kitty.app/", .app(.kitty)), ("/Alacritty.app/", .app(.alacritty)),
+        ]
     }
 
     /// `ps -axo pid=,ppid=,comm=` → pid → (parent, executable path). Paths may contain spaces.
@@ -133,9 +145,7 @@ extension Crew {
         var current = table[pid]?.ppid
         for _ in 0..<20 {
             guard let p = current, p > 1, let entry = table[p] else { break }
-            if entry.comm.contains("/iTerm.app/") { return .iterm }
-            if entry.comm.contains("/Terminal.app/") { return .terminal }
-            if entry.comm.contains("/Visual Studio Code.app/") { return .vscode }
+            if let known = Host.bundleFolders.first(where: { entry.comm.contains($0.folder) }) { return known.host }
             current = entry.ppid
         }
         return .other
@@ -328,11 +338,14 @@ extension Backend {
     }
 
     /// Brings a terminal session's window to the front: in iTerm2 or Terminal its tab, found by its
-    /// tty (from `ps`); in VS Code the window of its folder (the Claude panel inside can't be picked).
-    /// False when it isn't found.
+    /// tty (from `ps`); in VS Code the window of its folder (the Claude panel inside can't be picked);
+    /// in another known terminal (`Host.app`) just the app. False when it isn't found.
     static func reveal(_ session: CrewSession) async -> Bool {
         if session.host == .vscode {
             return await run("/usr/bin/open", ["-b", "com.microsoft.VSCode", session.cwd]) != nil
+        }
+        if case .app(let app) = session.host, let id = app.bundleID {
+            return await run("/usr/bin/open", ["-b", id]) != nil
         }
         guard let pid = session.pid,
               let tty = await run("/bin/ps", ["-o", "tty=", "-p", String(pid)])?

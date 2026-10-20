@@ -123,7 +123,8 @@ struct CrewTests {
                                  launchedAt: now.addingTimeInterval(-90), now: now) == nil)
     }
 
-    /// Shaped like the real tree: a VS Code extension session, an iTerm2 one, and one with no known app.
+    /// Shaped like the real tree: a VS Code extension session, an iTerm2 one, a Ghostty one, and one
+    /// with no known app.
     private let processes = """
         1     0 /sbin/launchd
      1241     1 /Applications/Visual Studio Code.app/Contents/MacOS/Code
@@ -133,6 +134,10 @@ struct CrewTests {
      1324  1246 /Users/me/Library/Application Support/iTerm2/iTermServer-3.7.3
     61660  1324 /bin/zsh
     61679 61660 claude
+     1400     1 /Applications/Ghostty.app/Contents/MacOS/ghostty
+     1410  1400 /usr/bin/login
+     1411  1410 -zsh
+     1420  1411 claude
       900     1 /usr/sbin/sshd
       901   900 claude
       700   701 claude
@@ -149,6 +154,8 @@ struct CrewTests {
         let t = Crew.parseProcessTable(processes)
         #expect(Crew.host(of: 16378, in: t) == .vscode)
         #expect(Crew.host(of: 61679, in: t) == .iterm)
+        #expect(Crew.host(of: 1420, in: t) == .app(.ghostty))
+        #expect(Crew.host(of: 1420, in: t).name == "Ghostty")
         #expect(Crew.host(of: 901, in: t) == .other)
         #expect(Crew.host(of: 700, in: t) == .other)   // a parent loop ends, it doesn't hang
         #expect(Crew.host(of: 999, in: t) == .other)

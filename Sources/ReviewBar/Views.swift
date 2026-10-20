@@ -396,7 +396,7 @@ struct ContentView: View {
     /// Terminal sessions only: an agent view session's row already opens it.
     private func showButton(_ item: CrewItem) -> some View {
         Button("Show session", systemImage: "macwindow") { vm.show(item) }
-            .help("Bring its window to the front (iTerm2, Terminal or VS Code)")
+            .help("Bring its window to the front: its tab in iTerm2 or Terminal, VS Code's window, or another terminal app")
     }
 
     private func stopButton(_ item: CrewItem) -> some View {

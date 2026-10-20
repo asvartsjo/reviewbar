@@ -50,6 +50,9 @@ private final class RunningProcess: @unchecked Sendable {
         let p = process
         lock.unlock()
         guard let p, p.isRunning else { return }
+        // Stopped first, so zsh can't start the command between the two kills: that child would
+        // outlive it holding the output pipes, and `sh` would wait for it to finish.
+        kill(p.processIdentifier, SIGSTOP)
         Self.pkill("KILL", parent: p.processIdentifier)
         kill(p.processIdentifier, SIGKILL)
     }

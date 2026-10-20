@@ -41,7 +41,7 @@ Once someone else has reviewed or commented since your review, **Summarise what 
 
 ### Muting
 
-Right-click a row to mute it until something happens (the next review, comment or push by someone else brings it back) or for good (also no new-commits, resolved or verdict notifications). Muted PRs sit dimmed in a **Muted** section at the bottom and don't count in the tab or menu bar. A review request you never reviewed can only be muted for good; a re-request always shows, muted or not.
+Right-click a row to mute it until something happens (the next review, comment or push by someone else brings it back) or for good (also no new-commits, resolved or verdict notifications). Muted PRs sit dimmed in a **Muted** section at the bottom and don't count in the tab, or in the menu bar except for mentions. A review request you never reviewed can only be muted for good; a re-request always shows, muted or not.
 
 ## Reviews
 

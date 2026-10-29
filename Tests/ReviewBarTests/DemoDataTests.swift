@@ -16,6 +16,11 @@ struct DemoDataTests {
         for t in all { #expect(turns.contains(t), "no demo PR for \(t)") }
     }
 
+    /// A dismissal needs an approval before it, so it shows from step 2.
+    @Test func secondStepHasADismissedReview() {
+        #expect(list(step: 2).first { $0.pr.number == 175 }?.turn == .yours(.dismissed))
+    }
+
     @Test func secondStepNotifies() {
         let before = Dictionary(list(step: 1).map { ($0.pr.url, $0) }, uniquingKeysWith: { a, _ in a })
         let alerts = AlertDiff.reviewing(list(step: 2), before: before)
@@ -24,10 +29,11 @@ struct DemoDataTests {
             case .pushed(let r): "pushed \(r.pr.number)"
             case .allResolved(let r): "resolved \(r.pr.number)"
             case .verdict(let r, let v): "\(v.login) \(v.state) \(r.pr.number)"
+            case .dismissed(let r): "dismissed \(r.pr.number)"
             default: "other"
             }
         }
-        #expect(Set(kinds) == ["pushed 140", "resolved 160", "omar APPROVED 152"])
+        #expect(Set(kinds) == ["pushed 140", "resolved 160", "omar APPROVED 152", "dismissed 175"])
         let fresh = AlertDiff.newRequests(DemoData.requests(step: 2), seen: Set(DemoData.requests(step: 1).map(\.url)))
         #expect(fresh.map(\.number) == [180])
     }

@@ -20,6 +20,8 @@ enum ReviewAlert: Equatable {
     case allResolved(ReviewingPR)
     /// Someone else approved or requested changes on a PR you reviewed.
     case verdict(ReviewingPR, ReviewingPR.Verdict)
+    /// Your only review on a PR was dismissed, so it's your turn again.
+    case dismissed(ReviewingPR)
 }
 
 /// Pure comparisons between one refresh and the next. The first refresh after launch only
@@ -43,14 +45,17 @@ enum AlertDiff {
         fresh.map { reviewed.contains($0.url) ? .reRequest($0) : .request($0) }
     }
 
-    /// Changes on PRs you reviewed since the previous refresh: the head moved and your review is
-    /// older, your last thread got resolved, or someone's verdict is new. PRs you hadn't reviewed
-    /// in `before` (not listed, or only requested) stay quiet: their verdicts were never baselined.
+    /// Changes on PRs you reviewed since the previous refresh: your only review was dismissed, the
+    /// head moved and your review is older, your last thread got resolved, or someone's verdict is
+    /// new. PRs you hadn't reviewed in `before` (not listed, or only requested) stay quiet: their
+    /// verdicts were never baselined.
     static func reviewing(_ now: [ReviewingPR], before: [String: ReviewingPR]?) -> [ReviewAlert] {
         guard let before else { return [] }
         var alerts: [ReviewAlert] = []
         for r in now {
-            guard let old = before[r.pr.url], old.myLastReview != nil, r.myLastReview != nil else { continue }
+            guard let old = before[r.pr.url] else { continue }
+            if r.myReviewDismissed, !old.myReviewDismissed { alerts.append(.dismissed(r)) }
+            guard old.myLastReview != nil, r.myLastReview != nil else { continue }
             if r.hasNewCommits, r.pr.headRefOid != old.pr.headRefOid { alerts.append(.pushed(r)) }
             if r.myThreads > 0, r.resolved == r.myThreads, old.resolved < old.myThreads {
                 alerts.append(.allResolved(r))
@@ -114,7 +119,7 @@ enum NotifySettings {
 
     static func wants(_ alert: ReviewAlert) -> Bool {
         switch alert {
-        case .request, .reRequest: return isOn(requestsKey)
+        case .request, .reRequest, .dismissed: return isOn(requestsKey)
         case .reply: return isOn(repliesKey)
         case .feedback: return isOn(feedbackKey)
         case .checksPassed: return isOn(checksPassedKey)
@@ -196,11 +201,12 @@ enum Notifier {
     }
 
     /// Alerts per PR, in the order each PR first appears, most important first within a PR:
-    /// a request, then new commits, a reply, verdicts, all resolved, feedback, checks passed. Pure, for tests.
+    /// a request or dismissed review, then new commits, a reply, verdicts, all resolved, feedback,
+    /// checks passed. Pure, for tests.
     static func grouped(_ alerts: [ReviewAlert]) -> [[ReviewAlert]] {
         func rank(_ a: ReviewAlert) -> Int {
             switch a {
-            case .request, .reRequest: return 0
+            case .request, .reRequest, .dismissed: return 0
             case .pushed: return 1
             case .reply: return 2
             case .verdict: return 3
@@ -260,6 +266,8 @@ enum Notifier {
         case .verdict(let r, let v):
             let did = v.state == "APPROVED" ? "approved" : "requested changes"
             return ("verdict-\(r.pr.url)-\(v.login)-\(v.state)", "\(v.login) \(did)", line(r.pr), r.pr.url)
+        case .dismissed(let r):
+            return ("dismissed-\(r.pr.url)-\(r.latestAt)", "Your review was dismissed", line(r.pr), r.pr.url)
         case .reply(let r):
             let waiting = r.waiting == 1 ? "1 thread waiting" : "\(r.waiting) threads waiting"
             return ("reply-\(r.pr.url)-\(r.latestAt)", "\(r.latestBy) replied", "\(line(r.pr)) · \(waiting)", r.pr.url)
@@ -294,7 +302,7 @@ enum Notifier {
             case .reply: replies += 1
             case .feedback: feedback += 1
             case .checksPassed: passed += 1
-            case .pushed, .allResolved, .verdict: updates += 1
+            case .pushed, .allResolved, .verdict, .dismissed: updates += 1
             }
         }
         func n(_ c: Int, _ one: String, _ many: String) -> String? { c == 0 ? nil : "\(c) \(c == 1 ? one : many)" }

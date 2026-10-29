@@ -1216,7 +1216,7 @@ struct SettingsView: View {
 
             Divider()
             Text("Notifications").font(.headline)
-            Toggle("New review requests and re-requests", isOn: $notifyRequests)
+            Toggle("New review requests, re-requests and dismissed reviews", isOn: $notifyRequests)
             Toggle("Replies on your review threads", isOn: $notifyReplies)
             Toggle("New commits after your review", isOn: $notifyPushed)
             Toggle("All your threads on a PR resolved", isOn: $notifyAllResolved)

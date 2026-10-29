@@ -20,6 +20,12 @@ enum Backend {
     /// settings only (`--setting-sources user`), which also drops the project's CLAUDE.md and rules.
     static let projectSettingsFiles = [".claude/settings.json", ".claude/settings.local.json"]
 
+    /// For interactive sessions in a PR's worktree, `.mcp.json` too: a stdio server there is a command,
+    /// and it starts without asking when you auto-approve project servers or your clone approved one of
+    /// that name (a worktree reads its approvals from the clone). `--setting-sources user` doesn't load
+    /// it. Headless reviews leave it out, since `--strict-mcp-config` already ignores it.
+    static let terminalProjectFiles = projectSettingsFiles + [".mcp.json"]
+
     static func hasProjectSettings(_ codebase: String) -> Bool {
         projectSettingsFiles.contains { FileManager.default.fileExists(atPath: codebase + "/" + $0) }
     }

@@ -260,13 +260,13 @@ struct ReviewingTests {
     }
 
     @Test func aRequestMutesOnlyForGoodAndAReRequestNever() throws {
-        let request = Backend.merge([], requested: [try one(node(1)).pr])[0]
+        let request = try #require(Backend.merge([], requested: [try one(node(1)).pr]).first)
         #expect(request.isRequested && request.myLastReview == nil)
         #expect(request.isMuted(forever: true, until: nil))
         #expect(!request.isMuted(forever: false, until: PRSnapshot(at: "2099-01-01T00:00:00Z", head: head)))
 
-        let reRequest = Backend.merge(try parse([node(1, reviews: [review("me", "COMMENTED")])]),
-                                      requested: [try one(node(1)).pr])[0]
+        let reRequest = try #require(Backend.merge(try parse([node(1, reviews: [review("me", "COMMENTED")])]),
+                                                   requested: [try one(node(1)).pr]).first)
         #expect(reRequest.turn == .yours(.reRequested))
         #expect(!reRequest.isMuted(forever: true, until: nil))
     }
@@ -324,15 +324,16 @@ struct ReviewingTests {
     }
 
     @Test func requestedTurnComesFromAwaitingMe() throws {
-        let reviewed = try parse([node(1, reviews: [review("me", "APPROVED")])])
+        let reviewed = try one(node(1, reviews: [review("me", "APPROVED")]))
         let fresh = PR(number: 2, title: "PR 2", url: "https://github.com/o/r/pull/2", isDraft: false,
                        updatedAt: "2026-09-01T00:00:00Z", repository: .init(nameWithOwner: "o/r"),
                        author: .init(login: "author"))
-        let merged = Backend.merge(reviewed, requested: [reviewed[0].pr, fresh])
-        #expect(merged.map(\.pr.number) == [1, 2])   // each PR once
+        let merged = Backend.merge([reviewed], requested: [reviewed.pr, fresh])
+        try #require(merged.map(\.pr.number) == [1, 2])   // each PR once
         #expect(merged[0].turn == .yours(.reRequested))
         #expect(merged[1].turn == .yours(.requested))
-        #expect(Backend.merge(reviewed, requested: [])[0].turn == .done)
+        let unrequested = try #require(Backend.merge([reviewed], requested: []).first)
+        #expect(unrequested.turn == .done)
     }
 
     // MARK: List

@@ -32,7 +32,7 @@ struct FeedbackParsingTests {
     @Test func replyAfterMyCommentIsWaiting() throws {
         let t = thread(opener: "me", recent: [("me", "2026-09-01T10:00:00Z"), ("alice", "2026-09-02T10:00:00Z")])
         let replies = try Backend.parseReplies(repliesJSON([replyNode(1, threads: t)]))
-        #expect(replies.count == 1)
+        try #require(replies.count == 1)
         #expect(replies[0].waiting == 1)
         #expect(replies[0].latestBy == "alice")
         #expect(replies[0].latestAt == "2026-09-02T10:00:00Z")
@@ -54,7 +54,7 @@ struct FeedbackParsingTests {
             replyNode(3, threads: older),
             replyNode(4, threads: [older, newer].joined(separator: ",")),
         ]))
-        #expect(replies.map(\.pr.number) == [4, 3])
+        try #require(replies.map(\.pr.number) == [4, 3])
         #expect(replies[0].waiting == 2)
         #expect(replies[0].latestBy == "bob")
     }

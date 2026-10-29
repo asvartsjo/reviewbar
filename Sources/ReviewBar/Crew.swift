@@ -156,6 +156,9 @@ extension Crew {
         return (custom, ai)
     }
 
+    /// The sessions Crew shows and counts on its tab: waiting on me or working, not idle. Pure, for tests.
+    static func active(_ items: [CrewItem]) -> [CrewItem] { items.filter { !$0.session.idle } }
+
     /// Sessions waiting on me now that weren't at the last poll (`before`: the ids that were). The
     /// first poll only sets the baseline (`before` nil), so launching never notifies. Pure, for tests.
     static func newlyWaiting(_ now: [CrewItem], before: Set<String>?) -> [CrewItem] {

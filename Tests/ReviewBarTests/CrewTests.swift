@@ -89,6 +89,14 @@ struct CrewTests {
         #expect(items.map(\.session.id) == ["asks", "new", "old"])
     }
 
+    @Test func theTabCountsActiveSessionsNotIdleOnes() {
+        let idle = CrewSession(id: "idle", name: "idle", cwd: clone, background: false, needsMe: false, working: false,
+                               startedAt: .distantPast)
+        let items = Crew.link([session("asks", clone, needsMe: true), session("busy", clone), idle], to: checkouts)
+        #expect(Crew.active(items).map(\.id) == ["asks", "busy"])
+        #expect(Crew.active([]).isEmpty)
+    }
+
     @Test func notifiesOnlyWhenASessionStartsWaiting() {
         let asks = CrewItem(session: session("a", clone, needsMe: true), repo: "acme/storefront", prNumber: nil)
         let busy = CrewItem(session: session("b", clone), repo: "acme/storefront", prNumber: nil)

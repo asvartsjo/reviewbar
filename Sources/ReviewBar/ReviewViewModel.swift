@@ -873,7 +873,8 @@ final class ReviewViewModel: ObservableObject {
     }
 
     /// Brings a session to the front: a background one with `claude attach`, a terminal one by
-    /// selecting its tab in iTerm2 or Terminal. Other terminals can't be searched, so it says where.
+    /// selecting its tab in iTerm2 or Terminal. Other terminals can't be searched: a known one comes to
+    /// the front, and either way it says where the session runs.
     func show(_ item: CrewItem) {
         guard !DemoData.isOn else { return }
         if item.session.background { return attach(item) }
@@ -881,10 +882,13 @@ final class ReviewViewModel: ObservableObject {
         Task {
             let home = (item.session.cwd as NSString).abbreviatingWithTildeInPath
             if !(await Backend.reveal(item.session)) {
-                terminalNotice = "Couldn't find \(item.session.displayName)'s window (iTerm2, Terminal and VS Code can be "
-                    + "found). It runs in \(home)\(item.session.pid.map { ", pid \($0)" } ?? "")."
+                terminalNotice = "Couldn't bring \(item.session.displayName)'s window to the front. "
+                    + "It runs in \(home)\(item.session.pid.map { ", pid \($0)" } ?? "")."
             } else if item.session.host == .vscode {
                 terminalNotice = "Brought VS Code's window for \(home) to the front: \(item.session.displayName) is in its Claude Code panel."
+            } else if case .app(let app, _) = item.session.host {
+                terminalNotice = "Brought \(app.name) to the front: \(item.session.displayName) is in one of its tabs, "
+                    + "in \(home). \(app.name) can't be asked which one."
             }
         }
     }

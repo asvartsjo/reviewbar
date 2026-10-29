@@ -20,7 +20,7 @@ enum ReviewAlert: Equatable {
     case allResolved(ReviewingPR)
     /// Someone else approved or requested changes on a PR you reviewed.
     case verdict(ReviewingPR, ReviewingPR.Verdict)
-    /// Your only review on a PR was dismissed, so it's your turn again.
+    /// Your latest review on a PR was dismissed, so it's your turn again.
     case dismissed(ReviewingPR)
 }
 
@@ -45,7 +45,7 @@ enum AlertDiff {
         fresh.map { reviewed.contains($0.url) ? .reRequest($0) : .request($0) }
     }
 
-    /// Changes on PRs you reviewed since the previous refresh: your only review was dismissed, the
+    /// Changes on PRs you reviewed since the previous refresh: your latest review was dismissed, the
     /// head moved and your review is older, your last thread got resolved, or someone's verdict is
     /// new. PRs you hadn't reviewed in `before` (not listed, or only requested) stay quiet: their
     /// verdicts were never baselined.

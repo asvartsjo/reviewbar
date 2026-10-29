@@ -327,7 +327,12 @@ struct PRFilterTests {
 struct MentionSnippetTests {
     @Test func snippetDropsQuotesAndFences() {
         #expect(Backend.snippet("> quoted\n\n@asvartsjo can you check this?\n```\ncode\n```")
-                == "@asvartsjo can you check this? code")
+                == "@asvartsjo can you check this? · code")
+    }
+
+    @Test func snippetKeepsLineBreaksVisible() {
+        #expect(Backend.snippet("🟠 Missing null check\n\nDescription: @asvartsjo the user can be nil")
+                == "🟠 Missing null check · Description: @asvartsjo the user can be nil")
     }
 
     @Test func snippetIsShort() {

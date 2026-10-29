@@ -273,12 +273,13 @@ enum Backend {
         return me
     }
 
-    /// First ~140 characters of a comment on one line, quotes and code fences dropped. Pure, for tests.
+    /// First ~140 characters of a comment on one line, quotes and code fences dropped. Lines are
+    /// joined with " · ", so a title and the paragraph after it don't read as one sentence. Pure, for tests.
     static func snippet(_ body: String) -> String {
         let lines = body.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && !$0.hasPrefix(">") && !$0.hasPrefix("```") }
-        let text = lines.joined(separator: " ")
+        let text = lines.joined(separator: " · ")
         return text.count > 140 ? String(text.prefix(139)) + "…" : text
     }
 

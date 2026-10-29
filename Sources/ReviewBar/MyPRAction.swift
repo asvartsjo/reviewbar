@@ -37,6 +37,23 @@ enum MyPRAction: Equatable {
         listed.first { $0.branch == "refs/heads/\(branch)" && FileManager.default.fileExists(atPath: $0.path) }?.path
     }
 
+    /// For PR `number` from a fork into `repo`, whether the clone's `branch` (the PR's branch name) is
+    /// the PR's, from `config`, the clone's `git config --get-regexp '^(branch|remote)\.'`: `gh pr checkout`
+    /// sets the merge ref to `refs/pull/<N>/head`, and a branch tracking a remote whose URL isn't `repo`
+    /// tracks the fork. A branch tracking `repo` (or nothing) is the base repo's branch of the same name,
+    /// `main` say, whichever remote name `repo` has in this clone. Pure, for tests.
+    static func isForkBranch(_ branch: String, config: String, number: Int, repo: String) -> Bool {
+        var values: [String: String] = [:]
+        for line in config.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            if parts.count == 2 { values[String(parts[0])] = String(parts[1]) }
+        }
+        if values["branch.\(branch).merge"] == "refs/pull/\(number)/head" { return true }
+        guard let remote = values["branch.\(branch).remote"],
+              let tracked = RepoList.normalize(values["remote.\(remote).url"] ?? remote) else { return false }
+        return tracked.lowercased() != repo.lowercased()
+    }
+
     /// Where a new checkout of `branch` goes: beside ReviewBar's `pr-<N>` worktrees, named after the
     /// branch (`atanas/fix` → `atanas-fix`), so it never takes the place of the PR's review worktree.
     /// Branches can share a folder (`a/b` and `a-b`, or one named `pr-7`): `worktree add` then refuses
@@ -64,11 +81,15 @@ enum MyPRAction: Equatable {
 
 extension Backend {
     /// The checkout of `branch` in the repo's local clone, read from `git worktree list`; nil when the
-    /// repo has no clone or no checkout has that branch. Read only: never switches a branch.
-    static func checkout(of branch: String, repo: String) async -> String? {
+    /// repo has no clone or no checkout has that branch. With `forkPR` (the number of a PR from a fork),
+    /// also nil when that branch isn't the fork's (`MyPRAction.isForkBranch`). Read only: never switches a branch.
+    static func checkout(of branch: String, repo: String, forkPR: Int? = nil) async -> String? {
         guard let folder = RepoList.folder(for: repo),
-              let list = try? await sh("git -C \(q(folder)) worktree list --porcelain") else { return nil }
-        return MyPRAction.checkout(of: branch, in: TerminalApp.Worktree.parseList(list))
+              let list = try? await sh("git -C \(q(folder)) worktree list --porcelain"),
+              let path = MyPRAction.checkout(of: branch, in: TerminalApp.Worktree.parseList(list)) else { return nil }
+        guard let number = forkPR else { return path }
+        let config = (try? await sh("git -C \(q(folder)) config --get-regexp '^(branch|remote)\\.'")) ?? ""
+        return MyPRAction.isForkBranch(branch, config: config, number: number, repo: repo) ? path : nil
     }
 
     /// Adds a worktree on `branch` (`MyPRAction.makeCheckoutScript`) for a PR with no checkout of its

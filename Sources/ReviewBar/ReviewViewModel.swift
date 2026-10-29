@@ -787,9 +787,9 @@ final class ReviewViewModel: ObservableObject {
     }
 
     /// Runs `myPRAction` in the checkout of the PR's branch, adding a worktree on the branch when there
-    /// is none. Not for a PR from a fork: origin's branch of that name (`main`, say) isn't the PR's. If
-    /// that fails nothing opens: the command is copied instead, since starting it anywhere else would
-    /// commit in the wrong place.
+    /// is none. For a PR from a fork, only a checkout of the fork's branch (`gh pr checkout`) counts, and
+    /// none is added: origin's branch of that name (`main`, say) isn't the PR's. If that fails nothing
+    /// opens: the command is copied instead, since starting it anywhere else would commit in the wrong place.
     func runMyPRAction(_ pr: PR) {
         guard let action = myPRAction(for: pr), let f = myPRs.first(where: { $0.pr.url == pr.url }) else { return }
         terminalNotice = nil
@@ -797,7 +797,8 @@ final class ReviewViewModel: ObservableObject {
         Task {
             do {
                 guard let branch = f.branch else { throw ShellError(code: 1, stderr: "GitHub didn't name the PR's branch") }
-                let path = if let existing = await Backend.checkout(of: branch, repo: repo) { existing }
+                let path = if let existing = await Backend.checkout(of: branch, repo: repo,
+                                                                    forkPR: f.crossRepo ? pr.number : nil) { existing }
                     else if f.crossRepo { throw ShellError(code: 1, stderr: "the PR's branch is on a fork") }
                     else { try await Backend.makeCheckout(of: branch, repo: repo) }
                 launchTerminal(pr, mode: .inCheckout(command: action.command, path: path))

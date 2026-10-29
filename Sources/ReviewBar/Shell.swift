@@ -139,10 +139,14 @@ func sh(_ command: String, timeout limit: Duration) async -> String? {
     }
 }
 
-/// Runs a blocking pipe read or write on a GCD thread, so it never ties up one of Swift
-/// concurrency's few threads for as long as a command runs.
+/// Runs a blocking pipe read or write on its own thread, so it never ties up one of Swift
+/// concurrency's few threads for as long as a command runs. Not GCD: each command holds three of
+/// these, and with a few dozen commands running GCD's capped pool runs out, so a finished or
+/// cancelled command's reads wait for the others to end.
 private func blocking<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
     await withCheckedContinuation { c in
-        DispatchQueue.global(qos: .userInitiated).async { c.resume(returning: work()) }
+        let thread = Thread { c.resume(returning: work()) }
+        thread.qualityOfService = .userInitiated
+        thread.start()
     }
 }

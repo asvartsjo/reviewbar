@@ -110,7 +110,7 @@ struct FeedbackParsingTests {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             decision: "CHANGES_REQUESTED",
             reviews: [review("alice", "CHANGES_REQUESTED", "2026-09-11T09:00:00Z")]))
-        #expect(prs.count == 1)
+        try #require(prs.count == 1)
         #expect(prs[0].reviews == 1)
         #expect(prs[0].decision == "CHANGES_REQUESTED")
         #expect(prs[0].latestBy == "alice")
@@ -161,7 +161,7 @@ struct FeedbackParsingTests {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             reviews: [review("alice", "COMMENTED", "2026-09-11T09:00:00Z")],
             threads: [myThread(last: comment("alice", "2026-09-11T09:00:00Z"))]))
-        #expect(prs.count == 1)
+        try #require(prs.count == 1)
         #expect(prs[0].threads == 1)
         #expect(prs[0].reviews == 0)
         #expect(prs[0].summary == "1 thread")
@@ -172,7 +172,7 @@ struct FeedbackParsingTests {
             threads: [myThread(last: comment("alice", "2026-09-01T09:00:00Z")),
                       myThread(resolved: true, last: comment("bob", "2026-09-01T09:00:00Z")),
                       myThread(last: comment("me", "2026-09-02T09:00:00Z"))]))
-        #expect(prs.count == 1)
+        try #require(prs.count == 1)
         #expect(prs[0].threads == 1)
     }
 
@@ -182,6 +182,7 @@ struct FeedbackParsingTests {
             comments: [comment("bob", "2026-09-11T08:00:00Z"), comment("carol", "2026-09-11T12:00:00Z")],
             threads: [myThread(last: comment("alice", "2026-09-11T07:00:00Z")),
                       myThread(last: comment("bob", "2026-09-11T06:00:00Z"))]))
+        try #require(prs.count == 1)
         #expect(prs[0].summary == "2 threads · 1 review · 2 comments")
         #expect(prs[0].latestBy == "carol")
     }
@@ -204,7 +205,7 @@ struct FeedbackParsingTests {
             decision: "APPROVED",
             reviews: [review("alice", "APPROVED", "2026-09-09T09:00:00Z")],   // before last commit: no feedback
             checks: "SUCCESS", mergeable: "MERGEABLE"))
-        #expect(prs.count == 1)
+        try #require(prs.count == 1)
         #expect(prs[0].readyToMerge)
         #expect(prs[0].summary == "Ready to merge")
         #expect(prs[0].latestAt == "2026-09-09T09:00:00Z")   // the approval: stable for dismissing
@@ -216,19 +217,20 @@ struct FeedbackParsingTests {
             decision: "APPROVED",
             reviews: [review("alice", "APPROVED", "2026-09-09T09:00:00Z")],
             checks: nil, mergeable: "MERGEABLE", mergeState: "CLEAN"))
+        try #require(prs.count == 1)
         #expect(prs[0].readyToMerge)
         #expect(prs[0].latestAt == "2026-09-09T09:00:00Z")   // so it notifies once
         // A required check that never ran also leaves no checks, but GitHub blocks the merge.
         for state in ["BLOCKED", "BEHIND", "UNSTABLE", nil] {
             let blocked = try Backend.parseMyPRs(myPRsJSON(decision: "APPROVED", checks: nil, mergeable: "MERGEABLE",
                                                            mergeState: state))
-            #expect(!blocked[0].readyToMerge)
+            #expect(blocked.first?.readyToMerge == false)
         }
         // CLEAN never overrides checks that are there.
         for checks in ["PENDING", "EXPECTED", "FAILURE"] {
             let other = try Backend.parseMyPRs(myPRsJSON(decision: "APPROVED", checks: checks, mergeable: "MERGEABLE",
                                                          mergeState: "CLEAN"))
-            #expect(!other[0].readyToMerge)
+            #expect(other.first?.readyToMerge == false)
         }
     }
 
@@ -245,7 +247,7 @@ struct FeedbackParsingTests {
     @Test func quietPRsAreListed() throws {
         for (checks, mergeable) in [("SUCCESS", "MERGEABLE"), ("PENDING", "UNKNOWN")] {
             let prs = try Backend.parseMyPRs(myPRsJSON(checks: checks, mergeable: mergeable))
-            #expect(prs.count == 1)
+            try #require(prs.count == 1)
             #expect(prs[0].isQuiet)
             #expect(!prs[0].hasFeedback)   // so no "Summarise feedback" box
             #expect(prs[0].latestBy == "")
@@ -257,6 +259,7 @@ struct FeedbackParsingTests {
     @Test func feedbackRowsStillShowCountsWithStatus() throws {
         let prs = try Backend.parseMyPRs(myPRsJSON(
             comments: [comment("bob", "2026-09-11T09:00:00Z")], checks: "FAILURE", mergeable: "MERGEABLE"))
+        try #require(prs.count == 1)
         #expect(prs[0].summary == "1 comment")
         #expect(prs[0].status == "Checks failing")
     }

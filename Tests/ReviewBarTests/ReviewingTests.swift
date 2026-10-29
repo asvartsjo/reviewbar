@@ -498,6 +498,6 @@ struct ReviewingTests {
                               review("me", "COMMENTED", at: "2026-09-20T10:00:00Z")]),
         ])
         #expect(prs.map(\.pr.number) == [2, 1])
-        #expect(prs[0].latestAt == "2026-09-06T10:00:00Z")
+        #expect(prs.first?.latestAt == "2026-09-06T10:00:00Z")
     }
 }

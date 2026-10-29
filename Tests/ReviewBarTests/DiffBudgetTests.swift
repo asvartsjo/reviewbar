@@ -12,12 +12,13 @@ struct DiffBudgetTests {
         #expect(DiffBudget.fit(d, maxBytes: 10_000) == .init(diff: d, note: ""))
     }
 
-    @Test func dropsNoiseAndShortensLargestFileOnly() {
+    @Test func dropsNoiseAndShortensLargestFileOnly() throws {
         let d = [file("small.swift", 10), file("package-lock.json", 5000),
                  file("big.swift", 20000), file("mid.swift", 2000)].joined()
         let r = DiffBudget.fit(d, maxBytes: 100_000)
         #expect(r.diff.utf8.count <= 100_000)
         let parts = DiffBudget.files(r.diff)
+        try #require(parts.count == 4)
         #expect(parts.map(\.path) == ["small.swift", "package-lock.json", "big.swift", "mid.swift"])
         #expect(parts[1].text.contains("omitted: generated or lockfile"))
         #expect(parts[2].text.contains("rest of this file's diff omitted"))

@@ -37,15 +37,17 @@ struct DraftReviewTests {
      print(a)
     """
 
-    @Test func nitsAreLeftOutAndRangesKept() {
+    @Test func nitsAreLeftOutAndRangesKept() throws {
         let cs = DraftReview.comments(from: review)
+        try #require(cs.count == 3)
         #expect(cs.map(\.line) == [3, 3, 40])
         #expect(cs[1].startLine == 2)
         #expect(!cs.contains { $0.body.contains("nit:") })
     }
 
-    @Test func multiLineSuggestionWithoutRangeIsDefused() {
+    @Test func multiLineSuggestionWithoutRangeIsDefused() throws {
         let cs = DraftReview.comments(from: review)
+        try #require(cs.count == 3)
         #expect(!cs[0].body.contains("```suggestion"))
         #expect(cs[1].body.contains("```suggestion"))
     }

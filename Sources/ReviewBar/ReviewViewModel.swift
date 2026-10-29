@@ -167,11 +167,13 @@ final class ReviewViewModel: ObservableObject {
             seenChecks = AlertDiff.ciByURL(myPRs)
         } catch { errors.append("My PRs: \(error.localizedDescription)") }
 
-        // Mentions are best effort: an empty list on failure, and only new ones notify.
-        mentions = await fetchedMentions
-        let newMentions = AlertDiff.newer(visibleMentions, seen: seenMentions, url: \.url, latestAt: \.updatedAt)
-        seenMentions = AlertDiff.latestByURL(mentions, url: \.url, latestAt: \.updatedAt)
-        newMentions.forEach(Notifier.mention)
+        // Mentions are best effort: a failed fetch keeps the previous list, and only new ones notify.
+        if let fetched = await fetchedMentions {
+            mentions = fetched
+            let newMentions = AlertDiff.newer(visibleMentions, seen: seenMentions, url: \.url, latestAt: \.updatedAt)
+            seenMentions = AlertDiff.latestByURL(mentions, url: \.url, latestAt: \.updatedAt)
+            newMentions.forEach(Notifier.mention)
+        }
 
         // A failed search is usually one repo gh can't read: find it, leave it out, try again.
         if !errors.isEmpty {

@@ -58,11 +58,12 @@ struct ShellTests {
         #expect(await sh("exit 1", timeout: .seconds(20)) == nil)
     }
 
-    /// A child left behind holds the output pipe for 15 s, as a process stuck on a network mount
-    /// would: the timeout still returns at its limit.
+    /// A process the cancel can't stop holds the output pipe for 15 s, as one stuck on a network mount
+    /// would: orphaned by the subshell, so `pkill -P` misses it, and deaf to the HUP and TERM that
+    /// reach it otherwise. The timeout still returns at its limit.
     @Test func aTimeoutDoesntWaitForWhatCantBeStopped() async {
         let start = ContinuousClock.now
-        #expect(await sh("sleep 15 &!; sleep 15", timeout: .seconds(2)) == nil)
+        #expect(await sh(#"(zsh -fc "trap '' HUP TERM; sleep 15" &!); sleep 15"#, timeout: .seconds(2)) == nil)
         #expect(ContinuousClock.now - start < .seconds(6))
     }
 

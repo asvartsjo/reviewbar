@@ -91,7 +91,7 @@ struct RepoFolderTests {
 
         #expect(try await sources(in: wt) == "")
         try "{}".write(to: wt.appendingPathComponent(".mcp.json"), atomically: true, encoding: .utf8)
-        #expect(try await sources(in: wt) == "--setting-sources user")
+        #expect(try await sources(in: wt) == "--setting-sources user --strict-mcp-config")
         try fm.removeItem(at: wt.appendingPathComponent(".mcp.json"))
         try "{}".write(to: wt.appendingPathComponent(".claude/settings.local.json"), atomically: true, encoding: .utf8)
         #expect(try await sources(in: wt) == "--setting-sources user")

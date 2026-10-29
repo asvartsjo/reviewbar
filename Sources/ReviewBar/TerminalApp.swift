@@ -133,8 +133,9 @@ enum TerminalApp: String, CaseIterable, Identifiable {
         /// interactive session would load the PR's own `.claude/settings.json` or `settings.local.json`
         /// (hooks, `env`, `apiKeyHelper`) without asking, and could start its `.mcp.json` servers. When
         /// the shell is in this worktree and it has one (`Backend.terminalProjectFiles`), `sources`
-        /// becomes `--setting-sources user`, as for headless reviews, and the terminal says so. The clone
-        /// `script` falls back to is yours, so it keeps its settings. Pure, for tests.
+        /// becomes `--setting-sources user`, as for headless reviews, plus `--strict-mcp-config` when it
+        /// has `.mcp.json` (see `Backend.projectMCPFile`), and the terminal says so. The clone `script`
+        /// falls back to is yours, so it keeps its settings. Pure, for tests.
         var userSettingsOnlyScript: String {
             let files = Backend.terminalProjectFiles.map { "-f \(q(path + "/" + $0))" }.joined(separator: " || ")
             return """
@@ -142,6 +143,10 @@ enum TerminalApp: String, CaseIterable, Identifiable {
             if [[ "$PWD" -ef \(q(path)) ]] && [[ \(files) ]]; then
               sources=(--setting-sources user)
               print "This PR has its own Claude settings or MCP servers (.claude/settings.json, settings.local.json or .mcp.json), so the session starts with your user settings only, without the project's CLAUDE.md, rules and MCP servers."
+              if [[ -f \(q(path + "/" + Backend.projectMCPFile)) ]]; then
+                sources+=(--strict-mcp-config)
+                print "Because of its .mcp.json, the session starts without any MCP servers, yours included."
+              fi
             fi
             """
         }

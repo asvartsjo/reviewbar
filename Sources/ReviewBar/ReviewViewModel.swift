@@ -878,11 +878,11 @@ final class ReviewViewModel: ObservableObject {
         Task {
             let home = (item.session.cwd as NSString).abbreviatingWithTildeInPath
             if !(await Backend.reveal(item.session)) {
-                terminalNotice = "Couldn't find \(item.session.displayName)'s window (iTerm2, Terminal and VS Code can be "
-                    + "found). It runs in \(home)\(item.session.pid.map { ", pid \($0)" } ?? "")."
+                terminalNotice = "Couldn't bring \(item.session.displayName)'s window to the front. "
+                    + "It runs in \(home)\(item.session.pid.map { ", pid \($0)" } ?? "")."
             } else if item.session.host == .vscode {
                 terminalNotice = "Brought VS Code's window for \(home) to the front: \(item.session.displayName) is in its Claude Code panel."
-            } else if case .app(let app) = item.session.host {
+            } else if case .app(let app, _) = item.session.host {
                 terminalNotice = "Brought \(app.name) to the front: \(item.session.displayName) is in one of its tabs, "
                     + "in \(home). \(app.name) can't be asked which one."
             }

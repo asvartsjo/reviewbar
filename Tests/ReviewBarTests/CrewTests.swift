@@ -154,7 +154,7 @@ struct CrewTests {
         let t = Crew.parseProcessTable(processes)
         #expect(Crew.host(of: 16378, in: t) == .vscode)
         #expect(Crew.host(of: 61679, in: t) == .iterm)
-        #expect(Crew.host(of: 1420, in: t) == .app(.ghostty))
+        #expect(Crew.host(of: 1420, in: t) == .app(.ghostty, pid: 1400))
         #expect(Crew.host(of: 1420, in: t).name == "Ghostty")
         #expect(Crew.host(of: 901, in: t) == .other)
         #expect(Crew.host(of: 700, in: t) == .other)   // a parent loop ends, it doesn't hang

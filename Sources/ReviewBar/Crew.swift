@@ -106,8 +106,9 @@ extension Crew {
     enum Host: Equatable {
         case iterm, terminal, vscode
         /// Ghostty, WezTerm, kitty or Alacritty: none can be asked which tab runs a tty, so Show
-        /// session brings the app to the front.
-        case app(TerminalApp)
+        /// session brings the app to the front. `pid` is the app process the session runs under:
+        /// ReviewBar starts one instance per session (`open -na`), so there may be several.
+        case app(TerminalApp, pid: Int)
         case other
 
         var name: String {
@@ -115,7 +116,7 @@ extension Crew {
             case .iterm: "iTerm2"
             case .terminal: "Terminal"
             case .vscode: "VS Code"
-            case .app(let app): app.name
+            case .app(let app, _): app.name
             case .other: "terminal"
             }
         }
@@ -123,8 +124,9 @@ extension Crew {
         /// The folder of each app's bundle, as it shows in a process path.
         static let bundleFolders: [(folder: String, host: Host)] = [
             ("/iTerm.app/", .iterm), ("/Terminal.app/", .terminal), ("/Visual Studio Code.app/", .vscode),
-            ("/Ghostty.app/", .app(.ghostty)), ("/WezTerm.app/", .app(.wezterm)),
-            ("/kitty.app/", .app(.kitty)), ("/Alacritty.app/", .app(.alacritty)),
+        ]
+        static let appFolders: [(folder: String, app: TerminalApp)] = [
+            ("/Ghostty.app/", .ghostty), ("/WezTerm.app/", .wezterm), ("/kitty.app/", .kitty), ("/Alacritty.app/", .alacritty),
         ]
     }
 
@@ -146,6 +148,7 @@ extension Crew {
         for _ in 0..<20 {
             guard let p = current, p > 1, let entry = table[p] else { break }
             if let known = Host.bundleFolders.first(where: { entry.comm.contains($0.folder) }) { return known.host }
+            if let known = Host.appFolders.first(where: { entry.comm.contains($0.folder) }) { return .app(known.app, pid: p) }
             current = entry.ppid
         }
         return .other
@@ -339,12 +342,14 @@ extension Backend {
 
     /// Brings a terminal session's window to the front: in iTerm2 or Terminal its tab, found by its
     /// tty (from `ps`); in VS Code the window of its folder (the Claude panel inside can't be picked);
-    /// in another known terminal (`Host.app`) just the app. False when it isn't found.
+    /// in another known terminal (`Host.app`) the instance it runs under, else any instance of that app.
+    /// False when it isn't found.
     static func reveal(_ session: CrewSession) async -> Bool {
         if session.host == .vscode {
             return await run("/usr/bin/open", ["-b", "com.microsoft.VSCode", session.cwd]) != nil
         }
-        if case .app(let app) = session.host, let id = app.bundleID {
+        if case .app(let app, let appPid) = session.host, let id = app.bundleID {
+            if await activate(pid: appPid) { return true }
             return await run("/usr/bin/open", ["-b", id]) != nil
         }
         guard let pid = session.pid,
@@ -356,6 +361,14 @@ extension Backend {
             if await run("/usr/bin/osascript", ["-e", script])?.contains("found") == true { return true }
         }
         return false
+    }
+
+    /// Brings the app process `pid` to the front, yielding ReviewBar's activation to it first: since
+    /// macOS 14 an app may otherwise ignore the request. False when `pid` isn't a running app.
+    @MainActor private static func activate(pid: Int) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: pid_t(pid)) else { return false }
+        NSApp.yieldActivation(to: app)
+        return app.activate()
     }
 
     /// Runs an executable directly (no shell) and returns its output, or nil if it fails.

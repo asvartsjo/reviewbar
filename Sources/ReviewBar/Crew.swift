@@ -342,15 +342,14 @@ extension Backend {
 
     /// Brings a terminal session's window to the front: in iTerm2 or Terminal its tab, found by its
     /// tty (from `ps`); in VS Code the window of its folder (the Claude panel inside can't be picked);
-    /// in another known terminal (`Host.app`) the instance it runs under, else any instance of that app.
-    /// False when it isn't found.
+    /// in another known terminal (`Host.app`) the instance it runs under, never another one: `open -b`
+    /// could open a new window instead. False when it isn't found.
     static func reveal(_ session: CrewSession) async -> Bool {
         if session.host == .vscode {
             return await run("/usr/bin/open", ["-b", "com.microsoft.VSCode", session.cwd]) != nil
         }
-        if case .app(let app, let appPid) = session.host, let id = app.bundleID {
-            if await activate(pid: appPid) { return true }
-            return await run("/usr/bin/open", ["-b", id]) != nil
+        if case .app(_, let appPid) = session.host {
+            return await activate(pid: appPid)
         }
         guard let pid = session.pid,
               let tty = await run("/bin/ps", ["-o", "tty=", "-p", String(pid)])?

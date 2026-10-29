@@ -26,6 +26,7 @@ final class MenuBarController: NSObject {
     private let panel: Panel
     private var window: NSWindow?
     private var watch: AnyCancellable?
+    private var levelWatch: AnyCancellable?
     private var resignObserver: NSObjectProtocol?
 
     init(vm: ReviewViewModel) {
@@ -51,6 +52,8 @@ final class MenuBarController: NSObject {
             .merge(with: defaults)
             .receive(on: RunLoop.main)
             .sink { [weak self, weak vm] _ in if let vm { self?.updateIcon(vm.badgeCount) } }
+        // Turning Stay open on or off in Settings applies to the panel that is open now.
+        levelWatch = defaults.sink { [weak self] in self?.panel.level = Panel.level(stayOpen: StayOpen.isOn) }
 
         // Clicking anywhere else closes it, like a menu, unless Settings keep it open.
         resignObserver = NotificationCenter.default.addObserver(
@@ -143,13 +146,16 @@ final class MenuBarController: NSObject {
             isOpaque = false
             backgroundColor = .clear
             hasShadow = true
-            level = .popUpMenu
+            level = Self.level(stayOpen: StayOpen.isOn)
             collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             isReleasedWhenClosed = false
             // Panels hide when the app loses focus by default; closing is up to MenuBarController.
             hidesOnDeactivate = false
         }
         override var canBecomeKey: Bool { true }
+        /// Above everything, like a menu, while a click elsewhere closes it. Pinned open it can stay for
+        /// hours, so it only floats above normal windows instead of covering full-screen apps.
+        static func level(stayOpen: Bool) -> NSWindow.Level { stayOpen ? .floating : .popUpMenu }
         var onEscape: (() -> Void)?
         /// Esc closes it, like a menu.
         override func cancelOperation(_ sender: Any?) { onEscape?() }

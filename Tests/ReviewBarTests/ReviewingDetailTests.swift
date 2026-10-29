@@ -41,6 +41,7 @@ struct ReviewingDetailTests {
             thread("me", path: "mine-last.ts"),
             thread("me", last: "author", outdated: true, path: "replied.ts"),
         ])
+        try #require(d.myThreads.count == 4)
         #expect(d.myThreads.map(\.path) == ["replied.ts", "bot.ts", "mine-last.ts", "resolved.ts"])
         #expect(d.myThreads.map(\.state) == [.replied(by: "author"), .open, .open, .resolved])
         #expect(d.myThreads[0].stateText == "author replied · code changed")
@@ -51,6 +52,7 @@ struct ReviewingDetailTests {
     @Test func locationFallsBackToTheOriginalLineAndSnippetDropsBold() throws {
         let d = try parse([thread("me", line: nil, originalLine: 42, body: "🟠 **MEDIUM** — a race"),
                            thread("me", path: "file-level.ts", line: nil)])
+        try #require(d.myThreads.count == 2)
         #expect(d.myThreads[0].location == "a.ts:42")
         #expect(d.myThreads[0].snippet == "🟠 MEDIUM — a race")
         #expect(d.myThreads[1].location == "file-level.ts")
@@ -62,6 +64,7 @@ struct ReviewingDetailTests {
 
     @Test func snippetIsTheTitleAndTooltipDropsCode() throws {
         let d = try parse([thread("me", body: skillComment)])
+        try #require(d.myThreads.count == 1)
         #expect(d.myThreads[0].snippet == "🟡 LOW — Logic in the controller")
         #expect(d.myThreads[0].fullText
                 == "🟡 LOW — Logic in the controller\n\nDescription: Move it.\n\nSuggested fix: An Action.")
@@ -175,6 +178,7 @@ struct ReviewingDetailTests {
             event("IssueComment", "author", at: "2026-09-28T10:00:00Z", extra: #", "url": "https://x/c""#),
             event("HeadRefForcePushedEvent", "author", at: "2026-09-29T10:00:00Z"),
         ], since: since)
+        try #require(d.activity.count == 6)
         #expect(d.activity.map(\.text) == [
             "author force-pushed", "author commented on the PR", "dave commented in a review",
             "carol reviewed · 2 comments", "bob requested changes · 3 comments", "anna approved",
@@ -205,6 +209,7 @@ struct ReviewingDetailTests {
             review("simon", "COMMENTED", at: "2026-09-25T10:03:00Z", comments: 1, replies: 1),
             review("simon", "COMMENTED", at: "2026-09-25T10:04:00Z", comments: 1, replies: 1),
         ], since: since)
+        try #require(d.activity.count == 3)
         #expect(d.activity.map(\.text) == ["simon replied in 2 threads", "setn replied in 1 thread",
                                            "simon replied in 2 threads"])
         #expect(d.activity[0].at == "2026-09-25T10:04:00Z")   // the newest of the merged ones

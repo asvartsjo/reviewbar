@@ -276,18 +276,19 @@ struct PRFilterTests {
            repository: .init(nameWithOwner: "o/r"), author: .init(login: "a"))
     }
 
-    @Test func requestsGetHeadCommitAndCI() {
+    @Test func requestsGetHeadCommitAndCI() throws {
         let json = #"{"data": {"viewer": {"login": "me"}, "p0": {"headRefOid": "abc", "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE"}}}]}},"#
             + #" "p1": {"headRefOid": "def", "commits": {"nodes": [{"commit": {"statusCheckRollup": null}}]}}, "p2": null}}"#
         let prs = Backend.applyHeadCommits([pr(1, draft: false), pr(2, draft: false), pr(3, draft: false)], Data(json.utf8))
         #expect(prs.map(\.headRefOid) == ["abc", "def", nil])
         #expect(prs.map(\.checks) == ["FAILURE", nil, nil])
         #expect(Backend.merge([], requested: prs).map(\.checks) == ["FAILURE", nil, nil])
-        #expect(Backend.applyHeadCommits([pr(1, draft: false)], Data("oops".utf8)) == [pr(1, draft: false)])
-        #expect(Backend.applyHeadCommits([pr(1, draft: false)], Data("oops".utf8))[0].verdicts == nil)
+        let unread = Backend.applyHeadCommits([pr(1, draft: false)], Data("oops".utf8))
+        #expect(unread == [pr(1, draft: false)])
+        #expect(try #require(unread.first).verdicts == nil)
     }
 
-    @Test func requestsGetOtherReviewersVerdicts() {
+    @Test func requestsGetOtherReviewersVerdicts() throws {
         func review(_ who: String, _ state: String, bot: Bool = false) -> String {
             #"{"author": {"login": "\#(who)", "__typename": "\#(bot ? "Bot" : "User")"}, "state": "\#(state)"}"#
         }
@@ -299,6 +300,7 @@ struct PRFilterTests {
             + reviews.joined(separator: ",") + #"]}}, "p1": {"headRefOid": "def"}}}"#
         let prs = Backend.applyHeadCommits([pr(1, draft: false), pr(2, draft: false)], Data(json.utf8))
         let rows = Backend.merge([], requested: prs)
+        try #require(rows.count == 2)
         #expect(rows[0].verdicts == [.init(login: "alice", state: "APPROVED"),
                                      .init(login: "carol", state: "CHANGES_REQUESTED")])
         #expect(rows[1].verdicts.isEmpty)

@@ -94,16 +94,18 @@ struct TerminalAppTests {
         #expect(!TerminalApp.launcherScript(claude: "claude", promptFile: "/p", path: "").contains("export PATH"))
     }
 
-    @Test func launchCommands() {
+    @Test func launchCommands() throws {
         guard case .process(let t, let targs) = TerminalApp.terminal.launch(launcher: "/tmp/r.sh", app: "/System/Applications/Utilities/Terminal.app")
         else { Issue.record(); return }
         #expect(t == "/usr/bin/osascript")
+        try #require(targs.count == 2)
         #expect(targs[1].contains(#"tell application "Terminal""#))
         #expect(targs[1].contains(#"do script "'/tmp/r.sh'""#))
 
         guard case .process(let i, let iargs) = TerminalApp.iterm.launch(launcher: "/tmp/r.sh", app: "/Applications/iTerm.app")
         else { Issue.record(); return }
         #expect(i == "/usr/bin/osascript")
+        try #require(iargs.count == 2)
         #expect(iargs[1].contains(#"create window with default profile command "/tmp/r.sh""#))
 
         #expect(TerminalApp.ghostty.launch(launcher: "/tmp/r.sh", app: "/Applications/Ghostty.app")

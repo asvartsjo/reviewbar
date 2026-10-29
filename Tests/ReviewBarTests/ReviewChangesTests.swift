@@ -44,7 +44,7 @@ struct ReviewChangesTests {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
         let saved = try dec.decode([SavedReview].self, from: Data(json.utf8))
-        #expect(saved.count == 1)
+        try #require(saved.count == 1)
         #expect(saved[0].producedBy == nil)
         #expect(saved[0].sinceCommit == nil)
         #expect(saved[0].pr.headRefOid == nil)

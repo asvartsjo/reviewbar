@@ -24,8 +24,9 @@ struct CrewTests {
     ]
     """.utf8)
 
-    @Test func readsEverySessionWithAFolder() {
+    @Test func readsEverySessionWithAFolder() throws {
         let s = Crew.parseSessions(sample)
+        try #require(s.count == 7)
         #expect(s.map(\.id) == ["aaaa1111", "bbbb2222", "cccc3333", "dddd4444", "eeee5555", "ffff6666", "8"])
         #expect(s.map(\.needsMe) == [true, false, false, true, false, false, false])
         #expect(s.map(\.working) == [false, false, true, false, true, false, true])
@@ -178,8 +179,9 @@ struct CrewTests {
         #expect(Crew.titles(inTranscript: "").ai == nil)
     }
 
-    @Test func showsTheTitleElseTheShortName() {
+    @Test func showsTheTitleElseTheShortName() throws {
         let s = Crew.parseSessions(sample)
+        try #require(s.count == 7)
         #expect(s[1].sessionId == "bbbb2222")
         #expect(s[3].sessionId == "s4")   // agent view sessions have one too, beside their `id`
         #expect(s[1].displayName == "storefront-ef")

@@ -24,6 +24,12 @@ enum ClaudeSettings {
     static let myPRCommandKey = "myPRCommand", myPRCommandDefault = ""
     static let mergeCommandDefault = "can I merge {url}?"
 
+    /// Settings that no longer exist, removed at launch so they don't linger in UserDefaults:
+    /// the Merge command became fixed (`mergeCommandDefault`).
+    static func removeRetiredSettings() {
+        UserDefaults.standard.removeObject(forKey: "mergeCommand")
+    }
+
     private static func value(_ key: String, _ fallback: String, allowed: [String]) -> String {
         let v = UserDefaults.standard.string(forKey: key) ?? fallback
         return allowed.contains(v) ? v : fallback   // only whitelisted values reach the shell

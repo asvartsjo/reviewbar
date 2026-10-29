@@ -150,7 +150,7 @@ struct ReviewingDetailTests {
     private let since = "2026-09-24T18:43:32Z"
 
     /// `replies` of the `comments` answer existing threads.
-    private func review(_ login: String, _ state: String, at: String, comments: Int = 0, replies: Int = 0,
+    private func review(_ login: String?, _ state: String, at: String, comments: Int = 0, replies: Int = 0,
                         bot: Bool = false) -> String {
         let nodes = (0..<comments).map { $0 < replies ? #"{"replyTo": {"id": "c"}}"# : #"{"replyTo": null}"# }
         return """
@@ -159,7 +159,7 @@ struct ReviewingDetailTests {
         """
     }
 
-    private func event(_ type: String, _ login: String, at: String, bot: Bool = false, extra: String = "") -> String {
+    private func event(_ type: String, _ login: String?, at: String, bot: Bool = false, extra: String = "") -> String {
         let who = type == "IssueComment" ? "author" : "actor"
         return #"{"__typename": "\#(type)", "\#(who)": \#(user(login, bot: bot)), "createdAt": "\#(at)"\#(extra)}"#
     }
@@ -210,13 +210,16 @@ struct ReviewingDetailTests {
         #expect(d.activity[0].at == "2026-09-25T10:04:00Z")   // the newest of the merged ones
     }
 
-    @Test func activityLeavesOutYouAndBots() throws {
+    /// And anyone GitHub returns no author for, as the Reviewing row doesn't count them either.
+    @Test func activityLeavesOutYouBotsAndNobody() throws {
         let d = try parse(reviews: [
             review("me", "COMMENTED", at: "2026-09-25T10:00:00Z", comments: 1, replies: 1),
             review("coderabbitai", "COMMENTED", at: "2026-09-25T11:00:00Z", comments: 4, bot: true),
+            review(nil, "APPROVED", at: "2026-09-25T11:30:00Z"),
         ], timeline: [
             event("IssueComment", "coderabbitai", at: "2026-09-25T12:00:00Z", bot: true),
             event("HeadRefForcePushedEvent", "me", at: "2026-09-25T13:00:00Z"),
+            event("IssueComment", nil, at: "2026-09-25T14:00:00Z"),
         ], since: since)
         #expect(d.activity.isEmpty)
     }

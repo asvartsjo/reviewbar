@@ -472,12 +472,7 @@ enum Backend {
     /// whose last comment is from someone else. One read-only GraphQL query.
     static func fetchReplies(skipping skipped: Set<String> = []) async throws -> [ReplyPR] {
         if DemoData.isOn { return DemoData.replies() }
-        let (owner, repos) = settingsScope(skipping: skipped)
-        var terms = repos.map { "repo:\($0)" }
-        if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
-        guard !terms.isEmpty else { return [] }
-        let search = "is:pr is:open reviewed-by:@me -author:@me sort:updated-desc " + terms.joined(separator: " ")
-
+        guard let search = reviewedSearch(skipping: skipped) else { return [] }
         let out = try await sh("gh api graphql -f query=\(q(repliesQuery)) -f q=\(q(search))")
         return try parseReplies(Data(out.utf8))
     }
@@ -559,14 +554,25 @@ enum Backend {
     /// through `merge`. One read-only GraphQL query.
     static func fetchReviewing(skipping skipped: Set<String> = []) async throws -> [ReviewingPR] {
         if DemoData.isOn { return await DemoData.reviewing() }
+        guard let search = reviewedSearch(skipping: skipped) else { return [] }
+        let out = try await sh("gh api graphql -f query=\(q(reviewingQuery)) -f q=\(q(search))")
+        return try parseReviewing(Data(out.utf8))
+    }
+
+    /// The search behind both Reviewing and Replies: open PRs of others you have reviewed, in the
+    /// watched repos (or the old whole-org setting). Nil when nothing is watched.
+    private static func reviewedSearch(skipping skipped: Set<String>) -> String? {
         let (owner, repos) = settingsScope(skipping: skipped)
         var terms = repos.map { "repo:\($0)" }
         if terms.isEmpty, !owner.isEmpty { terms = ["user:\(owner)"] }
-        guard !terms.isEmpty else { return [] }
-        let search = "is:pr is:open reviewed-by:@me -author:@me sort:updated-desc " + terms.joined(separator: " ")
+        guard !terms.isEmpty else { return nil }
+        return "is:pr is:open reviewed-by:@me -author:@me sort:updated-desc " + terms.joined(separator: " ")
+    }
 
-        let out = try await sh("gh api graphql -f query=\(q(reviewingQuery)) -f q=\(q(search))")
-        return try parseReviewing(Data(out.utf8))
+    /// Someone other than you, and not a bot. A missing author (null in GraphQL) counts as nobody,
+    /// as in the Replies rule (`parseReplies`), so the Reviewing row and its detail agree.
+    private static func isOther(_ u: GitHubUser?, me: String) -> Bool {
+        u.map { $0.login != me && !$0.isBot } ?? false
     }
 
     /// The `reviewingQuery` response → PRs you reviewed, newest activity first. Pure, for tests.
@@ -576,7 +582,7 @@ enum Backend {
 
         return data.search.items.map { n -> ReviewingPR in
             let author = n.author?.login ?? "ghost"
-            func isOther(_ u: GitHubUser?) -> Bool { u.map { $0.login != me && !$0.isBot } ?? false }
+            func isOther(_ u: GitHubUser?) -> Bool { Self.isOther(u, me: me) }
 
             func submitted(_ r: ReviewingData.Review?, after prev: ReviewingPR.MyReview?) -> ReviewingPR.MyReview? {
                 guard let r, let at = r.submittedAt, r.state != "PENDING", r.state != "DISMISSED" else { return nil }
@@ -840,7 +846,7 @@ enum Backend {
     private static func activity(_ pr: ReviewingDetailData.PullRequest, me: String,
                                  since: String) -> ([ReviewingDetail.Activity], Bool) {
         typealias A = ReviewingDetail.Activity
-        func isOther(_ u: GitHubUser?) -> Bool { u.map { $0.login != me && !$0.isBot } ?? true }
+        func isOther(_ u: GitHubUser?) -> Bool { Self.isOther(u, me: me) }
 
         var items: [A] = pr.reviews.items.compactMap { r in
             guard let at = r.submittedAt, at > since, isOther(r.author) else { return nil }

@@ -115,6 +115,30 @@ func sh(_ command: String, input: String? = nil) async throws -> String {
     }
 }
 
+/// `sh(command)`, or nil when it fails or runs longer than `limit`; it's cancelled then. Returns at
+/// the limit even if the command can't be stopped (a process stuck on a stale network mount ignores
+/// SIGKILL and keeps the output pipe open), so the caller never hangs; that `sh` call is left behind.
+func sh(_ command: String, timeout limit: Duration) async -> String? {
+    final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<String?, Never>?
+        init(_ c: CheckedContinuation<String?, Never>) { continuation = c }
+        func resume(_ value: String?) {
+            lock.lock(); let c = continuation; continuation = nil; lock.unlock()
+            c?.resume(returning: value)
+        }
+    }
+    return await withCheckedContinuation { c in
+        let once = Once(c)
+        let work = Task { once.resume(try? await sh(command)) }
+        Task {
+            try? await Task.sleep(for: limit)
+            work.cancel()
+            once.resume(nil)
+        }
+    }
+}
+
 /// Runs a blocking pipe read or write on a GCD thread, so it never ties up one of Swift
 /// concurrency's few threads for as long as a command runs.
 private func blocking<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {

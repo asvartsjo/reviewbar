@@ -52,15 +52,31 @@ struct MyPRActionTests {
         #expect(MyPRAction.checkout(of: "atanas", in: listed) == nil)
     }
 
-    /// A fork's PR from `main` must not land in the clone's own `main`, which tracks origin.
+    /// A fork's PR from `main` must not land in the clone's own `main`, which tracks the base repo.
     @Test func onlyTheForksBranchCountsForAForkPR() {
-        #expect(!MyPRAction.isForkBranch(remote: "origin", merge: "refs/heads/main", number: 7))
-        #expect(!MyPRAction.isForkBranch(remote: nil, merge: nil, number: 7))           // no upstream: a local branch
-        #expect(MyPRAction.isForkBranch(remote: "origin", merge: "refs/pull/7/head", number: 7))   // gh pr checkout
-        #expect(!MyPRAction.isForkBranch(remote: "origin", merge: "refs/pull/8/head", number: 7))
-        #expect(MyPRAction.isForkBranch(remote: "carol", merge: "refs/heads/main", number: 7))     // the fork's remote
-        #expect(MyPRAction.isForkBranch(remote: "https://github.com/carol/storefront.git", merge: "refs/heads/main",
-                                        number: 7))
+        let repo = "acme/storefront"
+        func fork(_ config: String, number: Int = 7) -> Bool {
+            MyPRAction.isForkBranch("main", config: config, number: number, repo: repo)
+        }
+        let baseIsOrigin = """
+        remote.origin.url git@github.com:acme/storefront.git
+        remote.carol.url https://github.com/carol/storefront.git
+        """
+        #expect(!fork(baseIsOrigin + "\nbranch.main.remote origin\nbranch.main.merge refs/heads/main"))
+        #expect(!fork(baseIsOrigin))                                                 // no upstream: a local branch
+        #expect(fork(baseIsOrigin + "\nbranch.main.remote origin\nbranch.main.merge refs/pull/7/head"))  // gh pr checkout
+        #expect(!fork(baseIsOrigin + "\nbranch.main.remote origin\nbranch.main.merge refs/pull/8/head"))
+        #expect(fork(baseIsOrigin + "\nbranch.main.remote carol\nbranch.main.merge refs/heads/main"))    // the fork's remote
+        #expect(fork(baseIsOrigin + "\nbranch.main.remote https://github.com/carol/storefront.git\nbranch.main.merge refs/heads/main"))
+        #expect(!fork(baseIsOrigin + "\nbranch.main.remote .\nbranch.main.merge refs/heads/dev"))       // tracks a local branch
+
+        // Origin is my fork, upstream the base repo: `main` tracking upstream is the base's.
+        let forkIsOrigin = """
+        remote.origin.url git@github.com:me/storefront.git
+        remote.upstream.url git@github.com:acme/storefront.git
+        """
+        #expect(!fork(forkIsOrigin + "\nbranch.main.remote upstream\nbranch.main.merge refs/heads/main"))
+        #expect(fork(forkIsOrigin + "\nbranch.main.remote origin\nbranch.main.merge refs/heads/main"))
     }
 
     @Test func newCheckoutGoesBesideThePRWorktrees() {

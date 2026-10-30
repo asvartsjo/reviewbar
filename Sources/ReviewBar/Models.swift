@@ -63,7 +63,8 @@ struct ReviewingPR: Identifiable, Hashable {
     /// Your latest review, skipping your pending draft and dismissed reviews. A later Comment
     /// (a thread reply is one) keeps your earlier verdict, as it does on GitHub.
     let myLastReview: MyReview?
-    /// No review of yours counts, and one was dismissed: GitHub still lists you as a reviewer.
+    /// Your latest review was dismissed: GitHub still lists you as a reviewer. An earlier review
+    /// can still fill `myLastReview`, but its verdict no longer counts.
     var myReviewDismissed = false
     /// Unresolved threads you took part in whose last comment is someone else's (not a bot).
     let waiting: Int
@@ -115,7 +116,8 @@ struct ReviewingPR: Identifiable, Hashable {
     enum Turn: Equatable {
         case yours(Reason)
         case authors
-        /// You approved, and nothing changed since or you commented on what did.
+        /// Your approval stands. New commits and replies since don't move it; a re-request or
+        /// a dismissal does.
         case done
     }
 
@@ -163,10 +165,11 @@ struct ReviewingPR: Identifiable, Hashable {
     var turn: Turn {
         if isRequested { return .yours(myLastReview == nil ? .requested : .reRequested) }
         if myReviewDismissed { return .yours(.dismissed) }
+        if myLastReview?.state == "APPROVED" { return .done }
         if hasNewCommits && !commentedOnHead { return .yours(.newCommits) }
         if waiting > 0 { return .yours(.reply) }
         if authorRepliedSinceYou { return .yours(.authorReplied) }
-        return myLastReview?.state == "APPROVED" ? .done : .authors
+        return .authors
     }
 
     /// The Reviewing tab's sections, in display order.

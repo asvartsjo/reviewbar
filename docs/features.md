@@ -16,9 +16,9 @@ ReviewBar refreshes every 5 minutes, and whenever you open the popover if the da
 
 Lists every open PR you review (where you are a requested reviewer, in the repos you choose, any mix of orgs and users), grouped by whose turn it is:
 
-- **Your turn**: newly requested, re-requested, new commits since your last review, a reply in one of your threads, or the author answering in the conversation after your review or comment (a comment to someone else, like `@coderabbitai …`, doesn't count).
+- **Your turn**: newly requested, re-requested, your review dismissed, or, unless you approved, new commits since your last review, a reply in one of your threads, or the author answering in the conversation after your review or comment (a comment to someone else, like `@coderabbitai …`, doesn't count).
 - **Author's turn**: nothing new since your review, or you commented in the conversation after the new commits.
-- **Done**: you approved, and nothing changed or you commented on what did.
+- **Done**: your approval stands. New commits and replies since don't move it: the row still counts replies waiting, and new commits show as the blue dot and in the "Since your review" box. Only a re-request or a dismissal moves it.
 
 Each row shows why it is in its group, how many of the threads you opened are resolved, other reviewers' approvals and change requests, and CI. Bots are ignored. Requested rows show how long the PR has been open (orange from 3 days). ✨ / 🕘 mark a review saved in ReviewBar for this or an older version of the PR. **Review all** above the list reviews every request that doesn't have one yet. The tab count is Your turn.
 
@@ -85,7 +85,7 @@ Agent view is a research preview: if its output changes, the tab stays empty.
 
 ReviewBar notifies you about:
 
-- new review requests (a request on a PR you already reviewed says re-requested), and your only review on a PR being dismissed;
+- new review requests (a request on a PR you already reviewed says re-requested), and your latest review on a PR being dismissed;
 - replies on your review threads;
 - feedback on your PRs;
 - checks turning green on your PRs that aren't approved yet (a push whose checks finish between two refreshes counts too; drafts, parked PRs and PRs without checks stay quiet; it never counts in the menu bar);
@@ -126,7 +126,7 @@ Turn each kind on or off (see [Notifications](#notifications)), including Claude
 
 ### Panel
 
-- **Menu bar number**: pick what the number counts: review requests (awaiting your review), new commits or replies on PRs you reviewed, feedback on your PRs, and mentions. All are on by default. A PR counts once even when it's in several. PRs muted in Reviewing don't count as requests or activity, but a mention still counts.
+- **Menu bar number**: pick what the number counts: review requests (awaiting your review), new commits or replies on PRs you reviewed but haven't approved, feedback on your PRs, and mentions. All are on by default. A PR counts once even when it's in several. PRs muted in Reviewing don't count as requests or activity, but a mention still counts.
 - **Stay open when clicking elsewhere** (off by default) keeps the popover up while you work in other apps; close it with the menu bar icon or Esc.
 - **Open as a window** (off by default) opens a normal window instead of the popup: move and resize it (at least 480×580), and it stays open until you close it. It remembers its position and size. Clicking the menu bar icon brings it to the front. It isn't in the Dock or ⌘-Tab.
 

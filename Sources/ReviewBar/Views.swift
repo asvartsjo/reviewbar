@@ -553,6 +553,10 @@ struct DetailView: View {
             HStack {
                 Button { back() } label: { Label("Back", systemImage: "chevron.left") }
                 Spacer()
+                ForEach(TicketLinks.find(in: pr.title, pr.body ?? ""), id: \.id) { t in
+                    Button(t.id, systemImage: "ticket") { open(t.url) }
+                        .help("Open \(t.id) in Linear")
+                }
                 Button("Open PR", systemImage: "arrow.up.right.square") { open(pr.url) }
                     .help("Open this PR on GitHub")
                 Button("Files", systemImage: "doc.text") { open(pr.url + "/files") }

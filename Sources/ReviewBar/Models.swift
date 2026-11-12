@@ -16,6 +16,12 @@ struct PR: Identifiable, Codable, Hashable {
     var checks: String? = nil
     /// Other reviewers' current verdicts, filled in with `headRefOid` for review requests.
     var verdicts: [ReviewingPR.Verdict]? = nil
+    /// The PR description, scanned for ticket ids. Not saved to disk.
+    var body: String? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case number, title, url, isDraft, updatedAt, repository, author, headRefOid, createdAt, checks, verdicts
+    }
 
     struct Repo: Codable, Hashable { let nameWithOwner: String }
     struct Author: Codable, Hashable { let login: String }

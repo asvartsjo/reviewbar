@@ -553,7 +553,7 @@ struct DetailView: View {
             HStack {
                 Button { back() } label: { Label("Back", systemImage: "chevron.left") }
                 Spacer()
-                ForEach(TicketLinks.find(in: pr.title, pr.body ?? ""), id: \.id) { t in
+                ForEach(TicketLinks.tickets(for: pr), id: \.id) { t in
                     Button(t.id, systemImage: "ticket") { open(t.url) }
                         .help("Open \(t.id) in Linear")
                 }
@@ -887,6 +887,9 @@ struct SettingsView: View {
     @AppStorage(CodexSettings.quickEffortKey) private var codexQuickEffort = CodexSettings.quickEffortDefault
     @AppStorage(PRFilter.includeDraftsKey) private var includeDrafts = true
     @AppStorage(AutoReview.key) private var autoReview = false
+    @AppStorage(TicketLinks.enabledKey) private var ticketLinks = false
+    @AppStorage(TicketLinks.workspaceKey) private var ticketWorkspace = ""
+    @AppStorage(TicketLinks.teamKeysKey) private var ticketTeamKeys = ""
     @AppStorage(StayOpen.key) private var stayOpen = false
     @AppStorage(AsWindow.key) private var asWindow = false
     @AppStorage(MenuBarCount.requestsKey) private var countRequests = true
@@ -1212,6 +1215,22 @@ struct SettingsView: View {
                  + "and notifies you when it's ready. Uses your \(Agent(rawValue: agentRaw)?.name ?? "Claude") plan; "
                  + "PRs already waiting are left alone.")
                 .font(.caption2).foregroundStyle(.secondary)
+            Toggle("Link Linear tickets", isOn: $ticketLinks)
+            Text("Finds ticket ids like ENG-123 in a PR's title and description and adds a button that opens them in Linear.")
+                .font(.caption2).foregroundStyle(.secondary)
+            if ticketLinks {
+                TextField("Linear workspace URL, e.g. https://linear.app/acme", text: $ticketWorkspace)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                if TicketLinks.workspace(from: ticketWorkspace) == nil {
+                    Text("Enter your workspace URL to turn this on.").font(.caption).foregroundStyle(.orange)
+                }
+                TextField("Team keys, e.g. ENG, WEB (optional)", text: $ticketTeamKeys)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                Text("Without team keys, any capitalised KEY-123 counts, which can catch things like UTF-8 or SHA-256.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             Toggle("Put PR worktrees next to the clone", isOn: $worktreesNextToClone)
             Text(worktreesNextToClone
                  ? "Each PR is checked out in <clone>-worktrees/pr-<number>, e.g. storefront-worktrees/pr-42."

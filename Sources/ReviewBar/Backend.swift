@@ -405,7 +405,7 @@ enum Backend {
         let fields = prs.indices.compactMap { i -> String? in
             guard let data = try? enc.encode(prs[i].url), let url = String(data: data, encoding: .utf8)
             else { return nil }
-            return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid "
+            return "p\(i): resource(url: \(url)) { ... on PullRequest { headRefOid body "
                 + "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } "
                 + "reviews(last: 30) { nodes { author { login __typename } state } } } }"
         }
@@ -427,6 +427,7 @@ enum Backend {
             var pr = pr
             let node = resp.prs["p\(i)"] ?? nil
             pr.headRefOid = node?.headRefOid
+            pr.body = node?.body ?? pr.body
             pr.checks = node?.commits?.nodes.first?.commit.statusCheckRollup?.state
             pr.verdicts = node?.reviews.map {
                 verdicts($0.items.map { ($0.author, $0.state) }, me: resp.viewer.login, author: pr.author.login)
@@ -446,6 +447,7 @@ enum Backend {
         }
         struct Node: Decodable {
             let headRefOid: String?
+            let body: String?
             let commits: Commits?
             let reviews: Nodes<Review>?
         }
@@ -466,7 +468,7 @@ enum Backend {
       viewer { login }
       search(query: $q, type: ISSUE, first: 30) {
         nodes { ... on PullRequest {
-          number title url isDraft updatedAt headRefOid
+          number title url isDraft updatedAt headRefOid body
           repository { nameWithOwner } author { login }
           reviewThreads(last: 50) { nodes {
             isResolved
@@ -504,7 +506,7 @@ enum Backend {
             guard waiting > 0 else { return nil }
             let pr = PR(number: n.number, title: n.title, url: n.url, isDraft: n.isDraft,
                         updatedAt: n.updatedAt, repository: n.repository,
-                        author: n.author ?? PR.Author(login: "ghost"), headRefOid: n.headRefOid)
+                        author: n.author ?? PR.Author(login: "ghost"), headRefOid: n.headRefOid, body: n.body)
             return ReplyPR(pr: pr, waiting: waiting, latestAt: latestAt, latestBy: latestBy)
         }
         .sorted { $0.latestAt > $1.latestAt }
@@ -520,6 +522,7 @@ enum Backend {
             let isDraft: Bool
             let updatedAt: String
             let headRefOid: String?
+            let body: String?
             let repository: PR.Repo
             let author: PR.Author?
             let reviewThreads: Nodes<ReviewThread>
@@ -542,7 +545,7 @@ enum Backend {
       viewer { login }
       search(query: $q, type: ISSUE, first: 30) {
         nodes { ... on PullRequest {
-          number title url isDraft updatedAt createdAt headRefOid
+          number title url isDraft updatedAt createdAt headRefOid body
           repository { nameWithOwner } author { login }
           commits(last: 1) { nodes { commit {
             committedDate checkSuites(first: 10) { nodes { createdAt } } statusCheckRollup { state }
@@ -647,6 +650,7 @@ enum Backend {
                         updatedAt: n.updatedAt, repository: n.repository,
                         author: PR.Author(login: author), headRefOid: n.headRefOid)
             pr.createdAt = n.createdAt
+            pr.body = n.body
             let head = n.commits.items.first?.commit
             return ReviewingPR(pr: pr, myLastReview: mine, myReviewDismissed: dismissed,
                                waiting: waiting, myThreads: opened, resolved: resolved, outdated: outdated,
@@ -706,6 +710,7 @@ enum Backend {
             let updatedAt: String
             let createdAt: String?
             let headRefOid: String?
+            let body: String?
             let repository: PR.Repo
             let author: Login?
             let commits: Nodes<CommitNode>
@@ -978,7 +983,7 @@ enum Backend {
       viewer { login }
       search(query: $q, type: ISSUE, first: 30) {
         nodes { ... on PullRequest {
-          number title url isDraft createdAt updatedAt headRefOid headRefName isCrossRepository reviewDecision
+          number title url isDraft createdAt updatedAt headRefOid body headRefName isCrossRepository reviewDecision
           repository { nameWithOwner } author { login }
           mergeable mergeStateStatus
           reviewRequests(first: 1) { totalCount }
@@ -1059,7 +1064,7 @@ enum Backend {
             let pr = PR(number: n.number, title: n.title, url: n.url, isDraft: n.isDraft,
                         updatedAt: n.updatedAt, repository: n.repository,
                         author: n.author ?? PR.Author(login: me), headRefOid: n.headRefOid,
-                        createdAt: n.createdAt)
+                        createdAt: n.createdAt, body: n.body)
             var f = FeedbackPR(pr: pr, decision: n.reviewDecision, threads: threads, reviews: reviews,
                                comments: comments, latestAt: latestAt, latestBy: latestBy,
                                checks: head?.statusCheckRollup?.state, mergeable: n.mergeable,
@@ -1102,6 +1107,7 @@ enum Backend {
             let createdAt: String?
             let updatedAt: String
             let headRefOid: String?
+            let body: String?
             let headRefName: String?
             let isCrossRepository: Bool?
             let reviewDecision: String?
